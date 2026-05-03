@@ -245,7 +245,7 @@ const msk=(val,hidden)=>hidden?"••••":val;
 /* Ticker → Yahoo Finance symbol mapping */
 const YF_MAP = {
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
-  XLE:"XLE", OIH:"OIH", AVIO:"AVAV", AI:"AI.PA", DJT:"DJT",
+  XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"AAAU", IBKR:"IBKR",
 };
 
@@ -1730,8 +1730,11 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
         }}>
           <div>
             <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>
-              {refreshedAt?"Actualisé "+refreshedAt+(fromSnapshot?" 📂":" ⟳"):CURRENT.date}
-
+              {refreshedAt
+                ? fromSnapshot
+                  ? (d=>{const dt=new Date(d.replace("snapshot ","")); const m=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"][dt.getMonth()]; return `ACTU HISTO ${String(dt.getDate()).padStart(2,"0")} - ${m} - ${String(dt.getFullYear()).slice(2)} 📂`;})(refreshedAt)
+                  : "ACTU "+refreshedAt+" ⟳"
+                : CURRENT.date}
             </div>
             <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.btc}}>
               {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
@@ -1739,40 +1742,6 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
             <div style={{fontSize:12,color:C.gray,marginTop:2}}>
               {msk(eur?"$"+fmt(_sumUSD):"€"+fmt(_sumEUR), hidden)}
             </div>
-          </div>
-          {/* 3 boutons groupés */}
-          <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
-            <div style={{display:"flex",gap:6}}>
-              {/* €/$ */}
-              <div style={{display:"flex",gap:6}}>
-                <button onClick={()=>setEur(!eur)} style={{
-                  background:C.bg2, border:`1px solid ${C.border}`,
-                  borderRadius:10, padding:"8px 12px", color:C.text2,
-                  fontSize:12, fontWeight:700, cursor:"pointer",
-                }}>{eur?"→ $":"→ €"}</button>
-                <button onClick={()=>setHidden(!hidden)} style={{
-                  background:hidden?C.btc+"33":C.bg2,
-                  border:`1px solid ${hidden?C.btc:C.border}`,
-                  borderRadius:10, padding:"8px 10px",
-                  fontSize:15, cursor:"pointer",
-                  color:hidden?C.btc:C.gray,
-                }}>{hidden?"🙈":"👁"}</button>
-                <button onClick={handleRefresh} disabled={refreshing} style={{
-                  background:refreshing?"#1F2937":C.green+"22",
-                  border:`1px solid ${refreshing?C.border:C.green}`,
-                  borderRadius:10, padding:"8px 10px",
-                  fontSize:15, cursor:refreshing?"not-allowed":"pointer",
-                  color:refreshing?C.gray:C.green,
-                  animation:refreshing?"spin 1s linear infinite":"none",
-                }}>⟳</button>
-              </div>
-            </div>
-            {/* Snapshot */}
-            <button onClick={onSnapshot} style={{
-              background:C.btc+"22", border:`1px solid ${C.btc}`,
-              borderRadius:10, padding:"6px 12px", color:C.btc,
-              fontSize:10, fontWeight:800, cursor:"pointer", width:"100%",
-            }}>📸 Snapshot</button>
           </div>
         </div>
 
@@ -2645,8 +2614,10 @@ function PageGDB({chartData,hidden,EFF}){
 /* ═══════════════════════════════════════════════════════════
    PAGE TRADES
 ═══════════════════════════════════════════════════════════ */
-function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied}){
-  const[showAdd,setShowAdd]=useState(false);
+function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:showAddProp,setShowAdd:setShowAddProp}){
+  const[showAddLocal,setShowAddLocal]=useState(false);
+  const showAdd    = showAddProp    !== undefined ? showAddProp    : showAddLocal;
+  const setShowAdd = setShowAddProp !== undefined ? setShowAddProp : setShowAddLocal;
   const[filter,setFilter]=useState("ALL");
   const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   const fil=txns.filter(t=>filter==="ALL"||t.side.toUpperCase()===filter);
@@ -2725,73 +2696,7 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied}){
         );
       })}
 
-      {showAdd&&(
-        <Modal title="Nouvelle transaction" onClose={()=>setShowAdd(false)}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={form.date} onChange={v=>setForm({...form,date:v})}/></div>
-            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v})} options={["BUY","SELL"]}/>
-            <FI label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v.toUpperCase()})} placeholder="BTC, ETH..."/>
-            <FI label="Quantité" type="number" value={form.qty} onChange={v=>setForm({...form,qty:v})} placeholder="0.01"/>
-            {/* Prix + devise sur la même ligne */}
-            <div>
-              <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
-            </div>
-            <FS label="Devise" value={form.currency} onChange={v=>setForm({...form,currency:v})} options={["USD","EUR"]}/>
-            <div style={{gridColumn:"1/-1"}}><FI label="Note" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="DCA, TP..."/></div>
-            <div style={{gridColumn:"1/-1"}}>
-              <FS label="Contrepartie" value={form.bank||"Aucune"}
-                onChange={v=>setForm({...form,bank:v})}
-                options={["Aucune","BCI","Bourso","DeBlock","KuCoin","IBKR"]}/>
-            </div>
-          </div>
-          {form.qty&&form.price&&(
-            <div style={{background:C.bg3,borderRadius:8,padding:"10px 12px",marginBottom:14}}>
-              {/* Valorisation USD + EUR */}
-              {(()=>{
-                const src = EFF||CURRENT;
-                const priceUSD = form.currency==="EUR" ? parseFloat(form.price||0)*src.eurUsd : parseFloat(form.price||0);
-                const valoUSD  = parseFloat(form.qty||0) * priceUSD;
-                const valoEUR  = Math.round(valoUSD * src.usdEur);
-                const sign     = form.side==="BUY" ? "-" : "+";
-                const col      = form.side==="BUY" ? C.red : C.green;
-                return(
-                  <>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                      <span style={{fontSize:12,color:C.gray}}>Valorisation</span>
-                      <div style={{textAlign:"right"}}>
-                        <span style={{fontSize:14,fontWeight:800,color:col}}>{sign}${fmt(valoUSD)}</span>
-                        <span style={{fontSize:10,color:C.gray,marginLeft:6}}>{sign}€{fmt(valoEUR)}</span>
-                      </div>
-                    </div>
-                    {form.bank&&form.bank!=="Aucune"&&(()=>{
-                      // KuCoin et IBKR sont dans stocks.items (cat Cash / Picking)
-                      const isStockCash = form.bank==="KuCoin"||form.bank==="IBKR";
-                      const bal = isStockCash
-                        ? (form.bank==="KuCoin"
-                            ? (src.stocks.items.find(x=>x.t==="EURO")?.val||0)
-                            : (src.stocks.items.find(x=>x.t==="EURO")?.val||0))
-                        : (src.bank.breakdown[form.bank]||0);
-                      const balCur  = isStockCash ? "$" : "€";
-                      const impact  = isStockCash ? Math.round(valoUSD) : Math.round(valoEUR);
-                      const after   = form.side==="BUY" ? bal-impact : bal+impact;
-                      return(
-                        <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:4}}>
-                          <span style={{fontSize:10,color:C.gray}}>{form.bank} après</span>
-                          <span style={{fontSize:12,fontWeight:700,color:after<0?C.red:C.green}}>{balCur}{fmt(after)}</span>
-                        </div>
-                      );
-                    })()}
-                  </>
-                );
-              })()}
-            </div>
-          )}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <Btn label="Annuler" onClick={()=>setShowAdd(false)} color={C.gray} outline/>
-            <Btn label={form.side==="BUY"?"Acheter":"Vendre"} onClick={submit} color={form.side==="BUY"?C.green:C.red}/>
-          </div>
-        </Modal>
-      )}
+
     </div>
   );
 }
@@ -2799,6 +2704,90 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied}){
 /* ═══════════════════════════════════════════════════════════
    SNAPSHOT MODAL
 ═══════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════
+   TRADE MODAL — top-level pour s'afficher depuis n'importe quel onglet
+═══════════════════════════════════════════════════════════ */
+function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
+  const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
+
+  const submit=()=>{
+    if(!form.qty||!form.price||!form.ticker)return;
+    const src = EFF||CURRENT;
+    const priceUSD = form.currency==="EUR"
+      ? parseFloat(form.price) * src.eurUsd
+      : parseFloat(form.price);
+    const trade={...form,qty:parseFloat(form.qty),price:priceUSD,priceRaw:parseFloat(form.price),currency:form.currency,id:uid(),bankAccount:form.bank||"Aucune"};
+    onAdd(trade);
+    onTradeApplied(trade);
+    onClose();
+  };
+
+  const src = EFF||CURRENT;
+
+  return(
+    <Modal title="Nouvelle transaction" onClose={onClose}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={form.date} onChange={v=>setForm({...form,date:v})}/></div>
+        <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v})} options={["BUY","SELL"]}/>
+        <FI label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v.toUpperCase()})} placeholder="BTC, ETH..."/>
+        <FI label="Quantité" type="number" value={form.qty} onChange={v=>setForm({...form,qty:v})} placeholder="0.01"/>
+        <div>
+          <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
+        </div>
+        <FS label="Devise" value={form.currency} onChange={v=>setForm({...form,currency:v})} options={["USD","EUR"]}/>
+        <div style={{gridColumn:"1/-1"}}><FI label="Note" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="DCA, TP..."/></div>
+        <div style={{gridColumn:"1/-1"}}>
+          <FS label="Contrepartie" value={form.bank||"Aucune"}
+            onChange={v=>setForm({...form,bank:v})}
+            options={["Aucune","BCI","Bourso","DeBlock","KuCoin","IBKR"]}/>
+        </div>
+      </div>
+      {form.qty&&form.price&&(
+        <div style={{background:C.bg3,borderRadius:8,padding:"10px 12px",marginBottom:14}}>
+          {(()=>{
+            const priceUSD = form.currency==="EUR" ? parseFloat(form.price||0)*src.eurUsd : parseFloat(form.price||0);
+            const valoUSD  = parseFloat(form.qty||0) * priceUSD;
+            const valoEUR  = Math.round(valoUSD * src.usdEur);
+            const sign     = form.side==="BUY" ? "-" : "+";
+            const col      = form.side==="BUY" ? C.red : C.green;
+            return(
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:12,color:C.gray}}>Valorisation</span>
+                  <div style={{textAlign:"right"}}>
+                    <span style={{fontSize:14,fontWeight:800,color:col}}>{sign}${fmt(valoUSD)}</span>
+                    <span style={{fontSize:10,color:C.gray,marginLeft:6}}>{sign}€{fmt(valoEUR)}</span>
+                  </div>
+                </div>
+                {form.bank&&form.bank!=="Aucune"&&(()=>{
+                  const isStockCash = form.bank==="KuCoin"||form.bank==="IBKR";
+                  const bal = isStockCash
+                    ? (src.stocks.items.find(x=>x.t==="EURO")?.val||0)
+                    : (src.bank.breakdown[form.bank]||0);
+                  const balCur = isStockCash ? "$" : "€";
+                  const impact = isStockCash ? Math.round(valoUSD) : Math.round(valoEUR);
+                  const after  = form.side==="BUY" ? bal-impact : bal+impact;
+                  return(
+                    <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:4}}>
+                      <span style={{fontSize:10,color:C.gray}}>{form.bank} après</span>
+                      <span style={{fontSize:12,fontWeight:700,color:after<0?C.red:C.green}}>{balCur}{fmt(after)}</span>
+                    </div>
+                  );
+                })()}
+              </>
+            );
+          })()}
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Btn label="Annuler" onClick={onClose} color={C.gray} outline/>
+        <Btn label={form.side==="BUY"?"Acheter":"Vendre"} onClick={submit} color={form.side==="BUY"?C.green:C.red}/>
+      </div>
+    </Modal>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
    SNAPSHOT MODAL v7
    - Pré-remplie depuis EFF (prix live si refresh fait, sinon CURRENT)
@@ -3058,6 +3047,7 @@ function App(){
   const[txns,setTxns]=useState(SEED_TXNS);
   const[ready,setReady]=useState(false);
   const[showSnap,setShowSnap]=useState(false);
+  const[showTrade,setShowTrade]=useState(false);
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
   const[live,setLive]=useState(null);
@@ -3224,25 +3214,59 @@ function App(){
 
   return(
     <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:78,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
-      <div style={{padding:"14px 20px 10px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{width:32}}/>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:22,fontWeight:900,color:C.btc,letterSpacing:.5}}>GDB & Sons</span>
-          {gistSync===true  && <span title="Synchronisé avec GitHub Gist" style={{fontSize:11,color:C.green}}>☁︎</span>}
-          {gistSync===false && <span title="Mode hors-ligne (localStorage)" style={{fontSize:11,color:C.gray}}>○</span>}
+      <div style={{padding:"10px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        {/* Gauche : ⟳ 📸 💵 */}
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button onClick={handleRefresh} disabled={refreshing} style={{
+            width:34,height:34,borderRadius:C.radiusSm||8,border:`1px solid ${refreshing?C.border:C.green}`,
+            background:refreshing?"transparent":C.green+"22",cursor:refreshing?"not-allowed":"pointer",
+            fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",color:refreshing?C.gray:C.green,
+            animation:refreshing?"spin 1s linear infinite":"none",
+          }}>⟳</button>
+          <button onClick={()=>setShowSnap(true)} style={{
+            width:34,height:34,borderRadius:C.radiusSm||8,border:`1px solid ${C.btc}`,
+            background:C.btc+"22",cursor:"pointer",fontSize:16,
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>📸</button>
+          <button onClick={()=>setShowTrade(true)} style={{
+            width:34,height:34,borderRadius:C.radiusSm||8,border:`1px solid ${C.teal}`,
+            background:C.teal+"22",cursor:"pointer",fontSize:18,
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>💵</button>
         </div>
-        <button onClick={()=>setShowTheme(true)} style={{
-          width:32,height:32,borderRadius:10,border:`1px solid ${C.border}`,
-          background:C.bg2,cursor:"pointer",fontSize:16,
-          display:"flex",alignItems:"center",justifyContent:"center",
-        }}>🎨</button>
+
+        {/* Centre : titre */}
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
+          {gistSync===true  && <span title="Synchronisé" style={{fontSize:10,color:C.green}}>☁︎</span>}
+          {gistSync===false && <span title="Hors-ligne"  style={{fontSize:10,color:C.gray}}>○</span>}
+        </div>
+
+        {/* Droite : →€/$ 👁 🎨 */}
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button onClick={()=>setEur(!eur)} style={{
+            height:34,borderRadius:C.radiusSm||8,border:`1px solid ${C.border}`,
+            background:C.bg2,cursor:"pointer",padding:"0 10px",
+            fontSize:12,fontWeight:700,color:C.text2,
+          }}>{eur?"→ $":"→ €"}</button>
+          <button onClick={()=>setHidden(!hidden)} style={{
+            width:34,height:34,borderRadius:C.radiusSm||8,border:`1px solid ${hidden?C.btc:C.border}`,
+            background:hidden?C.btc+"33":C.bg2,cursor:"pointer",fontSize:16,
+            display:"flex",alignItems:"center",justifyContent:"center",color:hidden?C.btc:C.gray,
+          }}>{hidden?"🙈":"👁"}</button>
+          <button onClick={()=>setShowTheme(true)} style={{
+            width:34,height:34,borderRadius:C.radiusSm||8,border:`1px solid ${C.border}`,
+            background:C.bg2,cursor:"pointer",fontSize:16,
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>🎨</button>
+        </div>
       </div>
       <div style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF}/>}
-        {tab===4 && <PageTrades txns={txns} onAdd={addTxn} onDel={delTxn} hidden={hidden} EFF={EFF} onTradeApplied={applyTradeToEFF}/>}
+        {tab===4 && <PageTrades txns={txns} onAdd={addTxn} onDel={delTxn} hidden={hidden} EFF={EFF} onTradeApplied={applyTradeToEFF} showAdd={showTrade} setShowAdd={setShowTrade}/>}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>
         {TABS.map((lb,i)=>(
@@ -3262,6 +3286,7 @@ function App(){
         VibeCoded by CryptoFlo · Claude Sonnet 4.6
       </div>
       {showSnap&&<SnapshotModal onSave={addSnap} onClose={()=>setShowSnap(false)} EFF={EFF}/>}
+      {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF}/>}
       {showTheme&&(
         <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowTheme(false)}>
@@ -3313,6 +3338,5 @@ function App(){
 }
 
 
-// Mount app
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(App));

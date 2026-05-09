@@ -281,13 +281,25 @@ const YF_MAP = {
 
 /* Fetch single Yahoo Finance quote via allorigins proxy */
 async function fetchYahoo(symbol){
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1d`;
-  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-  const res = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
-  const json = await res.json();
-  const data = JSON.parse(json.contents);
-  const meta = data?.chart?.result?.[0]?.meta;
-  return meta?.regularMarketPrice ?? meta?.previousClose ?? null;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
+  // Try two proxies for better coverage of non-US exchanges
+  const proxies = [
+    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ];
+  for(const proxy of proxies){
+    try{
+      const res = await fetch(proxy, {signal: AbortSignal.timeout(10000)});
+      if(!res.ok) continue;
+      const json = await res.json();
+      const raw = typeof json.contents === "string" ? json.contents : JSON.stringify(json);
+      const data = JSON.parse(raw);
+      const meta = data?.chart?.result?.[0]?.meta;
+      const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
+      if(price) return price;
+    }catch(e){ continue; }
+  }
+  return null;
 }
 
 /* Fetch BTC price and EUR/USD rate from CoinGecko */
@@ -406,7 +418,7 @@ async function fetchAllPrices(){
     const cg = await fetchCoinGecko();
     if(cg.btcUSD) results.BTC = cg.btcUSD;
     if(cg.eurUSD) results.EURUSD = cg.eurUSD;
-  } catch(e) { results.errors.push("BTC/EUR: "+e.message); }
+  } catch(e) { results.errors.push("BTC/EUR"); }
 
   /* Stocks in parallel (max 3 at a time to avoid rate limits) */
   const tickers = Object.entries(YF_MAP);
@@ -416,7 +428,8 @@ async function fetchAllPrices(){
       try {
         const price = await fetchYahoo(sym);
         if(price != null) results[key] = price;
-      } catch(e){ results.errors.push(`${key}: ${e.message}`); }
+        else results.errors.push(`${key}`); // null = échec silencieux
+      } catch(e){ results.errors.push(`${key}`); }
     }));
     if(i+3 < tickers.length) await new Promise(r=>setTimeout(r,300));
   }
@@ -495,11 +508,16 @@ async function gistRead(){
       headers:{"Authorization":`token ${GIST_TOKEN}`,"Accept":"application/vnd.github.v3+json"},
       signal: AbortSignal.timeout(8000),
     });
-    if(!res.ok) return null;
+    if(!res.ok){
+      const txt = await res.text().catch(()=>"");
+      return {_error: true, status: res.status, statusText: res.statusText, body: txt.slice(0,200)};
+    }
     const data = await res.json();
     const content = data?.files?.[GIST_FILE]?.content;
     return content ? JSON.parse(content) : null;
-  }catch{ return null; }
+  }catch(e){
+    return {_error: true, status: null, statusText: e.message, body: e.name};
+  }
 }
 
 /* Écrit l'objet complet dans le Gist */
@@ -1187,15 +1205,14 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData}){
     : GDBS.map(r=>r[0]===today ? [today, gsLive, gcLive] : r);
 
   // PORT_B100 étendu avec le point live
-  const port_base = 313653; // €313 653 = base jan 2026
-  const port_last = PORT_B100[PORT_B100.length-1]?.[0] || "2026-01-01";
-  const liveB100 = round2(portTodayEUR / port_base * 100);
-  const port_ext = today > port_last
-    ? [...PORT_B100, [today, liveB100]]
-    : PORT_B100.map(r=>r[0]===today ? [today, liveB100] : r);
+  // ── Portfolio : utilise DD directement (col 2 = total hors immo €)
+  const dd_last = DD[DD.length-1]?.[0] || "2026-01-01";
+  const dd_ext = today > dd_last
+    ? [...DD, [today, null, portTodayEUR, null, null]]
+    : DD.map(r=>r[0]===today ? [today, r[1], portTodayEUR, r[3], r[4]] : r);
 
   const gSlice = gdbs_ext.filter(r => r[0] >= cut && r[0] <= today);
-  const pSlice = port_ext.filter(r => r[0] >= cut && r[0] <= today);
+  const ddSlice = dd_ext.filter(r => r[0] >= cut && r[0] <= today && r[2] != null);
 
   if (!gSlice.length) return null;
   const dates = gSlice.map(r => r[0]);
@@ -1207,15 +1224,14 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData}){
   const gsB = gSlice.map(r => round2(r[1] / gs0 * 100));
   const gcB = gSlice.map(r => round2(r[2] / gc0 * 100));
 
-  /* ── Portfolio → valeurs absolues dans la devise sélectionnée ── */
-  const pByDate = {};
-  pSlice.forEach(r => { pByDate[r[0]] = r[1]; });
-
+  /* ── Portfolio → valeurs absolues depuis DD (€), converties si $ ── */
+  const ddByDate = {};
+  ddSlice.forEach(r => { ddByDate[r[0]] = r[2]; });
+  // Pour les dates sans point DD exact, cherche le plus proche précédent
   const portAbs = dates.map(d => {
-    const b = pByDate[d];
-    if (!b) return null;
-    const eur_val = Math.round(b / 100 * port_base);
-    return eur ? eur_val : Math.round(eur_val * src.eurUsd);
+    const eur_val = ddByDate[d] ?? DD.reduceRight((a,r)=>a!=null?a:(r[0]<=d&&r[2]!=null?r[2]:null),null);
+    if(eur_val==null) return null;
+    return eur ? Math.round(eur_val) : Math.round(eur_val * src.eurUsd);
   });
 
   // Dernier point = valeur live exacte
@@ -3582,7 +3598,9 @@ function App(){
   const[refreshing,setRefreshing]=useState(false);
   const[refreshedAt,setRefreshedAt]=useState(null);
   const[refreshErr,setRefreshErr]=useState(null);
-  const[gistSync,setGistSync]=useState(null); // null=init, true=ok, false=offline
+  const[gistSync,setGistSync]=useState(null);
+  const[gistError,setGistError]=useState(null); // détail erreur connexion
+  const[showGistDiag,setShowGistDiag]=useState(false);
   const[themeName,setThemeName]=useState(()=>{
     try{ return localStorage.getItem('gdb_theme')||'dark'; }catch{ return 'dark'; }
   });
@@ -3609,8 +3627,9 @@ function App(){
       setRefreshedAt(ts);
       // Rapport détaillé : succès et échecs
       const successList = Object.keys(YF_MAP).filter(k=>prices[k]!=null);
-      successList.push("BTC","EUR");
-      const failList = prices.errors.map(e=>e.split(":")[0]);
+      if(prices.BTC) successList.push("BTC");
+      if(prices.EURUSD) successList.push("EUR");
+      const failList = [...new Set(prices.errors)];
       if(failList.length>0){
         setRefreshErr({ok:successList.filter(k=>!failList.includes(k)), fail:failList});
       } else {
@@ -3639,7 +3658,9 @@ function App(){
 
   useEffect(()=>{
     (async()=>{
-      const gistOk = await gistRead().then(g=>!!g).catch(()=>false);
+      const gistResult = await gistRead().catch(e=>({_error:true,status:null,statusText:e.message,body:e.name}));
+      const gistOk = gistResult && !gistResult._error;
+      if(!gistOk) setGistError(gistResult||{status:null,statusText:"Réponse vide",body:""});
       setGistSync(gistOk);
       const[cd,tx]=await Promise.all([load(SK.chart,CHART_MONTHLY),load(SK.txns,SEED_TXNS)]);
       setChartData(cd);
@@ -3787,7 +3808,7 @@ function App(){
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
           {gistSync===true  && <span title="Synchronisé avec GitHub Gist" style={{fontSize:10,color:C.green}}>☁︎</span>}
-          {gistSync===false && <span title="Token expiré — reconnexion nécessaire" style={{fontSize:10,color:C.red}}>✗</span>}
+          {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Cliquer pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
           {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>○</span>}
         </div>
 
@@ -3837,6 +3858,48 @@ function App(){
       </div>
       {showSnap&&<SnapshotModal onSave={addSnap} onClose={()=>setShowSnap(false)} EFF={EFF}/>}
       {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF}/>}
+      {showGistDiag&&(
+        <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={()=>setShowGistDiag(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            background:C.bg1,borderRadius:"20px 20px 0 0",padding:"20px 20px 40px",
+            width:"100%",maxWidth:430,border:`1px solid ${C.border}`,
+          }}>
+            <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
+            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>🔴 Diagnostic connexion Gist</div>
+            <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,display:"flex",flexDirection:"column",gap:8}}>
+              <div><span style={{color:C.gray}}>GIST_ID :</span> <span style={{color:C.text}}>{GIST_ID}</span></div>
+              <div><span style={{color:C.gray}}>TOKEN :</span> <span style={{color:C.text}}>{GIST_TOKEN.slice(0,12)}…{GIST_TOKEN.slice(-4)}</span></div>
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
+                <span style={{color:C.gray}}>HTTP Status :</span>{" "}
+                <span style={{color:gistError?.status===200?C.green:C.red,fontWeight:700}}>
+                  {gistError?.status ?? "—"} {gistError?.statusText ?? ""}
+                </span>
+              </div>
+              {gistError?.body&&(
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
+                  <div style={{color:C.gray,marginBottom:4}}>Réponse :</div>
+                  <div style={{color:C.text,wordBreak:"break-all",fontSize:10}}>{gistError.body}</div>
+                </div>
+              )}
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
+                <span style={{color:C.gray}}>URL testée :</span>
+                <div style={{color:C.teal,fontSize:9,wordBreak:"break-all",marginTop:2}}>
+                  https://api.github.com/gists/{GIST_ID}
+                </div>
+              </div>
+            </div>
+            <div style={{marginTop:12,fontSize:10,color:C.gray,lineHeight:1.5}}>
+              💡 Capture d'écran de ce panel et envoie-la pour diagnostic.
+            </div>
+            <button onClick={()=>setShowGistDiag(false)} style={{
+              marginTop:14,width:"100%",padding:"10px 0",borderRadius:10,
+              background:C.bg2,border:`1px solid ${C.border}`,
+              color:C.text,fontSize:13,cursor:"pointer",fontWeight:700,
+            }}>Fermer</button>
+          </div>
+        </div>
+      )}
       {showTheme&&(
         <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowTheme(false)}>

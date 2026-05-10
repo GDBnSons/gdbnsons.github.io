@@ -47,6 +47,26 @@ const THEMES = {
     name:"Bitcoin Maximalist", font:"'-apple-system','BlinkMacSystemFont','SF Pro Display',sans-serif",
     radius:14, radiusSm:8,
   },
+  frozen: {
+    // ❄ Frozen Throne — nuit arctique, cristaux de glace, runes bleues
+    bg:"#020814",bg1:"#060F1E",bg2:"#0B1828",bg3:"#101F35",
+    border:"#1A3A5C",border2:"#2A5A8A",
+    btc:"#7DD8FF",blue:"#4FACDE",teal:"#00D4FF",gold:"#A8DFFF",
+    purple:"#8BB4E8",green:"#4DE8C4",red:"#FF4D6A",orange:"#7DD8FF",gray:"#3A6080",
+    text:"#D0EEFF",text2:"#7AADCC",text3:"#3A6080",
+    name:"❄ Frozen Throne", font:"'-apple-system','BlinkMacSystemFont','SF Pro Display',sans-serif",
+    radius:6, radiusSm:3,
+  },
+  tropical: {
+    // 🌴 Tropical — sable blanc, eau turquoise, soleil
+    bg:"#FFF9EE",bg1:"#FFFDF7",bg2:"#FFF3D4",bg3:"#FFE8A8",
+    border:"#FFD580",border2:"#FFB830",
+    btc:"#FF8C00",blue:"#0099CC",teal:"#00C2C7",gold:"#FFB830",
+    purple:"#E040A0",green:"#00A878",red:"#E53935",orange:"#FF8C00",gray:"#8AA0A8",
+    text:"#1A3040",text2:"#2D6070",text3:"#8AA0A8",
+    name:"🌴 Tropical", font:"'-apple-system','BlinkMacSystemFont','SF Pro Display',sans-serif",
+    radius:20, radiusSm:12,
+  },
 };
 
 /* C est une variable module réassignable au changement de thème */
@@ -997,15 +1017,23 @@ const crd=(x={})=>({
     ? `linear-gradient(135deg,${C.bg1} 0%,${C.bg2} 100%)`
     : C.name==="Bitcoin Maximalist"
       ? `linear-gradient(135deg,${C.bg2},${C.bg3})`
+      : C.name==="❄ Frozen Throne"
+      ? `linear-gradient(135deg,${C.bg1} 0%,${C.bg2} 100%)`
+      : C.name==="🌴 Tropical"
+      ? `linear-gradient(135deg,${C.bg1} 0%,${C.bg2} 100%)`
       : C.bg1,
   borderRadius:C.radius||12,
   padding:"12px 14px",
   border:`1px solid ${C.border}`,
   boxShadow: C.radius===16
     ? `0 4px 24px rgba(180,100,240,.06),inset 0 1px 0 rgba(212,168,67,.08)`
-    : C.name==="Bitcoin Maximalist"
-      ? `0 2px 16px rgba(247,147,26,.06)`
-      : "none",
+    : C.name==="❄ Frozen Throne"
+      ? `0 2px 16px rgba(0,212,255,.06),inset 0 1px 0 rgba(125,216,255,.08)`
+      : C.name==="🌴 Tropical"
+      ? `0 2px 12px rgba(0,194,199,.08)`
+      : C.name==="Bitcoin Maximalist"
+        ? `0 2px 16px rgba(247,147,26,.06)`
+        : "none",
   marginBottom:7,
   ...x,
 });
@@ -1521,7 +1549,9 @@ function PerfStrip({eur, EFF}){
     const ds=t.toISOString().slice(0,10);
     return DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
   };
-  const _aoNow = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null) || _src.totalEUR;
+  // _aoNow = valeur live si refreshée (EFF), sinon dernier point DD
+  const _ddLast = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
+  const _aoNow  = _src.totalEUR || _ddLast; // EFF.totalEUR prioritaire après refresh
   const _ao1j  = _ddAt(1)   ?? _aoNow;
   const _ao1s  = _ddAt(7)   ?? _aoNow;
   const _ao1m  = _ddAt(30)  ?? _aoNow;
@@ -1884,7 +1914,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
                   : "ACTU "+refreshedAt+" ⟳"
                 : CURRENT.date}
             </div>
-            <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.btc}}>
+            <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.green}}>
               {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
             </div>
             <div style={{fontSize:12,color:C.gray,marginTop:2}}>
@@ -1937,7 +1967,8 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           const _cur2 = eur ? "€" : "$";
 
           // Valeur portefeuille courante (col 2 = total hors immo €)
-          const _now = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null) || _src2.totalEUR;
+          const _ddLast2 = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
+          const _now = _src2.totalEUR || _ddLast2; // EFF.totalEUR prioritaire après refresh
 
           // Valeur à une date donnée (jours en arrière)
           const _ddAt2 = days => {
@@ -2086,6 +2117,14 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
       <GdbCompareChart eur={eur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData}/>
+
+      {/* Version discrète */}
+      <div style={{
+        textAlign:"center",fontSize:9,color:C.text3,opacity:.35,
+        marginTop:6,letterSpacing:.5,pointerEvents:"none",
+      }}>
+        v18.5
+      </div>
 
     </div>
   );
@@ -2330,7 +2369,7 @@ function PageAllocation({hidden, EFF}){
                 }}>
                   <div>
                     <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>Total portefeuille</div>
-                    <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:C.btc}}>{msk("$"+fmt(totalUSD),hidden)}</div>
+                    <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:C.green}}>{msk("$"+fmt(totalUSD),hidden)}</div>
                     <div style={{fontSize:13,color:C.gray,marginTop:2}}>{msk("€"+fmt(totalEUR),hidden)}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
@@ -2850,41 +2889,80 @@ function GdbCompareChartGDB({onTFChange}){
    4. Graphique GDB.C cours + Graphique GDB.S cours
 ═══════════════════════════════════════════════════════════ */
 /* ── FondCard: récapitulatif d'un fonds ── */
-function FondCard({label, cours, qty, fonds, color, perfs, hidden}){
+function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur}){
+  // label format: "GDB.C — CRYPTO" or "GDB.S — ACTIONS"
+  const [titre, sousTitre] = label.split(" — ");
+  const perfCreation = cours / 10 - 1;
+  const pUp = perfCreation >= 0;
+  const affCours = eur ? "€"+(cours*(usdEur||0.852)).toFixed(2) : "$"+cours.toFixed(2);
+  const affFonds = eur ? "€"+fmtK(Math.round(fonds*(usdEur||0.852))) : "$"+fmtK(fonds);
+
+  // Perfs 1J, 1S, 1M seulement (3 premières)
+  const perfs3 = perfs.slice(0,3);
+
   return(
-    <div style={{...crd(), marginBottom:12}}>
-      {/* Header: label + cours + perf depuis création */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-        <div>
-          <div style={{fontSize:10,color:C.gray,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>{label}</div>
-          <div style={{fontSize:28,fontWeight:900,color,letterSpacing:-1}}>${cours.toFixed(2)}</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:8,color:C.gray,marginBottom:2}}>Base 10</div>
-          <div style={{fontSize:16,fontWeight:800,color:clr(cours/10-1)}}>{fmtP(cours/10-1)}</div>
-          <div style={{fontSize:9,color:C.gray}}>depuis création</div>
-        </div>
-      </div>
-      {/* Parts + valeur fonds — mis en avant */}
+    <div style={{
+      background:C.bg1,
+      borderRadius:C.radius||14,
+      border:`1px solid ${C.border}`,
+      borderLeft:`3px solid ${color}`,
+      padding:"12px 12px",
+      marginBottom:12,
+      position:"relative",
+      overflow:"hidden",
+    }}>
+      {/* Halo décoratif */}
       <div style={{
-        background:C.bg3, borderRadius:8, padding:"9px 12px",
-        marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center",
-      }}>
-        <div>
-          <div style={{fontSize:9,color:C.gray,marginBottom:2}}>Valeur du fonds</div>
-          <div style={{fontSize:18,fontWeight:900,color:C.text}}>{msk("$"+fmtK(fonds), hidden)}</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:9,color:C.gray,marginBottom:2}}>Nombre de parts</div>
-          <div style={{fontSize:18,fontWeight:900,color:C.text}}>{msk(qty.toLocaleString("fr-FR"), hidden)}</div>
+        position:"absolute",top:-30,right:-30,width:100,height:100,borderRadius:"50%",
+        background:`radial-gradient(circle,${color}18,transparent 70%)`,
+        pointerEvents:"none",
+      }}/>
+
+      {/* Titre */}
+      <div style={{fontSize:10,fontWeight:700,color:C.gray,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>
+        <span style={{color}}>{titre}</span>
+        {sousTitre&&<span style={{color:C.gray}}>{" — "}{sousTitre}</span>}
+      </div>
+
+      {/* Cours + perf création */}
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",marginBottom:16}}>
+        <div style={{fontSize:26,fontWeight:900,color,letterSpacing:-1,lineHeight:1}}>
+          {msk(affCours, hidden)}
+        </div>        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:16,color:pUp?C.green:C.red}}>{pUp?"▲":"▼"}</span>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:14,fontWeight:800,color:pUp?C.green:C.red}}>
+              {fmtP(perfCreation)}
+            </div>
+            <div style={{fontSize:9,color:C.gray,letterSpacing:.3}}>création</div>
+          </div>
         </div>
       </div>
-      {/* Perfs compactes */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
-        {perfs.map(([l,v])=>(
-          <div key={l} style={{background:C.bg3,borderRadius:6,padding:"4px 2px",textAlign:"center"}}>
-            <div style={{fontSize:7,color:C.gray,marginBottom:1}}>{l}</div>
-            <div style={{fontSize:10,fontWeight:800,color:v!=null?clr(v):C.gray}}>
+
+      {/* Séparateur */}
+      <div style={{height:1,background:C.border,marginBottom:12}}/>
+
+      {/* Fonds + Parts */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0,marginBottom:14}}>
+        <div>
+          <div style={{fontSize:8,color:C.gray,letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>Fonds</div>
+          <div style={{fontSize:17,fontWeight:800,color:C.text}}>{msk(affFonds, hidden)}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:8,color:C.gray,letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>Parts</div>
+          <div style={{fontSize:17,fontWeight:800,color:C.text}}>{msk(qty.toLocaleString("fr-FR"), hidden)}</div>
+        </div>
+      </div>
+
+      {/* Perfs 1J / 1S / 1M */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+        {perfs3.map(([l,v])=>(
+          <div key={l} style={{
+            background:C.bg2,borderRadius:8,padding:"7px 0",textAlign:"center",
+            border:`1px solid ${C.border}`,
+          }}>
+            <div style={{fontSize:9,color:C.gray,marginBottom:3,letterSpacing:.5}}>{l}</div>
+            <div style={{fontSize:13,fontWeight:800,color:v!=null?clr(v):C.gray}}>
               {v!=null?fmtP(v):"—"}
             </div>
           </div>
@@ -2894,7 +2972,7 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden}){
   );
 }
 
-function PageGDB({chartData,hidden,EFF}){
+function PageGDB({chartData,hidden,EFF,eur}){
   const [benchTF, setBenchTF] = useState("ALL");
   const src = EFF||CURRENT;
   const gdbs2026 = GDBS.filter(r=>r[0]>='2026-01-01');
@@ -2965,10 +3043,14 @@ function PageGDB({chartData,hidden,EFF}){
 
   return(
     <div>
-      <FondCard label="GDB.C — Portefeuille Crypto" cours={gcToday} qty={gcQty} fonds={gcFonds} color={C.btc} hidden={hidden}
-        perfs={[["1J",gcPerf(d1)],["1S",gcPerf(d7)],["1M",gcPerf(d30)],["YTD",gcPerf(dytd)],["ALL",gcPerfAllTime]]}/>
-      <FondCard label="GDB.S — Portefeuille Actions" cours={gsToday} qty={gsQty} fonds={gsFonds} color={C.blue} hidden={hidden}
-        perfs={[["1J",gsPerf(d1)],["1S",gsPerf(d7)],["1M",gsPerf(d30)],["YTD",gsYTD],["1Y*",gsYTD]]}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:4}}>
+        <FondCard label="GDB.C — CRYPTO" cours={gcToday} qty={gcQty} fonds={gcFonds} color={C.btc} hidden={hidden}
+          eur={eur} usdEur={src.usdEur}
+          perfs={[["1J",gcPerf(d1)],["1S",gcPerf(d7)],["1M",gcPerf(d30)],["YTD",gcPerf(dytd)],["ALL",gcPerfAllTime]]}/>
+        <FondCard label="GDB.S — ACTIONS" cours={gsToday} qty={gsQty} fonds={gsFonds} color={C.blue} hidden={hidden}
+          eur={eur} usdEur={src.usdEur}
+          perfs={[["1J",gsPerf(d1)],["1S",gsPerf(d7)],["1M",gsPerf(d30)],["YTD",gsYTD],["1Y*",gsYTD]]}/>
+      </div>
 
       <SH label="Comparaison — base 100 au départ de la période" color={C.gray}/>
       <GdbCompareChartGDB onTFChange={setBenchTF}/>
@@ -4190,6 +4272,8 @@ function App(){
                 ["bloomberg", "🖥","Terminal · Style Bloomberg Pro"],
                 ["midnight",  "✦", "Violet & Or · Premium crypto"],
                 ["bitcoin",   "₿", "Orange pill · Bitcoin Standard"],
+                ["frozen",    "❄️", "Blizzard · Frozen Throne"],
+                ["tropical",  "🌴","Cocotiers · Eau turquoise"],
               ].map(([key,ic,desc])=>{
                 const T=THEMES[key];
                 return(

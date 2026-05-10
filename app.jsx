@@ -282,7 +282,6 @@ const YF_MAP = {
 /* Fetch single Yahoo Finance quote via allorigins proxy */
 async function fetchYahoo(symbol){
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
-  // Try two proxies for better coverage of non-US exchanges
   const proxies = [
     `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
     `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -294,9 +293,18 @@ async function fetchYahoo(symbol){
       const json = await res.json();
       const raw = typeof json.contents === "string" ? json.contents : JSON.stringify(json);
       const data = JSON.parse(raw);
-      const meta = data?.chart?.result?.[0]?.meta;
-      const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
-      if(price) return price;
+      const result = data?.chart?.result?.[0];
+      if(!result) continue;
+      const meta = result.meta;
+      // Prendre le prix le plus récent disponible :
+      // 1. regularMarketPrice (prix temps réel ou dernier connu)
+      // 2. Dernière clôture des 5 derniers jours (la plus haute pour éviter données périmées)
+      const live = meta?.regularMarketPrice;
+      const closes = result?.indicators?.quote?.[0]?.close?.filter(v=>v!=null) || [];
+      const lastClose = closes.length ? closes[closes.length-1] : null;
+      // Prendre le prix le plus récent et non-nul
+      const price = (live && live > 0) ? live : lastClose;
+      if(price && price > 0) return price;
     }catch(e){ continue; }
   }
   return null;
@@ -4105,36 +4113,45 @@ function App(){
             width:"100%",maxWidth:430,border:`1px solid ${C.border}`,
           }}>
             <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>{gistSync?"🟢":"🔴"} Diagnostic connexion Cloudflare</div>
+            <div style={{fontSize:13,fontWeight:800,color:gistSync?C.green:C.red,marginBottom:14}}>
+              {gistSync?"🟢":"🔴"} Connexion Cloudflare — {gistSync?"Opérationnelle":"Erreur"}
+            </div>
             <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,display:"flex",flexDirection:"column",gap:8}}>
               <div><span style={{color:C.gray}}>WORKER :</span> <span style={{color:C.text,fontSize:9}}>{CF_WORKER_URL}</span></div>
               <div><span style={{color:C.gray}}>AUTH_KEY :</span> <span style={{color:C.text}}>{CF_AUTH_KEY.slice(0,8)}…</span></div>
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
-                <span style={{color:C.gray}}>HTTP Status :</span>{" "}
-                <span style={{color:gistError?.status===200?C.green:C.red,fontWeight:700}}>
-                  {gistError?.status ?? "—"} {gistError?.statusText ?? ""}
-                </span>
+                <span style={{color:C.gray}}>Statut :</span>{" "}
+                {gistSync ? (
+                  <span style={{color:C.green,fontWeight:700}}>✓ Connecté — lecture/écriture OK</span>
+                ) : (
+                  <span style={{color:C.red,fontWeight:700}}>
+                    {gistError?.status ?? "—"} {gistError?.statusText ?? "Connexion impossible"}
+                  </span>
+                )}
               </div>
-              {gistError?.body&&(
+              {!gistSync && gistError?.body&&(
                 <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
-                  <div style={{color:C.gray,marginBottom:4}}>Réponse :</div>
+                  <div style={{color:C.gray,marginBottom:4}}>Réponse serveur :</div>
                   <div style={{color:C.text,wordBreak:"break-all",fontSize:10}}>{gistError.body}</div>
                 </div>
               )}
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
-                <span style={{color:C.gray}}>URL testée :</span>
+                <span style={{color:C.gray}}>Endpoint :</span>
                 <div style={{color:C.teal,fontSize:9,wordBreak:"break-all",marginTop:2}}>
                   {CF_WORKER_URL}/ping
                 </div>
               </div>
             </div>
-            <div style={{marginTop:12,fontSize:10,color:C.gray,lineHeight:1.5}}>
-              💡 Capture d'écran de ce panel et envoie-la pour diagnostic.
-            </div>
+            {!gistSync&&(
+              <div style={{marginTop:12,fontSize:10,color:C.gray,lineHeight:1.5}}>
+                💡 Capture d'écran et envoie-la pour diagnostic.
+              </div>
+            )}
             <button onClick={()=>setShowGistDiag(false)} style={{
               marginTop:14,width:"100%",padding:"10px 0",borderRadius:10,
-              background:C.bg2,border:`1px solid ${C.border}`,
-              color:C.text,fontSize:13,cursor:"pointer",fontWeight:700,
+              background:gistSync?C.green+"22":C.bg2,
+              border:`1px solid ${gistSync?C.green:C.border}`,
+              color:gistSync?C.green:C.text,fontSize:13,cursor:"pointer",fontWeight:700,
             }}>Fermer</button>
           </div>
         </div>

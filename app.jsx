@@ -276,7 +276,7 @@ const msk=(val,hidden)=>hidden?"••••":val;
 const YF_MAP = {
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
-  GOLD:"GLD", IBKR:"IBKR",
+  GOLD:"GOLD.PA", IBKR:"IBKR",
 };
 
 /* Fetch single Yahoo Finance quote via allorigins proxy */
@@ -442,14 +442,27 @@ function applyPrices(prices, usdEur){
   const rate = usdEur || CURRENT.usdEur;
   const eurUsd = 1 / rate;
   // Tickers cotés en € (bourse EU) — le prix récupéré est en €, on convertit en $
-  const EUR_TICKERS = new Set(["AVIO", "AI"]);
+  const EUR_TICKERS = new Set(["AVIO", "AI", "GOLD"]);
 
   /* Updated stocks items */
   const stocksItems = CURRENT.stocks.items.map(item => {
     let newLive = prices[item.t];
     if(!newLive) return item;
     // Conversion € → $ pour les tickers EU
-    if(EUR_TICKERS.has(item.t)) newLive = parseFloat((newLive * eurUsd).toFixed(4));
+    if(EUR_TICKERS.has(item.t)){
+      let priceEUR = newLive;
+      if(priceEUR < 1) priceEUR = priceEUR * 100; // centimes → euros
+      newLive = parseFloat((priceEUR * eurUsd).toFixed(4));
+    }
+    // Sanity checks — si prix aberrant vs CURRENT, on garde CURRENT
+    // (variation max tolérable = ±50% par rapport au dernier prix connu)
+    const currentLive = item.live || 1;
+    const variation = Math.abs(newLive - currentLive) / currentLive;
+    if(variation > 0.5){
+      // Prix trop éloigné — probablement une erreur de proxy
+      console.warn(`Prix aberrant pour ${item.t}: ${newLive} vs current ${currentLive} — ignoré`);
+      return item;
+    }
     const newVal = Math.round(item.qty * newLive);
     const newPnl = Math.round(newVal - item.pa * item.qty);
     const newPct = newPnl / (item.pa * item.qty);
@@ -4008,7 +4021,7 @@ function App(){
         {/* Centre : titre */}
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
-          {gistSync===true  && <span title="Cloudflare KV — connecté" style={{fontSize:10,color:C.green}}>☁︎</span>}
+          {gistSync===true  && <span onClick={()=>setShowGistDiag(true)} title="Cloudflare KV — connecté (clic pour détails)" style={{fontSize:10,color:C.green,cursor:"pointer"}}>☁︎</span>}
           {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion — clic pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
           {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>·</span>}
         </div>
@@ -4092,7 +4105,7 @@ function App(){
             width:"100%",maxWidth:430,border:`1px solid ${C.border}`,
           }}>
             <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>🔴 Diagnostic connexion Cloudflare</div>
+            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>{gistSync?"🟢":"🔴"} Diagnostic connexion Cloudflare</div>
             <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,display:"flex",flexDirection:"column",gap:8}}>
               <div><span style={{color:C.gray}}>WORKER :</span> <span style={{color:C.text,fontSize:9}}>{CF_WORKER_URL}</span></div>
               <div><span style={{color:C.gray}}>AUTH_KEY :</span> <span style={{color:C.text}}>{CF_AUTH_KEY.slice(0,8)}…</span></div>

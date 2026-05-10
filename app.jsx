@@ -280,7 +280,28 @@ const YF_MAP = {
 };
 
 /* Fetch single Yahoo Finance quote via allorigins proxy */
+// Tickers EU passent par le Worker Cloudflare (pas de CORS)
+// Tickers US passent par les proxies publics
+const EU_YAHOO_TICKERS = new Set(["AVIO.MI","AI.PA","GOLD.PA","JEDI.L","AIA"]);
+
+async function fetchYahooCF(symbol){
+  // Via Cloudflare Worker — pas de CORS, supporte les bourses EU
+  try{
+    const res = await fetch(`${CF_WORKER_URL}/yahoo?symbol=${encodeURIComponent(symbol)}`,{
+      headers:{"X-Auth-Key":CF_AUTH_KEY},
+      signal: AbortSignal.timeout(10000),
+    });
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data?.price ?? null;
+  }catch(e){ return null; }
+}
+
 async function fetchYahoo(symbol){
+  // Essai via Cloudflare d'abord (plus fiable pour EU)
+  const cfPrice = await fetchYahooCF(symbol);
+  if(cfPrice) return cfPrice;
+  // Fallback proxies publics pour tickers US
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
   const proxies = [
     `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
@@ -296,13 +317,9 @@ async function fetchYahoo(symbol){
       const result = data?.chart?.result?.[0];
       if(!result) continue;
       const meta = result.meta;
-      // Prendre le prix le plus récent disponible :
-      // 1. regularMarketPrice (prix temps réel ou dernier connu)
-      // 2. Dernière clôture des 5 derniers jours (la plus haute pour éviter données périmées)
       const live = meta?.regularMarketPrice;
       const closes = result?.indicators?.quote?.[0]?.close?.filter(v=>v!=null) || [];
       const lastClose = closes.length ? closes[closes.length-1] : null;
-      // Prendre le prix le plus récent et non-nul
       const price = (live && live > 0) ? live : lastClose;
       if(price && price > 0) return price;
     }catch(e){ continue; }

@@ -276,7 +276,7 @@ const msk=(val,hidden)=>hidden?"••••":val;
 const YF_MAP = {
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
-  GOLD:"AAAU", IBKR:"IBKR",
+  GOLD:"GLD", IBKR:"IBKR",
 };
 
 /* Fetch single Yahoo Finance quote via allorigins proxy */
@@ -440,11 +440,16 @@ async function fetchAllPrices(){
 /* Apply fetched prices to CURRENT and return updated totals */
 function applyPrices(prices, usdEur){
   const rate = usdEur || CURRENT.usdEur;
+  const eurUsd = 1 / rate;
+  // Tickers cotés en € (bourse EU) — le prix récupéré est en €, on convertit en $
+  const EUR_TICKERS = new Set(["AVIO", "AI"]);
 
   /* Updated stocks items */
   const stocksItems = CURRENT.stocks.items.map(item => {
-    const newLive = prices[item.t];
+    let newLive = prices[item.t];
     if(!newLive) return item;
+    // Conversion € → $ pour les tickers EU
+    if(EUR_TICKERS.has(item.t)) newLive = parseFloat((newLive * eurUsd).toFixed(4));
     const newVal = Math.round(item.qty * newLive);
     const newPnl = Math.round(newVal - item.pa * item.qty);
     const newPct = newPnl / (item.pa * item.qty);
@@ -496,45 +501,55 @@ const uid=()=>"t"+Date.now();
    STORAGE ENGINE v8 — GitHub Gist (multi-appareils) + localStorage (fallback offline)
    Gist layout: un seul fichier gdb_data.json = { chart: [...], txns: [...] }
 ═══════════════════════════════════════════════════════════ */
-const GIST_ID    = "a5fd6643e7bc6d9af5bd28e4060395a9";
-const GIST_TOKEN = "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";
-const GIST_FILE  = "gdb_data.json";
+/* ── Cloudflare Worker Storage ─────────────────────────────────── */
+const CF_WORKER_URL = "https://still-moon-9884.fgodbille.workers.dev";
+const CF_AUTH_KEY   = "gdb-sons-secret-2026";
 const LS_KEY     = "gdb_sons_v8";
 
 /* Lit le Gist complet — retourne l'objet JSON ou null */
-async function gistRead(){
+async function cfRead(){
   try{
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`,{
-      headers:{"Authorization":`token ${GIST_TOKEN}`,"Accept":"application/vnd.github.v3+json"},
+    const res = await fetch(`${CF_WORKER_URL}/read`,{
+      headers:{"X-Auth-Key":CF_AUTH_KEY},
       signal: AbortSignal.timeout(8000),
     });
     if(!res.ok){
       const txt = await res.text().catch(()=>"");
-      return {_error: true, status: res.status, statusText: res.statusText, body: txt.slice(0,200)};
+      return {_error:true, status:res.status, statusText:res.statusText, body:txt.slice(0,200)};
     }
-    const data = await res.json();
-    const content = data?.files?.[GIST_FILE]?.content;
-    return content ? JSON.parse(content) : null;
+    return await res.json();
   }catch(e){
-    return {_error: true, status: null, statusText: e.message, body: e.name};
+    return {_error:true, status:null, statusText:e.message, body:e.name};
   }
 }
+const gistRead = cfRead;
 
-/* Écrit l'objet complet dans le Gist */
-async function gistWrite(obj){
+/* Écrit l'objet complet dans Cloudflare KV */
+async function cfWrite(obj){
   try{
-    await fetch(`https://api.github.com/gists/${GIST_ID}`,{
-      method:"PATCH",
-      headers:{
-        "Authorization":`token ${GIST_TOKEN}`,
-        "Accept":"application/vnd.github.v3+json",
-        "Content-Type":"application/json",
-      },
-      body: JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify(obj)}}}),
+    const res = await fetch(`${CF_WORKER_URL}/write`,{
+      method:"POST",
+      headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},
+      body: JSON.stringify(obj),
       signal: AbortSignal.timeout(10000),
     });
-    return true;
+    return res.ok;
   }catch{ return false; }
+}
+const gistWrite = cfWrite;
+
+async function cfPing(){
+  try{
+    const res = await fetch(`${CF_WORKER_URL}/ping`,{
+      headers:{"X-Auth-Key":CF_AUTH_KEY},
+      signal: AbortSignal.timeout(5000),
+    });
+    if(!res.ok) return {_error:true, status:res.status, statusText:res.statusText, body:""};
+    const data = await res.json();
+    return data?.ok ? null : {_error:true, status:200, statusText:"Réponse inattendue", body:JSON.stringify(data)};
+  }catch(e){
+    return {_error:true, status:null, statusText:e.message, body:e.name};
+  }
 }
 
 /* Cache local (localStorage) */
@@ -1969,6 +1984,30 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       {refreshErr&&(typeof refreshErr==="string")&&(
         <div style={{background:C.red+"15",border:`1px solid ${C.red}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:11,color:C.red}}>⚠ {refreshErr}</div>
       )}
+      {/* ── Taux EUR/USD ── */}
+      {(()=>{
+        const _src3 = EFF||CURRENT;
+        const eurUsdRate = _src3.eurUsd || (1/_src3.usdEur);
+        const usdEurRate = _src3.usdEur;
+        return(
+          <div style={{...crd(),display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:13}}>🇪🇺</span>
+              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>EUR / USD</span>
+            </div>
+            <div style={{display:"flex",gap:16,alignItems:"center"}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>${eurUsdRate.toFixed(4)}</div>
+                <div style={{fontSize:9,color:C.gray}}>1€ = ${eurUsdRate.toFixed(4)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>€{usdEurRate.toFixed(4)}</div>
+                <div style={{fontSize:9,color:C.gray}}>1$ = €{usdEurRate.toFixed(4)}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {/* ── GDB.C + GDB.S encarts ── */}
       {(()=>{
         const _ov_src = EFF||CURRENT;
@@ -3812,9 +3851,9 @@ function App(){
 
   useEffect(()=>{
     (async()=>{
-      const gistResult = await gistRead().catch(e=>({_error:true,status:null,statusText:e.message,body:e.name}));
-      const gistOk = gistResult && !gistResult._error;
-      if(!gistOk) setGistError(gistResult||{status:null,statusText:"Réponse vide",body:""});
+      const pingResult = await cfPing();
+      const gistOk = pingResult === null;
+      if(!gistOk) setGistError(pingResult||{status:null,statusText:"Réponse vide",body:""});
       setGistSync(gistOk);
       const[cd,tx]=await Promise.all([load(SK.chart,CHART_MONTHLY),load(SK.txns,SEED_TXNS)]);
       setChartData(cd);
@@ -3969,9 +4008,9 @@ function App(){
         {/* Centre : titre */}
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
-          {gistSync===true  && <span title="Synchronisé avec GitHub Gist" style={{fontSize:10,color:C.green}}>☁︎</span>}
-          {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Cliquer pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
-          {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>○</span>}
+          {gistSync===true  && <span title="Cloudflare KV — connecté" style={{fontSize:10,color:C.green}}>☁︎</span>}
+          {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion — clic pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
+          {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>·</span>}
         </div>
 
         {/* Droite : →€/$ 👁 🎨 */}
@@ -4053,10 +4092,10 @@ function App(){
             width:"100%",maxWidth:430,border:`1px solid ${C.border}`,
           }}>
             <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>🔴 Diagnostic connexion Gist</div>
+            <div style={{fontSize:13,fontWeight:800,color:C.red,marginBottom:14}}>🔴 Diagnostic connexion Cloudflare</div>
             <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,display:"flex",flexDirection:"column",gap:8}}>
-              <div><span style={{color:C.gray}}>GIST_ID :</span> <span style={{color:C.text}}>{GIST_ID}</span></div>
-              <div><span style={{color:C.gray}}>TOKEN :</span> <span style={{color:C.text}}>{GIST_TOKEN.slice(0,12)}…{GIST_TOKEN.slice(-4)}</span></div>
+              <div><span style={{color:C.gray}}>WORKER :</span> <span style={{color:C.text,fontSize:9}}>{CF_WORKER_URL}</span></div>
+              <div><span style={{color:C.gray}}>AUTH_KEY :</span> <span style={{color:C.text}}>{CF_AUTH_KEY.slice(0,8)}…</span></div>
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
                 <span style={{color:C.gray}}>HTTP Status :</span>{" "}
                 <span style={{color:gistError?.status===200?C.green:C.red,fontWeight:700}}>
@@ -4072,7 +4111,7 @@ function App(){
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
                 <span style={{color:C.gray}}>URL testée :</span>
                 <div style={{color:C.teal,fontSize:9,wordBreak:"break-all",marginTop:2}}>
-                  https://api.github.com/gists/{GIST_ID}
+                  {CF_WORKER_URL}/ping
                 </div>
               </div>
             </div>

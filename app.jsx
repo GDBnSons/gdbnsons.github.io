@@ -791,13 +791,17 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
     const r=svgRef.current.getBoundingClientRect();
     setHover({i:getIdx(ev.clientX,r)});
   };
+  const _tm1=useRef(false),_ts1=useRef(0);
   const onTouch=ev=>{
     ev.preventDefault();
     if(!svgRef.current)return;
     const r=svgRef.current.getBoundingClientRect();
     const t=ev.touches[0]||ev.changedTouches[0];
+    if(ev.type==="touchstart"){_tm1.current=false;_ts1.current=t.clientX;}
+    else{_tm1.current=Math.abs(t.clientX-_ts1.current)>4;}
     setHover({i:getIdx(t.clientX,r)});
   };
+  const onTouchEnd1=ev=>{ev.preventDefault();if(!_tm1.current)setHover(null);};
 
   const hx=hover!=null?px(hover.i):null;
   const hovDate=hover!=null?(sliced[0]?._dates?.[hover.i]||""):null;
@@ -860,7 +864,7 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${h+22+legH}`}
         style={{overflow:"visible",touchAction:"none",userSelect:"none"}}
         onMouseMove={onMove} onMouseLeave={()=>setHover(null)}
-        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={()=>setHover(null)}>
+        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={onTouchEnd1}>
 
         {/* Grid */}
         {grids.map((v,i)=>(
@@ -1117,10 +1121,18 @@ const Btn=({label,onClick,color,full,outline})=>(
 /* ═══════════════════════════════════════════════════════════
    PORTFOLIO SECTION ROW — cliquable, expand avec ligne détail
 ═══════════════════════════════════════════════════════════ */
-function SectionRow({section, open, onToggle, hidden=false}){
+function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.852, eurUsd=1.173}){
   const {n, icon, color, totalUSD, totalEUR, pct, items} = section;
   const totalPnl = items.reduce((s,x)=>s+(x.pnl||0), 0);
-  const totalInvested = items.reduce((s,x)=>s+(x.investi||0), 0);
+
+  // Conversion selon mode €/$
+  const cv    = v => { const n=parseFloat(v); return isNaN(n)?0: eur ? Math.round(n * usdEur) : Math.round(n); };
+  const cvPnl = v => { const n=parseFloat(v); return isNaN(n)?0: eur ? Math.round(n * usdEur) : Math.round(n); };
+  const cur   = eur ? "€" : "$";
+  const fmtV  = v => cur + fmtK(Math.abs(cv(v)));
+  const fmtP2 = v => { const n=parseFloat(v); return isNaN(n)?"—":(n>=0?"+":"")+cur+fmtK(Math.abs(cvPnl(n))); };
+  const fmtLive = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+(n*usdEur).toFixed(2) : "$"+n.toFixed(2)); };
+  const fmtPA   = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+(n*usdEur).toFixed(2) : "$"+n.toFixed(2)); };
 
   return(
     <div style={{marginBottom:6}}>
@@ -1147,14 +1159,11 @@ function SectionRow({section, open, onToggle, hidden=false}){
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
             <span style={{fontSize:14, fontWeight:800, color: open ? color : C.text}}>{n}</span>
             <div style={{display:"flex", alignItems:"center", gap:8}}>
-              <span style={{
-                fontSize:11, fontWeight:700,
-                color: totalPnl>=0 ? C.green : C.red,
-              }}>
-                {msk((totalPnl>=0?"+":"")+"$"+fmtK(Math.abs(totalPnl)),hidden)}
+              <span style={{fontSize:11,fontWeight:700,color:totalPnl>=0?C.green:C.red}}>
+                {msk(fmtP2(totalPnl),hidden)}
               </span>
-              <span style={{fontSize:14, fontWeight:800, color: C.text}}>
-                {msk("$"+fmtK(totalUSD),hidden)}
+              <span style={{fontSize:14,fontWeight:800,color:C.text}}>
+                {msk(fmtV(totalUSD),hidden)}
               </span>
             </div>
           </div>
@@ -1179,104 +1188,81 @@ function SectionRow({section, open, onToggle, hidden=false}){
           overflow:"hidden",
         }}>
           {/* Section summary bar */}
-          <div style={{
-            display:"grid", gridTemplateColumns:"1fr 1fr 1fr",
-            gap:1, background:C.border, borderBottom:`1px solid ${color+"33"}`,
-          }}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border,borderBottom:`1px solid ${color+"33"}`}}>
             {[
-              ["Valorisation", hidden?"***":"$"+fmtK(totalUSD), C.text],
-              ["P&L total", hidden?"***":((totalPnl>=0?"+":"")+"$"+fmtK(Math.abs(totalPnl))), totalPnl>=0?C.green:C.red],
+              ["Valorisation", hidden?"***":fmtV(totalUSD), C.text],
+              ["P&L total", hidden?"***":fmtP2(totalPnl), totalPnl>=0?C.green:C.red],
               ["Part portefeuille", pct.toFixed(1)+"%", color],
             ].map(([l,v,c],i)=>(
-              <div key={i} style={{background:C.bg2, padding:"10px 12px", textAlign:"center"}}>
-                <div style={{fontSize:9, color:C.gray, marginBottom:3}}>{l}</div>
-                <div style={{fontSize:13, fontWeight:800, color:c}}>{v}</div>
+              <div key={i} style={{background:C.bg2,padding:"10px 12px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:C.gray,marginBottom:3}}>{l}</div>
+                <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
               </div>
             ))}
           </div>
 
           {/* Line items */}
-          {items.map((item, i)=>{
-            const isLast = i === items.length - 1;
-            const pnlPct = item.pct ?? (item.pnl && item.investi ? item.pnl/item.investi : null);
+          {items.map((item,i)=>{
+            const isLast=i===items.length-1;
+            const pnlPct=item.pct??(item.pnl&&item.investi?item.pnl/item.investi:null);
             return(
-              <div key={i} style={{
-                display:"flex", alignItems:"center", gap:10,
-                padding:"10px 14px",
-                borderBottom: isLast ? "none" : `1px solid ${C.border}`,
-                background: i%2===0 ? "transparent" : C.bg1+"66",
-              }}>
-                {/* Ticker badge — pictogramme ou SVG logo */}
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66"}}>
+                {/* Icon */}
                 {(()=>{
-                  const Logo = item.iconComponent ? BankLogo[item.iconComponent] : null;
+                  const Logo=item.iconComponent?BankLogo[item.iconComponent]:null;
                   return(
-                    <div style={{
-                      width:38, height:38, borderRadius:9, flexShrink:0,
-                      background: color+"22", display:"flex", alignItems:"center",
-                      justifyContent:"center", fontSize:20,
-                    }}>
-                      {Logo ? <Logo/> : (item.icon || item.ticker?.slice(0,4))}
+                    <div style={{width:38,height:38,borderRadius:9,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>
+                      {Logo?<Logo/>:(item.icon||item.ticker?.slice(0,4))}
                     </div>
                   );
                 })()}
 
                 {/* Main info */}
                 <div style={{flex:1}}>
-                  <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
-                      <div style={{fontSize:13, fontWeight:700, color:C.text}}>
-                        {item.label || item.ticker}
-                      </div>
-                      {item.detail && (
-                        <div style={{fontSize:10, color:C.gray, marginTop:1}}>{item.detail}</div>
-                      )}
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{item.label||item.ticker}</div>
+                      {item.detail&&<div style={{fontSize:10,color:C.gray,marginTop:1}}>{item.detail}</div>}
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:13, fontWeight:800, color:C.text}}>
-                        {hidden?"***":"$"+fmtK(item.valUSD)}
+                      <div style={{fontSize:13,fontWeight:800,color:C.text}}>
+                        {hidden?"***":fmtV(item.valUSD)}
                       </div>
+                      {/* Ligne secondaire : si €→$ affiché, montrer aussi $ brut ; si $ affiché, montrer € */}
                       {item.valEUR && (
-                        <div style={{fontSize:10, color:C.gray}}>{hidden?"***":"€"+fmtK(item.valEUR)}</div>
+                        <div style={{fontSize:10,color:C.gray}}>
+                          {hidden?"***":(eur?"$"+fmtK(item.valUSD):"€"+fmtK(item.valEUR))}
+                        </div>
                       )}
                     </div>
                   </div>
 
                   {/* P&L row */}
-                  {item.pnl !== undefined && item.pnl !== null && (
-                    <div style={{
-                      display:"flex", justifyContent:"space-between", alignItems:"center",
-                      marginTop:5, paddingTop:5, borderTop:`1px solid ${C.border}`,
-                    }}>
-                      <div style={{display:"flex", gap:12}}>
-                        {item.pa && (
-                          <span style={{fontSize:10, color:C.gray}}>
-                            PA <b style={{color:C.text2}}>${typeof item.pa==="number"?item.pa.toFixed(2):item.pa}</b>
+                  {item.pnl!==undefined&&item.pnl!==null&&(
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
+                      <div style={{display:"flex",gap:12}}>
+                        {item.pa&&(
+                          <span style={{fontSize:10,color:C.gray}}>
+                            PA <b style={{color:C.text2}}>{fmtPA(item.pa)}</b>
                           </span>
                         )}
-                        {item.live && (
-                          <span style={{fontSize:10, color:C.gray}}>
-                            Live <b style={{color}}>${typeof item.live==="number"?item.live.toFixed(2):item.live}</b>
+                        {item.live&&(
+                          <span style={{fontSize:10,color:C.gray}}>
+                            Live <b style={{color}}>{fmtLive(item.live)}</b>
                           </span>
                         )}
-                        {item.qty && (
-                          <span style={{fontSize:10, color:C.gray}}>
+                        {item.qty&&(
+                          <span style={{fontSize:10,color:C.gray}}>
                             Qté <b style={{color:C.text2}}>{item.qty}</b>
                           </span>
                         )}
                       </div>
-                      <div style={{display:"flex", alignItems:"center", gap:6}}>
-                        <span style={{
-                          fontSize:12, fontWeight:800,
-                          color: item.pnl>=0 ? C.green : C.red,
-                        }}>
-                          {hidden?"***":(item.pnl>=0?"+":"")+"$"+fmtK(Math.abs(item.pnl))}
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:12,fontWeight:800,color:item.pnl>=0?C.green:C.red}}>
+                          {hidden?"***":fmtP2(item.pnl)}
                         </span>
-                        {pnlPct !== null && (
-                          <span style={{
-                            fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:6,
-                            background: item.pnl>=0 ? C.green+"22" : C.red+"22",
-                            color: item.pnl>=0 ? C.green : C.red,
-                          }}>
+                        {pnlPct!==null&&(
+                          <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:6,background:item.pnl>=0?C.green+"22":C.red+"22",color:item.pnl>=0?C.green:C.red}}>
                             {fmtP(pnlPct)}
                           </span>
                         )}
@@ -1299,7 +1285,7 @@ function SectionRow({section, open, onToggle, hidden=false}){
    Right axis (montant en €/$ selon eur)         : Patrimoine total
    La valeur finale = exactement celle affichée en haut
 ═══════════════════════════════════════════════════════════ */
-function GdbCompareChart({eur, EFF, tf, setTF, onSparkData, chartData}){
+function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData}){
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);
   const [full, setFull] = useState(false);
@@ -1400,7 +1386,9 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData, chartData}){
     return Math.min(n - 1, Math.max(0, Math.round(svgX / (IW / (n - 1)))));
   };
   const onMove = e => { if (!svgRef.current) return; setHover({ i: getIdx(e.clientX, svgRef.current.getBoundingClientRect()) }); };
-  const onTouch = e => { e.preventDefault(); if (!svgRef.current) return; const t = e.touches[0]||e.changedTouches[0]; setHover({ i: getIdx(t.clientX, svgRef.current.getBoundingClientRect()) }); };
+  const _tm2=useRef(false),_ts2=useRef(0);
+  const onTouch = e => { e.preventDefault(); if (!svgRef.current) return; const t=e.touches[0]||e.changedTouches[0]; if(e.type==="touchstart"){_tm2.current=false;_ts2.current=t.clientX;}else{_tm2.current=Math.abs(t.clientX-_ts2.current)>4;} setHover({ i: getIdx(t.clientX, svgRef.current.getBoundingClientRect()) }); };
+  const onTouchEnd1=ev=>{ev.preventDefault();if(!_tm2.current)setHover(null);};
 
   /* ── Hover values ── */
   const hi = hover?.i;
@@ -1432,16 +1420,28 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData, chartData}){
   /* ── Contenu du graphique (partagé entre normal et fullscreen) ── */
   const chartContent = (hFull) => (
     <>
-      {/* Timeframe selector */}
-      <div style={{ display: "flex", gap: 3, marginBottom: 10 }}>
-        {["1W","1M","MTD","YTD","ALL"].map(t => (
-          <button key={t} onClick={() => { setTF(t); setHover(null); }} style={{
-            flex: 1, padding: "4px 0", borderRadius: 6, fontSize: 10, fontWeight: 700,
-            border: "none", cursor: "pointer",
-            background: tf === t ? C.btc : "transparent",
-            color: tf === t ? "#000" : C.gray,
+      {/* Timeframe selector + bouton € */}
+      <div style={{display:"flex",gap:3,marginBottom:10,alignItems:"center"}}>
+        {["1W","1M","MTD","YTD","ALL"].map(t=>(
+          <button key={t} onClick={()=>{setTF(t);setHover(null);}} style={{
+            flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
+            border:"none",cursor:"pointer",
+            background:tf===t?C.btc:"transparent",
+            color:tf===t?"#000":C.gray,
           }}>{t}</button>
         ))}
+        {/* Séparateur */}
+        <div style={{width:1,height:16,background:C.border,margin:"0 2px"}}/>
+        {/* Bouton € / $ */}
+        {setEur&&(
+          <button onClick={()=>setEur(!eur)} style={{
+            padding:"4px 7px",borderRadius:6,fontSize:10,fontWeight:800,
+            border:`1px solid ${eur?C.btc:C.border}`,cursor:"pointer",
+            background:eur?C.btc+"22":"transparent",
+            color:eur?C.btc:C.gray,
+            flexShrink:0,
+          }}>{eur?"€":"$"}</button>
+        )}
       </div>
 
       {/* Tooltip flottant — position fixed au dessus du titre */}
@@ -1480,7 +1480,7 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData, chartData}){
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H + 22}`}
         style={{ overflow: "visible", touchAction: "none", userSelect: "none" }}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}
-        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={() => setHover(null)}>
+        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={onTouchEnd1}>
         {gridVals.map((v, i) => (
           <g key={i}>
             <line x1={PAD_L} y1={py(v)} x2={W - PAD_R} y2={py(v)} stroke={C.border} strokeWidth={0.4}/>
@@ -1563,16 +1563,16 @@ function GdbCompareChart({eur, EFF, tf, setTF, onSparkData, chartData}){
     </div>
   ) : (
     /* ── VUE NORMALE ── */
-    <div style={{ background: C.bg1, borderRadius: 12, padding: "10px 10px 6px", border: `1px solid ${C.border}`, marginBottom: 7, position:"relative" }}>
-      {/* Bouton plein écran */}
-      <button onClick={()=>setFull(true)} title="Plein écran" style={{
-        position:"absolute", top:8, right:8, zIndex:10,
-        background:C.bg2, border:`1px solid ${C.border}`,
-        borderRadius:6, width:22, height:22,
-        display:"flex", alignItems:"center", justifyContent:"center",
-        cursor:"pointer", fontSize:11, color:C.gray, lineHeight:1,
-      }}>⛶</button>
+    <div style={{background:C.bg1,borderRadius:12,padding:"10px 10px 6px",border:`1px solid ${C.border}`,marginBottom:7,position:"relative"}}>
       {chartContent(false)}
+      {/* Bouton plein écran — coin bas droite */}
+      <button onClick={()=>setFull(true)} title="Plein écran" style={{
+        position:"absolute",bottom:8,right:8,zIndex:10,
+        background:C.bg2,border:`1px solid ${C.border}`,
+        borderRadius:6,width:22,height:22,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        cursor:"pointer",fontSize:11,color:C.gray,lineHeight:1,
+      }}>⛶</button>
     </div>
   );
 }
@@ -2204,7 +2204,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
 
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
-      <GdbCompareChart eur={eur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData}/>
+      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData}/>
 
       {/* Version discrète */}
       <div style={{
@@ -2262,7 +2262,7 @@ function DonutControlled({data,size=160,ri=30,label,sub,sel,onSel}){
   );
 }
 
-function PageAllocation({hidden, EFF}){
+function PageAllocation({hidden, EFF, eur=false, setEur}){
   const[mode,setMode]=useState("detail");
   const[selSlice,setSelSlice]=useState(null);
   const[openSec,setOpenSec]=useState(null);
@@ -2274,10 +2274,11 @@ function PageAllocation({hidden, EFF}){
 
   /* totals for footer */
   const _src = EFF||CURRENT;
-  // totalUSD = somme des catégories (cohérent avec le donut)
   const _SECTIONS = buildSections(_src);
   const totalUSD = _SECTIONS.reduce((s,sec)=>s+sec.totalUSD,0);
   const totalEUR = Math.round(totalUSD * _src.usdEur);
+  const cur2 = eur ? "€" : "$";
+  const totalDisplay = eur ? totalEUR : totalUSD;
 
   return(
     <div>
@@ -2294,11 +2295,11 @@ function PageAllocation({hidden, EFF}){
           {/* Donuts côte à côte */}
           <div style={{display:"flex",justifyContent:"space-around",alignItems:"center",marginBottom:10}}>
             <div style={{textAlign:"center"}}>
-              <Donut data={realD} size={148} label="RÉEL" sub={"$"+fmtK(sectionsTotal)} ri={26}/>
+              <Donut data={realD} size={148} label="RÉEL" sub={(eur?"€":"$")+fmtK(eur?Math.round(sectionsTotal*_src.usdEur):sectionsTotal)} ri={26}/>
               <div style={{fontSize:10,color:C.gray,marginTop:3}}>Réel</div>
             </div>
             <div style={{textAlign:"center"}}>
-              <Donut data={tgtD} size={148} label="CIBLE" sub="$380k" ri={26}/>
+              <Donut data={tgtD} size={148} label="CIBLE" sub={eur?"€320k":"$380k"} ri={26}/>
               <div style={{fontSize:10,color:C.gray,marginTop:3}}>Cible 2026</div>
             </div>
           </div>
@@ -2313,13 +2314,19 @@ function PageAllocation({hidden, EFF}){
           </div>
           {/* Liste ajustements */}
           {CURRENT.alloc.map((a,i)=>{
-            const _sp=SECTIONS.find(x=>x.n===a.n); const _ap=_sp?_sp.pct:0; const diff=_ap-a.tgt,adj=Math.round((diff/100)*CURRENT.totalUSD);
+            const _sp=SECTIONS.find(x=>x.n===a.n);
+            const _ap=_sp?_sp.pct:0;
+            const diff=_ap-a.tgt;
+            const adjUSD=Math.round((diff/100)*totalUSD);
+            const adjEUR=Math.round(adjUSD*_src.usdEur);
+            const adjDisp=eur?adjEUR:adjUSD;
+            const cur2=eur?"€":"$";
             return(
               <div key={i} style={crd()}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
                   <div style={{width:9,height:9,borderRadius:2,background:a.c,flexShrink:0}}/>
                   <span style={{fontSize:13,fontWeight:700,flex:1}}>{a.n}</span>
-                  <span style={{fontSize:12,fontWeight:800}}>${fmt(a.usd)}</span>
+                  <span style={{fontSize:12,fontWeight:800}}>{cur2+fmt(eur?Math.round((_sp?.totalUSD||0)*_src.usdEur):(_sp?.totalUSD||0))}</span>
                 </div>
                 <div style={{position:"relative",height:14,background:C.bg3,borderRadius:4,marginBottom:5,overflow:"hidden"}}>
                   <div style={{position:"absolute",left:0,top:0,height:"100%",width:Math.min(a.tgt/65*100,100)+"%",background:a.c,opacity:.2,borderRadius:4}}/>
@@ -2329,7 +2336,7 @@ function PageAllocation({hidden, EFF}){
                   <span style={{fontSize:10,color:C.gray}}>Réel <b style={{color:a.c}}>{_ap.toFixed(1)}%</b></span>
                   <span style={{fontSize:10,color:C.gray}}>Cible <b style={{color:C.text2}}>{a.tgt}%</b></span>
                   <span style={{fontSize:10,fontWeight:800,color:Math.abs(diff)<1?C.green:diff>0?C.orange:C.blue}}>
-                    {diff>=0?"+":""}{diff.toFixed(1)}% → {diff>0?"Vendre":"Achat"} ${fmt(Math.abs(adj))}
+                    {diff>=0?"+":""}{diff.toFixed(1)}% → {diff>0?"Vendre":"Achat"} {cur2+fmt(Math.abs(adjDisp))}
                   </span>
                 </div>
               </div>
@@ -2338,8 +2345,13 @@ function PageAllocation({hidden, EFF}){
           {/* Plan d'action résumé */}
           <div style={{background:C.bg2,borderRadius:12,padding:14,border:`1px solid ${C.border}`,marginTop:4}}>
             <div style={{fontSize:10,color:C.gray,marginBottom:10,fontWeight:800,textTransform:"uppercase",letterSpacing:.5}}>Plan d'action</div>
-            {CURRENT.alloc.filter(a=>{ const s=SECTIONS.find(x=>x.n===a.n); return Math.abs((s?s.pct:0)-a.tgt)>1; }).map((a,i,arr)=>{
-              const _sp2=SECTIONS.find(x=>x.n===a.n); const _ap2=_sp2?_sp2.pct:0; const diff=_ap2-a.tgt, adj=Math.round((diff/100)*CURRENT.totalUSD);
+            {CURRENT.alloc.filter(a=>{const s=SECTIONS.find(x=>x.n===a.n);return Math.abs((s?s.pct:0)-a.tgt)>1;}).map((a,i,arr)=>{
+              const _sp2=SECTIONS.find(x=>x.n===a.n);
+              const _ap2=_sp2?_sp2.pct:0;
+              const diff=_ap2-a.tgt;
+              const adjUSD=Math.round((diff/100)*totalUSD);
+              const adjEUR=Math.round(adjUSD*_src.usdEur);
+              const cur2=eur?"€":"$";
               return(
                 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<arr.length-1?`1px solid ${C.border}`:"none"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -2347,8 +2359,12 @@ function PageAllocation({hidden, EFF}){
                     <span style={{fontSize:12,fontWeight:600}}>{a.n}</span>
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:12,fontWeight:800,color:diff>0?C.orange:C.blue}}>{diff>0?"Vendre":"Acheter"} ${fmt(Math.abs(adj))}</div>
-                    <div style={{fontSize:10,color:C.gray}}>≈ €{fmt(Math.abs(adj)*CURRENT.usdEur)}</div>
+                    <div style={{fontSize:12,fontWeight:800,color:diff>0?C.orange:C.blue}}>
+                      {diff>0?"Vendre":"Acheter"} {cur2+fmt(Math.abs(eur?adjEUR:adjUSD))}
+                    </div>
+                    <div style={{fontSize:10,color:C.gray}}>
+                      ≈ {eur?"$"+fmt(Math.abs(adjUSD)):"€"+fmt(Math.abs(adjEUR))}
+                    </div>
                   </div>
                 </div>
               );
@@ -2362,17 +2378,17 @@ function PageAllocation({hidden, EFF}){
         <>
           {/* Donut + légende côte à côte */}
           {(()=>{
-            const sectionsTotal = SECTIONS.reduce((s,sec)=>s+sec.totalUSD,0);
+            const sectionsTotal2 = SECTIONS.reduce((s,sec)=>s+sec.totalUSD,0);
             const donutData = SECTIONS.map(s=>({v:s.pct/100,c:s.color,n:s.n,pct:s.pct,usd:s.totalUSD}));
             const selSec = selSlice!=null ? SECTIONS[selSlice] : null;
+            const cur2 = eur?"€":"$";
+            const cvD = v => eur ? Math.round(v*_src.usdEur) : v;
             return(
               <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-                {/* Donut contrôlé */}
                 <div style={{flexShrink:0}}>
-                  <DonutControlled size={150} ri={30} label="TOTAL" sub={"$"+fmtK(sectionsTotal)}
+                  <DonutControlled size={150} ri={30} label="TOTAL" sub={cur2+fmtK(cvD(sectionsTotal2))}
                     data={donutData} sel={selSlice} onSel={i=>setSelSlice(selSlice===i?null:i)}/>
                 </div>
-                {/* Légende : globale ou items de la section */}
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:6}}>
                   {selSec ? (
                     <>
@@ -2380,11 +2396,11 @@ function PageAllocation({hidden, EFF}){
                         {selSec.n}
                       </div>
                       {selSec.items.slice(0,7).map((item,i)=>{
-                        const name  = item.t || item.ticker || item.label || "—";
-                        const icon  = TICKER_ICONS[item.t||item.ticker] || item.icon || "•";
-                        const valUSD= item.val || item.valUSD || 0;
-                        const pnl   = item.pnl || 0;
-                        const pct   = selSec.totalUSD>0 ? (valUSD/selSec.totalUSD)*100 : 0;
+                        const name  = item.t||item.ticker||item.label||"—";
+                        const icon  = TICKER_ICONS[item.t||item.ticker]||item.icon||"•";
+                        const valUSD= item.val||item.valUSD||0;
+                        const pnl   = item.pnl||0;
+                        const pct   = selSec.totalUSD>0?(valUSD/selSec.totalUSD)*100:0;
                         return(
                           <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                             <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -2393,14 +2409,12 @@ function PageAllocation({hidden, EFF}){
                             </div>
                             <div style={{textAlign:"right"}}>
                               <div style={{fontSize:10,fontWeight:800,color:selSec.color}}>{pct.toFixed(1)}%</div>
-                              <div style={{fontSize:9,color:clr(pnl)}}>{pnl>=0?"+":""}${fmtK(Math.abs(pnl))}</div>
+                              <div style={{fontSize:9,color:clr(pnl)}}>{pnl>=0?"+":""}{cur2+fmtK(Math.abs(cvD(pnl)))}</div>
                             </div>
                           </div>
                         );
                       })}
-                      <div style={{fontSize:9,color:C.gray,marginTop:2,textAlign:"center",fontStyle:"italic"}}>
-                        Appuie à nouveau pour revenir
-                      </div>
+                      <div style={{fontSize:9,color:C.gray,marginTop:2,textAlign:"center",fontStyle:"italic"}}>Appuie à nouveau pour revenir</div>
                     </>
                   ) : (
                     SECTIONS.map((s,i)=>{
@@ -2414,7 +2428,7 @@ function PageAllocation({hidden, EFF}){
                           </div>
                           <div style={{textAlign:"right"}}>
                             <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.pct.toFixed(1)}%</div>
-                            <div style={{fontSize:9,color:clr(secPnl)}}>{secPnl>=0?"+":""}${fmtK(Math.abs(secPnl))}</div>
+                            <div style={{fontSize:9,color:clr(secPnl)}}>{secPnl>=0?"+":""}{cur2+fmtK(Math.abs(cvD(secPnl)))}</div>
                           </div>
                         </div>
                       );
@@ -2438,6 +2452,9 @@ function PageAllocation({hidden, EFF}){
               open={openSec===sec.key}
               onToggle={()=>setOpenSec(openSec===sec.key?null:sec.key)}
               hidden={hidden}
+              eur={eur}
+              usdEur={_src.usdEur||0.852}
+              eurUsd={_src.eurUsd||1.173}
             />
           ))}
 
@@ -2457,12 +2474,12 @@ function PageAllocation({hidden, EFF}){
                 }}>
                   <div>
                     <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>Total portefeuille</div>
-                    <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:C.green}}>{msk("$"+fmt(totalUSD),hidden)}</div>
-                    <div style={{fontSize:13,color:C.gray,marginTop:2}}>{msk("€"+fmt(totalEUR),hidden)}</div>
+                    <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:C.green}}>{msk(cur2+fmt(totalDisplay),hidden)}</div>
+                    <div style={{fontSize:13,color:C.gray,marginTop:2}}>{msk(eur?"$"+fmt(totalUSD):"€"+fmt(totalEUR),hidden)}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>P&L positions</div>
-                    <div style={{fontSize:22,fontWeight:800,color:clr(sectionsPnl)}}>{hidden?"***":(sectionsPnl>=0?"+":"")+"$"+fmtK(Math.abs(sectionsPnl))}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:clr(sectionsPnl)}}>{hidden?"***":(sectionsPnl>=0?"+":"")+cur2+fmtK(Math.abs(eur?Math.round(sectionsPnl*(_src.usdEur||0.852)):sectionsPnl))}</div>
                     <div style={{
                       fontSize:12,fontWeight:700,color:clr(sectionsPnl),
                       background:clr(sectionsPnl)+"22",borderRadius:6,padding:"2px 8px",
@@ -2828,7 +2845,9 @@ function GdbCompareChartGDB({onTFChange}){
     return Math.min(n-1, Math.max(0, Math.round(svgX / (IW/(n-1)))));
   };
   const onMove  = e => { if(!svgRef.current) return; setHover({i:getIdx(e.clientX, svgRef.current.getBoundingClientRect())}); };
-  const onTouch = e => { e.preventDefault(); if(!svgRef.current) return; const t=e.touches[0]||e.changedTouches[0]; setHover({i:getIdx(t.clientX, svgRef.current.getBoundingClientRect())}); };
+  const _tm3=useRef(false),_ts3=useRef(0);
+  const onTouch = e => { e.preventDefault(); if(!svgRef.current) return; const t=e.touches[0]||e.changedTouches[0]; if(e.type==="touchstart"){_tm3.current=false;_ts3.current=t.clientX;}else{_tm3.current=Math.abs(t.clientX-_ts3.current)>4;} setHover({i:getIdx(t.clientX, svgRef.current.getBoundingClientRect())}); };
+  const onTouchEnd1=ev=>{ev.preventDefault();if(!_tm3.current)setHover(null);};
 
   const mkLine=(vals,col,bold)=>{
     const pts=vals.map((v,i)=>v!=null?`${px(i)},${py(v)}`:null).filter(Boolean).join(" ");
@@ -2907,7 +2926,7 @@ function GdbCompareChartGDB({onTFChange}){
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H+20}`}
         style={{overflow:"visible",touchAction:"none",userSelect:"none"}}
         onMouseMove={onMove} onMouseLeave={()=>setHover(null)}
-        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={()=>setHover(null)}>
+        onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={onTouchEnd1}>
         {gridVals.map((v,i)=>(
           <g key={i}>
             <line x1={PL} y1={py(v)} x2={W-PR} y2={py(v)} stroke={C.border} strokeWidth={0.4}/>
@@ -3914,6 +3933,34 @@ function PageData({EFF, hidden}){
         ]:null).filter(Boolean)
       ).reverse(),
     },
+    "STOCKS_M": {
+      label:"Stocks — Stats mensuelles",
+      desc:"P&L mensuel actions depuis 2026",
+      headers:["Année","Mois","BOM €","EOM €","P&L €","Investi €","%"],
+      rows: Object.entries(STOCKS_MONTHLY).flatMap(([yr,d])=>
+        d.m.map((m,i)=>d.bom[i]!=null?[yr,m,
+          d.bom[i]?.toLocaleString("fr-FR"),
+          d.eom[i]?.toLocaleString("fr-FR"),
+          d.pnl[i]!=null?(d.pnl[i]>=0?"+":"")+d.pnl[i]?.toLocaleString("fr-FR"):"-",
+          d.inv?.[i]!=null&&d.inv[i]!==0?(d.inv[i]>0?"+":"")+d.inv[i]?.toLocaleString("fr-FR"):"-",
+          d.pct[i]!=null?((d.pct[i]*100).toFixed(1)+"%"):"-"
+        ]:null).filter(Boolean)
+      ).reverse(),
+    },
+    "TOTAL_M": {
+      label:"Total — Stats mensuelles",
+      desc:"P&L mensuel total portefeuille depuis 2026",
+      headers:["Année","Mois","BOM €","EOM €","P&L €","Investi €","%"],
+      rows: Object.entries(TOTAL_MONTHLY).flatMap(([yr,d])=>
+        d.m.map((m,i)=>d.bom[i]!=null?[yr,m,
+          d.bom[i]?.toLocaleString("fr-FR"),
+          d.eom[i]?.toLocaleString("fr-FR"),
+          d.pnl[i]!=null?(d.pnl[i]>=0?"+":"")+d.pnl[i]?.toLocaleString("fr-FR"):"-",
+          d.inv?.[i]!=null&&d.inv[i]!==0?(d.inv[i]>0?"+":"")+d.inv[i]?.toLocaleString("fr-FR"):"-",
+          d.pct[i]!=null?((d.pct[i]*100).toFixed(1)+"%"):"-"
+        ]:null).filter(Boolean)
+      ).reverse(),
+    },
   };
 
   const currentDB = DATABASES[db];
@@ -4181,13 +4228,174 @@ function App(){
     })();
   },[]);
 
+  // ── Mise à jour des bases de données depuis un snapshot ──────────────────
+  const [snapResult, setSnapResult] = useState(null); // {ok, log, errors, snap, nextData}
+
+  function updateBasesFromSnapshot(snap, src){
+    const log = [], errors = [];
+    const today = snap.d;
+    const usdEur = snap.eur || src.usdEur;
+    const eurUsd = 1/usdEur;
+
+    // ── Valeurs live du snapshot ───────────────────────────────────────────
+    const btcLive  = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || src.btcPrice;
+    const cryptoEUR= snap.wallet_crypto || Math.round((src.crypto?.total||0)*usdEur);
+    const totalEUR = snap.ao || src.totalEUR;
+    const gdbS     = snap.gdbs || src.gdbS;
+    const gdbC     = snap.gdbc || src.gdbC;
+    const GS_JAN   = 11.7681;
+    const MONTHS_FR= ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
+
+    // ── 1. Mise à jour DD ─────────────────────────────────────────────────
+    let newDD = [...DD];
+    const lastDD = newDD[newDD.length-1];
+    const newRow = [today, cryptoEUR, totalEUR, btcLive, gdbS, usdEur];
+    if(lastDD?.[0] === today){
+      newDD[newDD.length-1] = newRow;
+      log.push("✓ DD : ligne du jour mise à jour");
+    } else if(today > (lastDD?.[0]||"")){
+      newDD.push(newRow);
+      newDD.sort((a,b)=>a[0].localeCompare(b[0]));
+      log.push("✓ DD : nouvelle ligne ajoutée ("+today+")");
+    } else {
+      errors.push("DD : date "+today+" < dernière date "+lastDD?.[0]);
+    }
+
+    // ── 2. Mise à jour GDBS ───────────────────────────────────────────────
+    let newGDBS = [...GDBS];
+    if(gdbS && gdbC){
+      const lastG = newGDBS[newGDBS.length-1];
+      const gRow  = [today, gdbS, gdbC];
+      if(lastG?.[0]===today) newGDBS[newGDBS.length-1]=gRow;
+      else { newGDBS.push(gRow); newGDBS.sort((a,b)=>a[0].localeCompare(b[0])); }
+      log.push("✓ GDBS : mis à jour (GDB.S="+gdbS+", GDB.C="+gdbC+")");
+    } else errors.push("GDBS : gdbS ou gdbC manquant");
+
+    // ── 3. Mise à jour GC_FULL ────────────────────────────────────────────
+    let newGC = [...GC_FULL];
+    if(gdbC){
+      const lastGC = newGC[newGC.length-1];
+      const gcRow  = [today, gdbC];
+      if(lastGC?.[0]===today) newGC[newGC.length-1]=gcRow;
+      else { newGC.push(gcRow); newGC.sort((a,b)=>a[0].localeCompare(b[0])); }
+      log.push("✓ GC_FULL : mis à jour");
+    }
+
+    // ── 4. Mise à jour GS_B100_EXT ────────────────────────────────────────
+    let newGSB = [...GS_B100_EXT];
+    if(gdbS){
+      const gsb = round2(gdbS/GS_JAN*100);
+      const lastGSB = newGSB[newGSB.length-1];
+      const gsbRow  = [today, gsb];
+      if(lastGSB?.[0]===today) newGSB[newGSB.length-1]=gsbRow;
+      else { newGSB.push(gsbRow); newGSB.sort((a,b)=>a[0].localeCompare(b[0])); }
+      log.push("✓ GS_B100_EXT : mis à jour ("+gsb+")");
+    }
+
+    // ── 5. Monthly : helper générique ─────────────────────────────────────
+    function updateMonthly(base, liveEOM, year, monthIdx, inv=0){
+      const m = MONTHS_FR[monthIdx];
+      const updated = {...base};
+      if(!updated[year]){
+        // Nouvelle année
+        updated[year] = { m:MONTHS_FR.map((_,i)=>i<=monthIdx?m:null).filter(Boolean),
+          bom:[liveEOM,...Array(11).fill(null)],eom:[liveEOM,...Array(11).fill(null)],
+          pct:[0,...Array(11).fill(null)],pnl:[0,...Array(11).fill(null)],
+          inv:[inv,...Array(11).fill(null)],ttl_pnl:0,ttl_pct:0 };
+        return updated;
+      }
+      const d = {...updated[year]};
+      const months = d.m || MONTHS_FR;
+      const mi = months.indexOf(m);
+      if(mi >= 0){
+        // Mois existant → mise à jour EOM
+        const bom = d.bom[mi] || liveEOM;
+        const pnl = Math.round(liveEOM - bom - (d.inv?.[mi]||0));
+        const pct = bom ? round2(pnl/bom) : 0;
+        d.eom = [...d.eom]; d.eom[mi] = liveEOM;
+        d.pnl = [...d.pnl]; d.pnl[mi] = pnl;
+        d.pct = [...d.pct]; d.pct[mi] = pct;
+      } else {
+        // Nouveau mois dans l'année existante
+        const prevEOM = d.eom.filter(v=>v!=null).slice(-1)[0] || liveEOM;
+        const mi2 = monthIdx;
+        d.m    = [...d.m]; d.m[mi2]=m;
+        d.bom  = [...d.bom]; d.bom[mi2]=prevEOM;
+        d.eom  = [...d.eom]; d.eom[mi2]=liveEOM;
+        const pnl2 = Math.round(liveEOM-prevEOM-inv);
+        d.pnl  = [...d.pnl]; d.pnl[mi2]=pnl2;
+        d.pct  = [...d.pct]; d.pct[mi2]=pnl2/prevEOM;
+        d.inv  = [...(d.inv||[])]; d.inv[mi2]=inv;
+      }
+      d.ttl_pnl = d.pnl.filter(v=>v!=null).reduce((s,v)=>s+v,0);
+      updated[year] = d;
+      return updated;
+    }
+
+    const todayD = new Date(today);
+    const year   = String(todayD.getFullYear());
+    const monthI = todayD.getMonth();
+
+    // ── 6. CRYPTO_MONTHLY ─────────────────────────────────────────────────
+    let newCM = updateMonthly({...CRYPTO_MONTHLY}, cryptoEUR, year, monthI);
+    log.push("✓ CRYPTO_MONTHLY : mis à jour ("+year+" "+MONTHS_FR[monthI]+" EOM=€"+cryptoEUR+")");
+
+    // ── 7. STOCKS_MONTHLY ─────────────────────────────────────────────────
+    const stocksEUR = Math.round((src.stocks?.items||[]).filter(x=>x.cat!=="Cash"&&x.cat!=="Cash Matelas").reduce((s,x)=>s+(x.val||0),0)*usdEur);
+    let newSM = updateMonthly({...STOCKS_MONTHLY}, stocksEUR, year, monthI);
+    log.push("✓ STOCKS_MONTHLY : mis à jour (€"+stocksEUR+")");
+
+    // ── 8. TOTAL_MONTHLY ──────────────────────────────────────────────────
+    const totalLiveEUR = Math.round(totalEUR);
+    let newTM = updateMonthly({...TOTAL_MONTHLY}, totalLiveEUR, year, monthI);
+    log.push("✓ TOTAL_MONTHLY : mis à jour (€"+totalLiveEUR+")");
+
+    // ── 9. Portfolio / Crypto / Stocks dans CURRENT (via snap) ───────────
+    log.push("✓ _portfolio : sauvegardé avec date "+today);
+
+    return {
+      ok: errors.length===0, log, errors,
+      newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM,
+    };
+  }
+
   const addSnap=useCallback(async snap=>{
-    // v7: granularité journalière — remplace le point du même jour, conserve tous les autres
+    const result = updateBasesFromSnapshot(snap, EFF||CURRENT);
+
+    // Sauvegarder dans chartData (snapshots journaliers)
     const next=[...chartData.filter(r=>r.d!==snap.d),snap]
       .sort((a,b)=>a.d.localeCompare(b.d));
     setChartData(next);
-    await save(SK.chart,next);
-  },[chartData]);
+
+    // Afficher l'écran de résultat AVANT l'upload Cloudflare
+    setSnapResult({...result, snap, next, pendingUpload:true});
+  },[chartData, EFF]);
+
+  const doSnapUpload = useCallback(async()=>{
+    if(!snapResult) return;
+    const {next, newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM} = snapResult;
+    const uploadLog = [], uploadErrors = [];
+
+    try {
+      await save(SK.chart, next);
+      uploadLog.push("✓ Cloudflare : snapshots sauvegardés");
+    } catch(e){ uploadErrors.push("✗ Cloudflare snapshots : "+e.message); }
+
+    // Les bases statiques DD/GDBS/etc. sont dans le code — on les stocke aussi dans KV
+    // pour que la prochaine session puisse les lire si plus récentes
+    try {
+      await save("gdb_dd",     newDD);
+      await save("gdb_gdbs",   newGDBS);
+      await save("gdb_gc",     newGC);
+      await save("gdb_gsb",    newGSB);
+      await save("gdb_cm",     newCM);
+      await save("gdb_sm",     newSM);
+      await save("gdb_tm",     newTM);
+      uploadLog.push("✓ Cloudflare : bases de données sauvegardées (DD, GDBS, GC, Monthly)");
+    } catch(e){ uploadErrors.push("✗ Cloudflare bases : "+e.message); }
+
+    setSnapResult(prev=>({...prev, pendingUpload:false, uploadLog, uploadErrors, uploadDone:true}));
+  },[snapResult]);
 
   const addTxn=useCallback(async t=>{
     const next=[t,...txns];setTxns(next);await save(SK.txns,next);
@@ -4374,6 +4582,68 @@ function App(){
         </div>
       )}
       {showSnap&&<SnapshotModal onSave={addSnap} onClose={()=>setShowSnap(false)} EFF={EFF}/>}
+
+      {/* ── Écran résultat snapshot ── */}
+      {snapResult&&(
+        <div style={{position:"fixed",inset:0,zIndex:700,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={snapResult.uploadDone?()=>setSnapResult(null):undefined}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            background:C.bg1,borderRadius:"20px 20px 0 0",padding:"20px 16px 40px",
+            width:"100%",maxWidth:430,border:`1px solid ${C.border}`,maxHeight:"80vh",overflowY:"auto",
+          }}>
+            <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
+
+            {/* Titre */}
+            <div style={{fontSize:14,fontWeight:800,color:snapResult.ok?C.green:C.red,marginBottom:12}}>
+              {snapResult.ok?"✅ Bases de données mises à jour":"⚠️ Erreurs lors de la mise à jour"}
+            </div>
+
+            {/* Log */}
+            <div style={{background:C.bg2,borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:5}}>
+              {snapResult.log.map((l,i)=>(
+                <div key={i} style={{fontSize:10,color:C.green,fontFamily:"monospace"}}>{l}</div>
+              ))}
+              {snapResult.errors.map((e,i)=>(
+                <div key={i} style={{fontSize:10,color:C.red,fontFamily:"monospace"}}>{e}</div>
+              ))}
+            </div>
+
+            {/* Résultat upload si fait */}
+            {snapResult.uploadDone&&(
+              <div style={{background:C.bg2,borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:5}}>
+                {(snapResult.uploadLog||[]).map((l,i)=>(
+                  <div key={i} style={{fontSize:10,color:C.green,fontFamily:"monospace"}}>{l}</div>
+                ))}
+                {(snapResult.uploadErrors||[]).map((e,i)=>(
+                  <div key={i} style={{fontSize:10,color:C.red,fontFamily:"monospace"}}>{e}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Boutons */}
+            {snapResult.pendingUpload&&!snapResult.uploadDone&&(
+              <button onClick={doSnapUpload} style={{
+                width:"100%",padding:"12px 0",borderRadius:10,marginBottom:8,
+                background:C.green,border:"none",color:"#000",fontSize:13,fontWeight:800,cursor:"pointer",
+              }}>☁︎ Envoyer sur Cloudflare</button>
+            )}
+            {snapResult.pendingUpload&&!snapResult.uploadDone&&(
+              <button onClick={()=>setSnapResult(null)} style={{
+                width:"100%",padding:"10px 0",borderRadius:10,
+                background:"transparent",border:`1px solid ${C.border}`,
+                color:C.gray,fontSize:12,cursor:"pointer",
+              }}>Ignorer — fermer</button>
+            )}
+            {snapResult.uploadDone&&(
+              <button onClick={()=>setSnapResult(null)} style={{
+                width:"100%",padding:"12px 0",borderRadius:10,
+                background:C.bg2,border:`1px solid ${C.green}`,
+                color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",
+              }}>Fermer</button>
+            )}
+          </div>
+        </div>
+      )}
       {showTheme&&(
         <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowTheme(false)}>

@@ -466,12 +466,35 @@ function applyTrade(trade, currentEFF){
   const totalUSD     = cryptoTotal + stocksTotal + bankUSD + cashStocks;
   const totalEUR     = Math.round(totalUSD * usdEur);
 
+  /* ── Mise à jour portfolio.items (structure unifiée) ── */
+  let portfolioItems = null;
+  if(src.portfolio?.items){
+    portfolioItems = src.portfolio.items.map(item=>{
+      // Cash Matelas : quantité = montant€, inchangé par les trades
+      if(item.cat==="Cash Matelas"){
+        if(bankAccount && bankAccount===item.t){
+          const tradeEUR = Math.round(tradeUSD * usdEur);
+          const newValEUR = isBuy ? Math.max(0,(item.valEUR||item.qty)-tradeEUR) : (item.valEUR||item.qty)+tradeEUR;
+          const newValUSD = Math.round(newValEUR * (src.eurUsd||1/usdEur));
+          return {...item, qty:newValEUR, valEUR:newValEUR, val:newValUSD};
+        }
+        return item;
+      }
+      // Crypto/Stocks : mettre à jour depuis cryptoItems/stocksItems
+      const updated = [...cryptoItems, ...stocksItems].find(x=>x.t===item.t);
+      if(!updated) return item;
+      return {...item, qty:updated.qty, pa:updated.pa, val:updated.val, pnl:updated.pnl, pct:updated.pct,
+              valEUR:Math.round(updated.val*usdEur)};
+    });
+  }
+
   return {
     ...src,
     totalUSD, totalEUR,
     crypto: {...src.crypto, total: cryptoTotal, items: cryptoItems},
     stocks: {...src.stocks, total: stocksTotal + cashStocks, items: stocksItems},
     bank,
+    ...(portfolioItems ? {portfolio:{...src.portfolio, items:portfolioItems}} : {}),
   };
 }
 
@@ -1285,7 +1308,10 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
    Right axis (montant en €/$ selon eur)         : Patrimoine total
    La valeur finale = exactement celle affichée en haut
 ═══════════════════════════════════════════════════════════ */
-function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData}){
+function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC}){
+  const _DD=liveDD||DD;
+  const _GDBS=liveGDBS||GDBS;
+  const _GC=liveGC||GC_FULL;
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);
   const [full, setFull] = useState(false);
@@ -1311,18 +1337,18 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData}){
   const cut = tfCut[tf] || "2026-01-01";
 
   // ── Séries enrichies avec le point live ──────────────────────────────────
-  // GDBS étendu avec le point live si sa date > dernier point GDBS
-  const gdbs_last = GDBS[GDBS.length-1]?.[0] || "2026-01-01";
+  // _GDBS étendu avec le point live si sa date > dernier point _GDBS
+  const gdbs_last = _GDBS[_GDBS.length-1]?.[0] || "2026-01-01";
   const gdbs_ext = today > gdbs_last
-    ? [...GDBS, [today, gsLive, gcLive]]
-    : GDBS.map(r=>r[0]===today ? [today, gsLive, gcLive] : r);
+    ? [..._GDBS, [today, gsLive, gcLive]]
+    : _GDBS.map(r=>r[0]===today ? [today, gsLive, gcLive] : r);
 
   // PORT_B100 étendu avec le point live
-  // ── Portfolio : utilise DD directement (col 2 = total hors immo €)
-  const dd_last = DD[DD.length-1]?.[0] || "2026-01-01";
+  // ── Portfolio : utilise _DD directement (col 2 = total hors immo €)
+  const dd_last = _DD[_DD.length-1]?.[0] || "2026-01-01";
   const dd_ext = today > dd_last
-    ? [...DD, [today, null, portTodayEUR, null, null]]
-    : DD.map(r=>r[0]===today ? [today, r[1], portTodayEUR, r[3], r[4]] : r);
+    ? [..._DD, [today, null, portTodayEUR, null, null]]
+    : _DD.map(r=>r[0]===today ? [today, r[1], portTodayEUR, r[3], r[4]] : r);
 
   const gSlice = gdbs_ext.filter(r => r[0] >= cut && r[0] <= today);
   const ddSlice = dd_ext.filter(r => r[0] >= cut && r[0] <= today && r[2] != null);
@@ -1337,15 +1363,15 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData}){
   const gsB = gSlice.map(r => round2(r[1] / gs0 * 100));
   const gcB = gSlice.map(r => round2(r[2] / gc0 * 100));
 
-  /* ── Portfolio → valeurs absolues depuis DD (€), converties si $ ── */
+  /* ── Portfolio → valeurs absolues depuis _DD (€), converties si $ ── */
   const ddByDate = {};
   ddSlice.forEach(r => { ddByDate[r[0]] = r[2]; });
-  // Pour les dates sans point DD exact, cherche le plus proche précédent
+  // Pour les dates sans point _DD exact, cherche le plus proche précédent
   const portAbs = dates.map(d => {
-    const eur_val = ddByDate[d] ?? DD.reduceRight((a,r)=>a!=null?a:(r[0]<=d&&r[2]!=null?r[2]:null),null);
+    const eur_val = ddByDate[d] ?? _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=d&&r[2]!=null?r[2]:null),null);
     if(eur_val==null) return null;
-    // Use historical usdEur from DD[5] if available, otherwise from chartData snapshot, else src rate
-    const ddRow_full = DD.find(r=>r[0]===d);
+    // Use historical usdEur from _DD[5] if available, otherwise from chartData snapshot, else src rate
+    const ddRow_full = _DD.find(r=>r[0]===d);
     const snap_eur = chartData?.find(s=>s.d===d)?.eur;
     const hist_usdEur = ddRow_full?.[5] || snap_eur || src.usdEur;
     const hist_eurUsd = 1 / hist_usdEur;
@@ -1589,14 +1615,14 @@ function PerfStrip({eur, EFF}){
   const rate = _src.eurUsd;
   const pnl = (v) => eur ? v : Math.round(v * rate);
   const cur  = eur ? "€" : "$";
-  // P&L calculés depuis DD col 2 (total hors immo €)
+  // P&L calculés depuis _DD col 2 (total hors immo €)
   const _ddAt = days => {
     const t=new Date(); t.setDate(t.getDate()-days);
     const ds=t.toISOString().slice(0,10);
-    return DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
+    return _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
   };
-  // _aoNow = valeur live si refreshée (EFF), sinon dernier point DD
-  const _ddLast = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
+  // _aoNow = valeur live si refreshée (EFF), sinon dernier point _DD
+  const _ddLast = _DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
   const _aoNow  = _src.totalEUR || _ddLast; // EFF.totalEUR prioritaire après refresh
   const _ao1j  = _ddAt(1)   ?? _aoNow;
   const _ao1s  = _ddAt(7)   ?? _aoNow;
@@ -1610,18 +1636,18 @@ function PerfStrip({eur, EFF}){
     { label:"6M",  pnl:pnl(Math.round(_aoNow-_ao6m)), pct:_ao6m?(_aoNow-_ao6m)/_ao6m:0 },
     { label:"1A",  pnl:pnl(Math.round(_aoNow-_ao1y)), pct:_ao1y?(_aoNow-_ao1y)/_ao1y:0 },
   ];
-  // Perfs GDB.C / GDB.S depuis GDBS
+  // Perfs GDB.C / GDB.S depuis _GDBS
   const _gdbsAt = days => {
     const t=new Date(); t.setDate(t.getDate()-days);
     const ds=t.toISOString().slice(0,10);
-    return GDBS.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
+    return _GDBS.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
   };
   const _gcNow = calcGdbPrices(_src).gdbC;
   const _gsNow = calcGdbPrices(_src).gdbS;
   const _gcPerf = d => { const r=_gdbsAt(d); return r&&r[2]?parseFloat((_gcNow/r[2]-1).toFixed(4)):null; };
   const _gsPerf = d => { const r=_gdbsAt(d); return r&&r[1]?parseFloat((_gsNow/r[1]-1).toFixed(4)):null; };
-  // GDB prices depuis GDBS
-  const _gdbs26 = GDBS.filter(r=>r[0]>='2026-01-01');
+  // GDB prices depuis _GDBS
+  const _gdbs26 = _GDBS.filter(r=>r[0]>='2026-01-01');
   const {gdbS: _gsT, gdbC: _gcT} = calcGdbPrices(EFF||CURRENT);
   const gcPrice = eur ? (_gcT * (EFF||CURRENT).usdEur).toFixed(2) : _gcT.toFixed(2);
   const gsPrice = eur ? (_gsT * (EFF||CURRENT).usdEur).toFixed(2) : _gsT.toFixed(2);
@@ -1820,7 +1846,7 @@ function buildPortfolio(src){
       valEUR:v, pnl:0, pct:0,
     })),
   ];
-  return { date: src.crypto?.date || DD[DD.length-1]?.[0], items };
+  return { date: src.crypto?.date || _DD[_DD.length-1]?.[0], items };
 }
 
 function buildSections(L){
@@ -1965,7 +1991,9 @@ function buildSections(L){
 /* ═══════════════════════════════════════════════════════════
    PAGE OVERVIEW
 ═══════════════════════════════════════════════════════════ */
-function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync}){
+function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC}){
+  const _DD_PO=liveDD||DD;
+  const _CM_PO=liveCM||CRYPTO_MONTHLY;
   const [chartTF, setChartTF] = useState("YTD");
   const [sparkData, setSparkData] = useState([]);
   const cur = eur ? "€" : "$";
@@ -2000,7 +2028,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
                 ? fromSnapshot
                   ? (d=>{const dt=new Date(d.replace("snapshot ","")); const m=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"][dt.getMonth()]; return `ACTU HISTO ${String(dt.getDate()).padStart(2,"0")} - ${m} - ${String(dt.getFullYear()).slice(2)} 📂`;})(refreshedAt)
                   : "ACTU "+refreshedAt+" ⟳"
-                : (DD[DD.length-1]?.[0] || CURRENT.date)}
+                : (_DD_PO[_DD_PO.length-1]?.[0] || CURRENT.date)}
             </div>
             <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.green}}>
               {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
@@ -2055,27 +2083,27 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           const _cur2 = eur ? "€" : "$";
 
           // Valeur portefeuille courante (col 2 = total hors immo €)
-          const _ddLast2 = DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
+          const _ddLast2 = _DD_PO.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
           const _now = _src2.totalEUR || _ddLast2; // EFF.totalEUR prioritaire après refresh
 
           // Valeur à une date donnée (jours en arrière)
           const _ddAt2 = days => {
             const t=new Date(); t.setDate(t.getDate()-days);
             const ds=t.toISOString().slice(0,10);
-            return DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
+            return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
           };
           const _at = d => _ddAt2(d) ?? _now;
 
           // Capital investi sur la période = somme des inv mensuels entre cutoff et aujourd'hui
-          // Sources: CRYPTO_MONTHLY.inv + STOCKS_MONTHLY.inv
+          // Sources: _CM_PO.inv + STOCKS_MONTHLY.inv
           const _invInPeriod = days => {
             const t=new Date(); t.setDate(t.getDate()-days);
             const cutDs=t.toISOString().slice(0,10);
             const months=["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
             let total=0;
             // Parcourir toutes les années disponibles
-            for(const yr of Object.keys(CRYPTO_MONTHLY)){
-              const d=CRYPTO_MONTHLY[yr];
+            for(const yr of Object.keys(_CM_PO)){
+              const d=_CM_PO[yr];
               if(!d) continue;
               d.m.forEach((m,i)=>{
                 const mDate=`${yr}-${String(months.indexOf(m)+1).padStart(2,"0")}-01`;
@@ -2204,7 +2232,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
 
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
-      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData}/>
+      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC}/>
 
       {/* Version discrète */}
       <div style={{
@@ -4038,6 +4066,14 @@ function PageData({EFF, hidden}){
 function App(){
   const[tab,setTab]=useState(0);
   const[chartData,setChartData]=useState(CHART_MONTHLY);
+  // Séries temporelles en state pour pouvoir les muter après snapshot/refresh
+  const[liveDD,setLiveDD]=useState(DD);
+  const[liveGDBS,setLiveGDBS]=useState(GDBS);
+  const[liveGC,setLiveGC]=useState(GC_FULL);
+  const[liveGSB,setLiveGSB]=useState(GS_B100_EXT);
+  const[liveCM,setLiveCM]=useState(CRYPTO_MONTHLY);
+  const[liveSM,setLiveSM]=useState(STOCKS_MONTHLY);
+  const[liveTM,setLiveTM]=useState(TOTAL_MONTHLY);
   const[txns,setTxns]=useState(SEED_TXNS);
   const[ready,setReady]=useState(false);
   const[showSnap,setShowSnap]=useState(false);
@@ -4089,6 +4125,35 @@ function App(){
       const liveUsdEur = 1 / liveEurUsd;
       const updated = applyPrices(prices, liveUsdEur);
       setLive({...updated, eurUsd: liveEurUsd, usdEur: liveUsdEur, errors:prices.errors});
+
+      // Mettre à jour le point du JOUR dans DD et GDBS avec les prix refreshés
+      const todayStr = new Date().toISOString().slice(0,10);
+      const cryptoEUR_refresh = Math.round((updated.crypto?.total||0)*liveUsdEur);
+      const totalEUR_refresh   = updated.totalEUR;
+      const gdbSCalc = updated.gdbS || CURRENT.gdbS;
+      const gdbCCalc = updated.gdbC || CURRENT.gdbC;
+      const btcRefresh = updated.btcPrice || CURRENT.btcPrice;
+
+      setLiveDD(prev => {
+        const last = prev[prev.length-1];
+        const newRow = [todayStr, cryptoEUR_refresh, totalEUR_refresh, btcRefresh, gdbSCalc, liveUsdEur];
+        if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
+        return [...prev, newRow];
+      });
+      if(gdbSCalc && gdbCCalc){
+        setLiveGDBS(prev => {
+          const last = prev[prev.length-1];
+          const newRow = [todayStr, gdbSCalc, gdbCCalc];
+          if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
+          return [...prev, newRow];
+        });
+        setLiveGC(prev => {
+          const last = prev[prev.length-1];
+          const newRow = [todayStr, gdbCCalc];
+          if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
+          return [...prev, newRow];
+        });
+      }
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
       // Rapport détaillé : succès et échecs
@@ -4122,7 +4187,7 @@ function App(){
     bank:      live.bank,
   } : CURRENT;
 
-  const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync};
+  const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync, liveDD, liveGDBS, liveGC, liveGSB, liveCM};
 
   useEffect(()=>{
     (async()=>{
@@ -4368,6 +4433,14 @@ function App(){
     setChartData(next);
 
     // Afficher l'écran de résultat AVANT l'upload Cloudflare
+    // Mettre à jour les états React des séries — les graphiques voient les nouvelles valeurs immédiatement
+    setLiveDD(result.newDD);
+    setLiveGDBS(result.newGDBS);
+    setLiveGC(result.newGC);
+    setLiveGSB(result.newGSB);
+    setLiveCM(result.newCM);
+    setLiveSM(result.newSM);
+    setLiveTM(result.newTM);
     setSnapResult({...result, snap, next, pendingUpload:true});
   },[chartData, EFF]);
 
@@ -4480,7 +4553,7 @@ function App(){
         </div>
       </div>
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}

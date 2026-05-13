@@ -526,29 +526,25 @@ async function fetchAllPrices(){
 }
 
 /* Apply fetched prices to CURRENT and return updated totals */
-function applyPrices(prices, usdEur){
-  const rate = usdEur || CURRENT.usdEur;
+function applyPrices(prices, usdEur, effSrc){
+  const src  = effSrc || CURRENT;  // ← utilise EFF live, pas CURRENT statique
+  const rate = usdEur || src.usdEur;
   const eurUsd = 1 / rate;
-  // Tickers cotés en € (bourse EU) — le prix récupéré est en €, on convertit en $
   const EUR_TICKERS = new Set(["AVIO", "AI", "GOLD"]);
 
-  /* Updated stocks items */
-  const stocksItems = CURRENT.stocks.items.map(item => {
+  /* Updated stocks items — depuis src (EFF live) pour conserver les quantités */
+  const stocksItems = src.stocks.items.map(item => {
     let newLive = prices[item.t];
     if(!newLive) return item;
-    // Conversion € → $ pour les tickers EU
     if(EUR_TICKERS.has(item.t)){
       let priceEUR = newLive;
-      if(priceEUR < 1) priceEUR = priceEUR * 100; // centimes → euros
+      if(priceEUR < 1) priceEUR = priceEUR * 100;
       newLive = parseFloat((priceEUR * eurUsd).toFixed(4));
     }
-    // Sanity checks — si prix aberrant vs CURRENT, on garde CURRENT
-    // (variation max tolérable = ±50% par rapport au dernier prix connu)
     const currentLive = item.live || 1;
     const variation = Math.abs(newLive - currentLive) / currentLive;
     if(variation > 0.5){
-      // Prix trop éloigné — probablement une erreur de proxy
-      console.warn(`Prix aberrant pour ${item.t}: ${newLive} vs current ${currentLive} — ignoré`);
+      console.warn(`Prix aberrant pour ${item.t}: ${newLive} vs ${currentLive} — ignoré`);
       return item;
     }
     const newVal = Math.round(item.qty * newLive);
@@ -558,65 +554,61 @@ function applyPrices(prices, usdEur){
   });
   const stocksTotal = stocksItems.reduce((s,x)=>s+x.val, 0);
 
-  /* BTC */
-  const btcLive = prices.BTC || CURRENT.crypto.items[0].live;
-  const btcQty  = CURRENT.crypto.items[0].qty;
+  /* BTC — quantité depuis src live */
+  const btcSrc  = src.crypto.items[0];
+  const btcLive = prices.BTC || btcSrc.live;
+  const btcQty  = btcSrc.qty;
+  const btcPa   = btcSrc.pa;
   const btcVal  = Math.round(btcQty * btcLive);
-  const btcPa   = CURRENT.crypto.items[0].pa;
   const btcPnl  = Math.round(btcVal - btcPa * btcQty);
-  const cryptoItems = [{...CURRENT.crypto.items[0], live:btcLive, val:btcVal, pnl:btcPnl, pct:btcPnl/(btcPa*btcQty)}];
+  const cryptoItems = [{...btcSrc, live:btcLive, val:btcVal, pnl:btcPnl, pct:btcPnl/(btcPa*btcQty)}];
   const cryptoTotal = btcVal;
 
-  /* GDB.C et GDB.S — calculés depuis les valeurs réelles du portefeuille */
+  /* GDB.C et GDB.S */
   const tmpEFF = {
-    usdEur: rate, eurUsd: 1/rate, btcPrice: btcLive,
-    crypto: {...CURRENT.crypto, total: cryptoTotal, items: cryptoItems},
-    stocks: {...CURRENT.stocks, total: stocksTotal, items: stocksItems},
-    bank: {...CURRENT.bank},
+    usdEur: rate, eurUsd, btcPrice: btcLive,
+    crypto: {...src.crypto, total: cryptoTotal, items: cryptoItems},
+    stocks: {...src.stocks, total: stocksTotal, items: stocksItems},
+    bank: {...src.bank},
   };
   const {gdbS, gdbC} = calcGdbPrices(tmpEFF);
 
-  /* Bank stays unchanged */
-  const bankUSD = Math.round(CURRENT.bank.totalEUR / rate);
+  /* Bank stays in EUR — converti en $ au taux live */
+  const bankUSD = Math.round(src.bank.totalEUR * eurUsd);
 
-  /* Total = somme des 3 catégories → cohérent avec buildSections */
+  /* Totaux */
   const totalUSD = cryptoTotal + stocksTotal + bankUSD;
   const totalEUR = Math.round(totalUSD * rate);
 
-  // Mettre à jour portfolio.items si présent
+  /* Portfolio.items mis à jour */
+  const newEurUsd = eurUsd;
   let portfolioItems = null;
-  const newEurUsd = 1 / (prices.EURUSD || CURRENT.usdEur); // taux live après refresh
-  if(CURRENT.portfolio?.items){
-    portfolioItems = CURRENT.portfolio.items.map(item=>{
-      const newLive = stocksItems.find(s=>s.t===item.t)?.live
-                   || cryptoItems.find(c=>c.t===item.t)?.live
-                   || (item.cat==="Cash Matelas" ? newEurUsd  // live = taux eurUsd actuel
-                   :   item.live);
-      // Cash Matelas : qty = montant€, val$ = qty * eurUsd (pas usdEur !)
+  if(src.portfolio?.items){
+    portfolioItems = src.portfolio.items.map(item=>{
+      const newLive = cryptoItems.find(c=>c.t===item.t)?.live
+                   || stocksItems.find(s=>s.t===item.t)?.live
+                   || (item.cat==="Cash Matelas" ? newEurUsd : item.live);
       const newVal = item.cat==="Cash Matelas"
         ? Math.round(item.qty * newEurUsd)
         : Math.round((item.qty||1) * newLive);
       const newPnl = item.cat==="Cash Matelas" ? 0
         : Math.round(newVal - (item.pa||0)*(item.qty||1));
       return {
-        ...item,
-        live:   newLive,
-        val:    newVal,
-        pnl:    newPnl,
-        valEUR: item.cat==="Cash Matelas" ? item.valEUR  // valEUR inchangé (montant banque fixe)
-              : Math.round(newVal * (prices.EURUSD||CURRENT.usdEur)),
+        ...item, live: newLive, val: newVal, pnl: newPnl,
+        valEUR: item.cat==="Cash Matelas" ? item.valEUR : Math.round(newVal * rate),
       };
     });
   }
 
   return {
-    usdEur: rate, eurUsd: 1/rate,
+    usdEur: rate, eurUsd,
     totalUSD, totalEUR,
     btcPrice: btcLive,
     gdbC, gdbS,
-    crypto: {...CURRENT.crypto, total: cryptoTotal, items: cryptoItems},
-    stocks: {...CURRENT.stocks, total: stocksTotal, items: stocksItems},
-    bank:   {...CURRENT.bank},
+    crypto: {...src.crypto, total: cryptoTotal, items: cryptoItems},
+    stocks: {...src.stocks, total: stocksTotal, items: stocksItems},
+    bank:   {...src.bank},
+    ...(portfolioItems ? {portfolio: {...src.portfolio, items: portfolioItems}} : {}),
   };
 }
 
@@ -1154,8 +1146,9 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
   const cur   = eur ? "€" : "$";
   const fmtV  = v => cur + fmtK(Math.abs(cv(v)));
   const fmtP2 = v => { const n=parseFloat(v); return isNaN(n)?"—":(n>=0?"+":"")+cur+fmtK(Math.abs(cvPnl(n))); };
-  const fmtLive = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+(n*usdEur).toFixed(2) : "$"+n.toFixed(2)); };
-  const fmtPA   = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+(n*usdEur).toFixed(2) : "$"+n.toFixed(2)); };
+  const fmtPrice = (n, rate=1) => { const v=n*rate; return v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2); };
+  const fmtLive = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+fmtPrice(n,usdEur) : "$"+fmtPrice(n)); };
+  const fmtPA   = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+fmtPrice(n,usdEur) : "$"+fmtPrice(n)); };
 
   return(
     <div style={{marginBottom:6}}>
@@ -1900,7 +1893,7 @@ function buildSections(L){
         detail: `${x.qty} BTC · $${x.live.toLocaleString("fr-FR")}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
-        pa: x.pa.toLocaleString("fr-FR"), live: x.live.toLocaleString("fr-FR"),
+        pa: x.pa, live: x.live,
         qty: x.qty, investi: x.pa*x.qty,
       })),
     },
@@ -1914,7 +1907,7 @@ function buildSections(L){
         detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
-        pa: x.pa.toFixed(2), live: x.live.toFixed(2),
+        pa: x.pa, live: x.live,
         qty: x.qty, investi: x.pa*x.qty,
       })),
     },
@@ -1930,7 +1923,7 @@ function buildSections(L){
         detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
-        pa: x.pa.toFixed(2), live: x.live.toFixed(2),
+        pa: x.pa, live: x.live,
         qty: x.qty, investi: x.pa*x.qty,
       })),
     },
@@ -1944,7 +1937,7 @@ function buildSections(L){
         detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
-        pa: x.pa.toFixed(2), live: x.live.toFixed(2),
+        pa: x.pa, live: x.live,
         qty: x.qty, investi: x.pa*x.qty,
       })),
     },
@@ -4123,7 +4116,7 @@ function App(){
       // applyPrices attend usdEur ($ → €) = 1/eurUsd
       const liveEurUsd = prices.EURUSD || (1/CURRENT.usdEur);
       const liveUsdEur = 1 / liveEurUsd;
-      const updated = applyPrices(prices, liveUsdEur);
+      const updated = applyPrices(prices, liveUsdEur, EFF||CURRENT);
       setLive({...updated, eurUsd: liveEurUsd, usdEur: liveUsdEur, errors:prices.errors});
 
       // Mettre à jour le point du JOUR dans DD et GDBS avec les prix refreshés
@@ -4185,6 +4178,7 @@ function App(){
     crypto:    live.crypto,
     stocks:    live.stocks,
     bank:      live.bank,
+    portfolio: live.portfolio ?? CURRENT.portfolio,
   } : CURRENT;
 
   const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync, liveDD, liveGDBS, liveGC, liveGSB, liveCM};

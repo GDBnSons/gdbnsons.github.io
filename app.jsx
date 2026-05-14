@@ -313,11 +313,13 @@ const msk=(val,hidden)=>hidden?"••••":val;
 ═══════════════════════════════════════════════════════════ */
 
 /* Ticker → Yahoo Finance symbol mapping */
-const YF_MAP = {
+let YF_MAP = {
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"GOLD.PA", IBKR:"IBKR",
 };
+// Tickers EU dont le prix est en € → à convertir en $ après fetch
+const EUR_YAHOO_TICKERS_SET = new Set(["AVIO","AI","GOLD"]);
 
 /* Fetch single Yahoo Finance quote via allorigins proxy */
 // Tickers EU passent par le Worker Cloudflare (pas de CORS)
@@ -390,7 +392,7 @@ async function fetchCoinGecko(){
 ═══════════════════════════════════════════════════════════ */
 function applyTrade(trade, currentEFF){
   const src = currentEFF || CURRENT;
-  const {ticker, side, qty, price, bankAccount} = trade;
+  const {ticker, side, qty, price, bankAccount, cat: tradeCatRaw} = trade;
   const isBuy = side.toUpperCase() === "BUY";
   const tradeUSD = qty * price;
   const usdEur = src.usdEur;
@@ -398,6 +400,14 @@ function applyTrade(trade, currentEFF){
   /* ── Mise à jour des stocks items ── */
   let stocksItems = src.stocks.items.map(item => ({...item}));
   const idx = stocksItems.findIndex(x => x.t.toUpperCase() === ticker.toUpperCase());
+
+  // Catégorie du ticker (depuis le trade si fournie, sinon heuristique)
+  const tradeCAT = tradeCatRaw || (
+    ticker === "BTC" ? null :
+    ["QQQ","AIA","JEDI","ROBO","XLE","OIH"].includes(ticker) ? "Indices" :
+    ticker === "GOLD" ? "Or" :
+    ticker === "EURO" ? "Cash" : "Picking"
+  );
 
   if(idx >= 0){
     // Ticker existant — mettre à jour
@@ -417,13 +427,9 @@ function applyTrade(trade, currentEFF){
     stocksItems[idx] = item;
   } else if(isBuy){
     // Nouveau ticker — ajouter
-    const cat = ticker === "BTC" ? null :
-                ["QQQ","AIA","JEDI","ROBO","XLE","OIH"].includes(ticker) ? "Indices" :
-                ticker === "GOLD" ? "Or" :
-                ticker === "EURO" ? "Cash" : "Picking";
-    if(cat) {
+    if(tradeCAT && tradeCAT !== "Crypto") {
       stocksItems.push({
-        t: ticker, cat, qty, pa: price, live: price,
+        t: ticker, cat: tradeCAT, qty, pa: price, live: price,
         val: Math.round(qty * price), pnl: 0, pct: 0,
       });
     }
@@ -446,7 +452,8 @@ function applyTrade(trade, currentEFF){
     bi.pct = bi.pa * bi.qty > 0 ? bi.pnl / (bi.pa * bi.qty) : 0;
     cryptoItems[0] = bi;
   }
-
+  // Supprimer crypto à qty=0
+  cryptoItems = cryptoItems.filter(x => x.qty > 0);
   /* ── Mise à jour contrepartie bancaire ── */
   let bank = {...src.bank, breakdown: {...src.bank.breakdown}};
   if(bankAccount && bankAccount !== "Aucune"){
@@ -456,20 +463,63 @@ function applyTrade(trade, currentEFF){
       ? Math.max(0, current - tradeEUR)
       : current + tradeEUR;
     bank.totalEUR = Object.values(bank.breakdown).reduce((s,v)=>s+v, 0);
+
+    // Si contrepartie = IBKR → mettre à jour l'item EURO (cash IBKR) dans stocksItems
+    // L'item EURO représente le cash sur la plateforme IBKR
+    if(bankAccount === "IBKR"){
+      const euroIdx = stocksItems.findIndex(x=>x.t==="EURO");
+      if(euroIdx >= 0){
+        const euroItem = {...stocksItems[euroIdx]};
+        const eurUsd = 1/usdEur;
+        const newQtyEUR = isBuy
+          ? Math.max(0, euroItem.qty - tradeEUR)
+          : euroItem.qty + tradeEUR;
+        euroItem.qty = newQtyEUR;
+        euroItem.val = Math.round(newQtyEUR * euroItem.live); // live = taux eurUsd
+        euroItem.pnl = Math.round(euroItem.val - euroItem.pa * newQtyEUR);
+        euroItem.valEUR = newQtyEUR;
+        stocksItems[euroIdx] = euroItem;
+      }
+    }
   }
 
   /* ── Recalcul des totaux ── */
   const stocksTotal  = stocksItems.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+x.val, 0);
-  const cryptoTotal  = cryptoItems[0].val;
+  const cryptoTotal  = cryptoItems.reduce((s,x)=>s+x.val, 0);
   const bankUSD      = Math.round(bank.totalEUR / usdEur);
   const cashStocks   = stocksItems.filter(x=>x.cat==="Cash").reduce((s,x)=>s+x.val, 0);
   const totalUSD     = cryptoTotal + stocksTotal + bankUSD + cashStocks;
   const totalEUR     = Math.round(totalUSD * usdEur);
 
+  /* ── Suppression des items à quantité zéro ── */
+  // On mémorise les tickers à zéro AVANT de les supprimer
+  const zeroTickers = new Set([
+    ...stocksItems.filter(x=>x.qty<=0).map(x=>x.t),
+    ...cryptoItems.filter(x=>x.qty<=0).map(x=>x.t),
+  ]);
+  stocksItems = stocksItems.filter(x => x.qty > 0);
+
+  /* ── Ajout du nouveau ticker dans YF_MAP si achat nouveau ticker ── */
+  if(isBuy && idx < 0 && ticker.toUpperCase() !== "BTC"){
+    // Nouveau ticker — on l'ajoute à YF_MAP avec le symbole Yahoo correspondant
+    // Convention : ticker US → tel quel, .MI = Milan, .PA = Paris, .L = London
+    if(!YF_MAP[ticker]){
+      // Heuristique simple — l'utilisateur peut ajuster manuellement
+      YF_MAP[ticker] = ticker;
+      console.info(`Nouveau ticker ${ticker} ajouté à YF_MAP`);
+    }
+  }
+
   /* ── Mise à jour portfolio.items (structure unifiée) ── */
   let portfolioItems = null;
   if(src.portfolio?.items){
-    portfolioItems = src.portfolio.items.map(item=>{
+    portfolioItems = src.portfolio.items
+      .filter(item => {
+        if(item.cat==="Cash Matelas") return true;
+        // Supprimer si le ticker est à qty=0 après le trade
+        return !zeroTickers.has(item.t);
+      })
+      .map(item=>{
       // Cash Matelas : quantité = montant€, inchangé par les trades
       if(item.cat==="Cash Matelas"){
         if(bankAccount && bankAccount===item.t){
@@ -485,6 +535,21 @@ function applyTrade(trade, currentEFF){
       if(!updated) return item;
       return {...item, qty:updated.qty, pa:updated.pa, val:updated.val, pnl:updated.pnl, pct:updated.pct,
               valEUR:Math.round(updated.val*usdEur)};
+    });
+  }
+
+  // Ajouter les nouveaux tickers achetés non encore dans portfolio
+  if(portfolioItems && isBuy){
+    const existing = new Set(portfolioItems.map(x=>x.t));
+    [...cryptoItems, ...stocksItems].forEach(item=>{
+      if(!existing.has(item.t) && item.qty > 0){
+        portfolioItems.push({
+          t:item.t, cat:item.cat||"Picking",
+          qty:item.qty, pa:item.pa, live:item.live,
+          val:item.val, pnl:item.pnl, pct:item.pct,
+          valEUR:Math.round(item.val*(src.usdEur||0.852)),
+        });
+      }
     });
   }
 
@@ -553,7 +618,6 @@ function applyPrices(prices, usdEur, effSrc){
     return {...item, live: newLive, val: newVal, pnl: newPnl, pct: newPct};
   });
   const stocksTotal = stocksItems.reduce((s,x)=>s+x.val, 0);
-
   /* BTC — quantité depuis src live */
   const btcSrc  = src.crypto.items[0];
   const btcLive = prices.BTC || btcSrc.live;
@@ -3210,7 +3274,7 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:sh
   const showAdd    = showAddProp    !== undefined ? showAddProp    : showAddLocal;
   const setShowAdd = setShowAddProp !== undefined ? setShowAddProp : setShowAddLocal;
   const[filter,setFilter]=useState("ALL");
-  const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
+  const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   const fil=txns.filter(t=>filter==="ALL"||t.side.toUpperCase()===filter);
   const pos={};
   txns.forEach(t=>{
@@ -3230,7 +3294,7 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:sh
     onAdd(trade);
     onTradeApplied(trade);
     setShowAdd(false);
-    setForm({date:today(),side:"BUY",ticker:"BTC",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
+    setForm({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   };
 
   return(
@@ -3301,7 +3365,7 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:sh
 ═══════════════════════════════════════════════════════════ */
 function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[mode,setMode]=useState("trade");
-  const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
+  const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
   const[done,setDone]=useState(null); // {type, montant, bank} après succès
@@ -3335,37 +3399,72 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
     const priceUSD = form.currency==="EUR"
       ? parseFloat(form.price)*src.eurUsd
       : parseFloat(form.price);
+    const valoUSD = parseFloat(form.qty)*priceUSD;
+    const valoEUR = Math.round(valoUSD*src.usdEur);
     const trade={...form,qty:parseFloat(form.qty),price:priceUSD,priceRaw:parseFloat(form.price),currency:form.currency,id:uid(),bankAccount:form.bank||"Aucune"};
     onAdd(trade);
     onTradeApplied(trade);
-    onClose();
+    // Afficher écran de confirmation au lieu de fermer immédiatement
+    setDone({type:"trade", side:form.side, ticker:form.ticker, qty:parseFloat(form.qty), valoUSD, valoEUR, bank:form.bank, note:form.note, date:form.date});
   };
 
   return(
     <Modal title="Transaction" onClose={onClose}>
       {done ? (
-        /* ── Écran de succès ── */
-        <div style={{textAlign:"center",padding:"20px 0 10px"}}>
-          <div style={{
-            width:72,height:72,borderRadius:"50%",margin:"0 auto 16px",
-            background:done.type==="retrait"?C.red+"22":C.green+"22",
-            border:`2px solid ${done.type==="retrait"?C.red:C.green}`,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:32,
-          }}>{done.type==="retrait"?"⬆":"⬇"}</div>
-          <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:6}}>
-            {done.type==="retrait"?"Retrait effectué !":"Dépôt effectué !"}
+        /* ── Écran de confirmation après opération ── */
+        <div style={{padding:"8px 0"}}>
+          <div style={{textAlign:"center",marginBottom:16}}>
+            <div style={{fontSize:40,marginBottom:8}}>✅</div>
+            <div style={{fontSize:16,fontWeight:800,color:C.green,marginBottom:4}}>
+              {done.type==="trade"
+                ? (done.side==="BUY" ? "Achat enregistré" : "Vente enregistrée")
+                : done.type==="retrait" ? "Retrait effectué" : "Dépôt effectué"}
+            </div>
+            <div style={{fontSize:12,color:C.text3}}>{done.date}</div>
           </div>
-          <div style={{
-            fontSize:28,fontWeight:900,letterSpacing:-1,marginBottom:6,
-            color:done.type==="retrait"?C.red:C.green,
-          }}>
-            {done.type==="retrait"?"-":"+"}€{fmt(done.montant)}
+          <div style={{background:C.bg2,borderRadius:12,padding:"12px 14px",marginBottom:14,display:"flex",flexDirection:"column",gap:8}}>
+            {done.type==="trade" ? (<>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:12,color:C.text2}}>Ticker</span>
+                <span style={{fontSize:13,fontWeight:800,color:C.text}}>{done.ticker}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:7}}>
+                <span style={{fontSize:12,color:C.text2}}>Quantité</span>
+                <span style={{fontSize:13,fontWeight:700,color:C.text}}>{done.qty}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:7}}>
+                <span style={{fontSize:12,color:C.text2}}>Montant</span>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:done.side==="BUY"?C.red:C.green}}>
+                    {done.side==="BUY"?"-":"+"}${fmt(done.valoUSD)}
+                  </div>
+                  <div style={{fontSize:10,color:C.text3}}>{done.side==="BUY"?"-":"+"}€{fmt(done.valoEUR)}</div>
+                </div>
+              </div>
+              {done.bank&&done.bank!=="Aucune"&&(
+                <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:7}}>
+                  <span style={{fontSize:12,color:C.text2}}>Contrepartie</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.teal}}>{done.bank}</span>
+                </div>
+              )}
+              {done.note&&<div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:7}}>
+                <span style={{fontSize:12,color:C.text2}}>Note</span>
+                <span style={{fontSize:12,color:C.text3}}>{done.note}</span>
+              </div>}
+            </>) : (<>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:12,color:C.text2}}>Banque</span>
+                <span style={{fontSize:13,fontWeight:800,color:C.text}}>{done.bank}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:7}}>
+                <span style={{fontSize:12,color:C.text2}}>Montant</span>
+                <span style={{fontSize:15,fontWeight:800,color:done.type==="retrait"?C.red:C.green}}>
+                  {done.type==="retrait"?"-":"+"}€{fmt(done.montant)}
+                </span>
+              </div>
+            </>)}
           </div>
-          <div style={{fontSize:13,color:C.text3,marginBottom:24}}>
-            {done.bank} · {depot.date}
-          </div>
-          <Btn label="Fermer" onClick={onClose} color={done.type==="retrait"?C.red:C.teal}/>
+          <Btn label="Fermer" onClick={onClose} color={C.green}/>
         </div>
       ) : (
         <>
@@ -3385,8 +3484,15 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={form.date} onChange={v=>setForm({...form,date:v})}/></div>
-            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v})} options={["BUY","SELL"]}/>
-            <FI label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v.toUpperCase()})} placeholder="BTC, ETH..."/>
+            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v,ticker:v==="SELL"?(src.portfolio?.items?.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0)[0]?.t||"BTC"):"BTC"})} options={["BUY","SELL"]}/>
+            {form.side==="SELL" ? (
+              <FS label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v})}
+                options={(src.portfolio?.items||[]).filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)}/>
+            ) : (<>
+              <FI label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v.toUpperCase()})} placeholder="BTC, QQQ..."/>
+              <FS label="Catégorie" value={form.cat} onChange={v=>setForm({...form,cat:v})}
+                options={["Crypto","Indices","Picking","Or","Cash"]}/>
+            </>)}
             <FI label="Quantité" type="number" value={form.qty} onChange={v=>setForm({...form,qty:v})} placeholder="0.01"/>
             <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
             <FS label="Devise" value={form.currency} onChange={v=>setForm({...form,currency:v})} options={["USD","EUR"]}/>
@@ -3884,171 +3990,254 @@ const ICONS=["◎","◑","▲","◈","⇅","⬡"];
 /* ═══════════════════════════════════════════════════════════
    PAGE DATA — Explorateur des bases de données
 ═══════════════════════════════════════════════════════════ */
+
+function CloudKeyList({data}){
+  const CLOUD_KEYS = [
+    {key:"chart",    label:"Snapshots journaliers"},
+    {key:"txns",     label:"Transactions (achats/ventes)"},
+    {key:"gdb_dd",   label:"DD (historique quotidien)"},
+    {key:"gdb_gdbs", label:"GDBS (GDB.C et GDB.S)"},
+    {key:"gdb_gc",   label:"GC_FULL (GDB.C historique)"},
+    {key:"gdb_cm",   label:"CRYPTO_MONTHLY (mensuel crypto)"},
+    {key:"gdb_sm",   label:"STOCKS_MONTHLY (mensuel stocks)"},
+    {key:"gdb_tm",   label:"TOTAL_MONTHLY (mensuel total)"},
+  ];
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {CLOUD_KEYS.map(function(item){
+        const val = data[item.key];
+        const count = Array.isArray(val) ? val.length :
+                      (val && typeof val==="object") ? Object.keys(val).length : 0;
+        const lastItem = Array.isArray(val) && val.length>0 ? val[val.length-1] : null;
+        const last = lastItem ? (lastItem.d || lastItem[0] || "—") : null;
+        const empty = !val || (Array.isArray(val) && val.length===0);
+        return(
+          <div key={item.key} style={{
+            background:C.bg2, borderRadius:10, padding:"10px 12px",
+            border:"1px solid "+(empty?C.border:C.teal+"44"),
+            display:"flex", justifyContent:"space-between", alignItems:"center",
+          }}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{item.label}</div>
+              <div style={{fontSize:9,color:C.gray,fontFamily:"monospace",marginTop:2}}>{"kv/"+item.key}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              {empty
+                ? <span style={{fontSize:10,color:C.gray}}>Vide</span>
+                : <div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.teal}}>{count} entrees</div>
+                    {last && <div style={{fontSize:9,color:C.gray}}>{"--> "+last}</div>}
+                  </div>
+              }
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PageData({EFF, hidden}){
-  const[db,setDb]=useState("DD");
-  const[search,setSearch]=useState("");
+  var db_state = useState("DD");
+  var db = db_state[0]; var setDb = db_state[1];
+  var search_state = useState(""); 
+  var search = search_state[0]; var setSearch = search_state[1];
+  var vm_state = useState("local");
+  var viewMode = vm_state[0]; var setViewMode = vm_state[1];
+  var cd_state = useState(null);
+  var cloudData = cd_state[0]; var setCloudData = cd_state[1];
+  var cl_state = useState(false);
+  var cloudLoading = cl_state[0]; var setCloudLoading = cl_state[1];
+  var ce_state = useState(null);
+  var cloudError = ce_state[0]; var setCloudError = ce_state[1];
 
-  const src = EFF||CURRENT;
-  const usdEur = src.usdEur;
+  var src = EFF || CURRENT;
 
-  const DATABASES = {
+  function doLoadCloud(){
+    setCloudLoading(true);
+    setCloudError(null);
+    fetch(CF_WORKER_URL+"/read", {headers:{"X-Auth-Key":CF_AUTH_KEY}})
+      .then(function(r){
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        return r.json();
+      })
+      .then(function(d){ setCloudData(d); setCloudLoading(false); })
+      .catch(function(e){ setCloudError(e.message); setCloudLoading(false); });
+  }
+
+  function handleViewMode(mode){
+    setViewMode(mode);
+    if(mode==="cloud" && !cloudData && !cloudLoading) doLoadCloud();
+  }
+
+  function getLast(arr){ return (arr && arr.length>0 && arr[arr.length-1]) ? (arr[arr.length-1][0]||"—") : "—"; }
+  function fmt(v){ return v!=null ? v.toLocaleString("fr-FR") : "—"; }
+  function fmtF(v,d){ return v!=null ? v.toFixed(d) : "—"; }
+  function fmtPnl(v){ return v!=null ? (v>=0?"+":"")+v.toLocaleString("fr-FR") : "—"; }
+  function fmtPct(v){ return v!=null ? (v*100).toFixed(1)+"%" : "—"; }
+
+  var portfolioItems = (EFF||CURRENT).portfolio && (EFF||CURRENT).portfolio.items ? (EFF||CURRENT).portfolio.items : [];
+  var portfolioDate  = (EFF||CURRENT).portfolio && (EFF||CURRENT).portfolio.date ? (EFF||CURRENT).portfolio.date : "—";
+
+  var DATABASES = {
     "DD": {
       label:"DD — Historique quotidien",
       desc:"Valeurs quotidiennes depuis 2020 ("+DD.length+" points)",
-      headers:["Date","Crypto €","Total €","BTC $","GDB.S $","usdEur"],
-      rows: DD.slice().reverse().map(r=>[r[0],r[1]?.toLocaleString("fr-FR"),r[2]?.toLocaleString("fr-FR"),r[3]?.toLocaleString("fr-FR"),r[4]?.toFixed(4),r[5]?.toFixed(4)]),
+      headers:["Date","Crypto EUR","Total EUR","BTC $","GDB.S $","usdEur"],
+      rows: DD.slice().reverse().map(function(r){return[r[0],fmt(r[1]),fmt(r[2]),fmt(r[3]),fmtF(r[4],4),fmtF(r[5],6)];}),
     },
     "GDBS": {
       label:"GDBS — Cours GDB.C et GDB.S",
-      desc:"Cours journaliers depuis août 2025 ("+GDBS.length+" points)",
+      desc:"Cours journaliers depuis aout 2025 ("+GDBS.length+" points)",
       headers:["Date","GDB.S $","GDB.C $"],
-      rows: GDBS.slice().reverse().map(r=>[r[0],r[1]?.toFixed(4),r[2]?.toFixed(4)]),
+      rows: GDBS.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4),fmtF(r[2],4)];}),
     },
     "GC_FULL": {
       label:"GC_FULL — Historique GDB.C",
       desc:"Cours GDB.C depuis 2020 ("+GC_FULL.length+" points)",
       headers:["Date","GDB.C $"],
-      rows: GC_FULL.slice().reverse().map(r=>[r[0],r[1]?.toFixed(4)]),
+      rows: GC_FULL.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4)];}),
     },
     "DB": {
       label:"DB — Indices base 100",
       desc:"Indices base 100 depuis 2023 ("+DB.length+" points)",
       headers:["Date","Port","Idx1","Idx2","Idx3","Idx4","Idx5"],
-      rows: DB.slice().reverse().map(r=>[r[0],...r.slice(1).map(v=>v?.toFixed(1))]),
-    },
-    "CRYPTO": {
-      label:"Crypto — Positions actuelles",
-      desc:"Positions crypto ("+src.crypto.items.length+" lignes)",
-      headers:["Ticker","Qté","PA $","Live $","Valeur $","P&L $","P&L %"],
-      rows: src.crypto.items.map(x=>[x.t,x.qty,x.pa?.toFixed(2),x.live?.toFixed(2),"$"+x.val?.toLocaleString("fr-FR"),"$"+(x.pnl>=0?"+":"")+x.pnl?.toLocaleString("fr-FR"),(x.pct*100)?.toFixed(1)+"%"]),
+      rows: DB.slice().reverse().map(function(r){return[r[0]].concat(r.slice(1).map(function(v){return fmtF(v,1);}));}),
     },
     "PORTFOLIO": {
-      label:"Portfolio — Vue unifiée",
-      desc:"Toutes les positions (Crypto + Actions + Banque) au "+((EFF||CURRENT).portfolio?.date||"—"),
-      headers:["Ticker","Catégorie","Qté","Live $","Val $","Val €","P&L $"],
-      rows: ((EFF||CURRENT).portfolio?.items||[]).map(x=>[
-        x.t, x.cat, x.qty?.toFixed?.(x.qty%1?4:0)||x.qty,
-        x.live?.toFixed(2)||"—",
-        x.val?("$"+x.val.toLocaleString("fr-FR")):"—",
-        x.valEUR?(x.valEUR.toLocaleString("fr-FR")+"€"):"—",
-        x.pnl!=null?((x.pnl>=0?"+":"")+"$"+Math.round(Math.abs(x.pnl)).toLocaleString("fr-FR")):"—",
-      ]),
+      label:"Portfolio — Vue unifiee",
+      desc:"Toutes les positions au "+portfolioDate,
+      headers:["Ticker","Cat","Qty","Live $","Val $","Val EUR","P&L $"],
+      rows: portfolioItems.map(function(x){return[x.t,x.cat,x.qty,fmtF(x.live,2),"$"+fmt(x.val),fmt(x.valEUR)+"EUR",fmtPnl(x.pnl)];}),
+    },
+    "CRYPTO": {
+      label:"Crypto — Positions",
+      desc:"Detail crypto live",
+      headers:["Ticker","Qty","PA $","Live $","Val $","P&L $","%"],
+      rows: src.crypto.items.map(function(x){return[x.t,x.qty,fmtF(x.pa,2),fmtF(x.live,0),"$"+fmt(x.val),fmtPnl(x.pnl),fmtPct(x.pct)];}),
     },
     "STOCKS": {
-      label:"Stocks — Positions actuelles",
-      desc:"Positions actions ("+src.stocks.items.length+" lignes)",
-      headers:["Ticker","Cat","Qté","PA $","Live $","Valeur $","P&L $"],
-      rows: src.stocks.items.map(x=>[x.t,x.cat,x.qty,x.pa?.toFixed(2),x.live?.toFixed(2),"$"+x.val?.toLocaleString("fr-FR"),"$"+(x.pnl>=0?"+":"")+x.pnl?.toLocaleString("fr-FR")]),
+      label:"Stocks — Positions",
+      desc:"Detail stocks live",
+      headers:["Ticker","Cat","Qty","PA $","Live $","Val $","P&L $"],
+      rows: src.stocks.items.map(function(x){return[x.t,x.cat,x.qty,fmtF(x.pa,2),fmtF(x.live,2),"$"+fmt(x.val),fmtPnl(x.pnl)];}),
     },
     "MONTHLY": {
-      label:"Monthly — Stats mensuelles crypto",
+      label:"Crypto Monthly",
       desc:"P&L mensuel crypto depuis 2020",
-      headers:["Année","Mois","BOM €","EOM €","P&L €","Investi €","%"],
-      rows: Object.entries(CRYPTO_MONTHLY).flatMap(([yr,d])=>
-        d.m.map((m,i)=>d.bom[i]!=null?[yr,m,
-          d.bom[i]?.toLocaleString("fr-FR"),
-          d.eom[i]?.toLocaleString("fr-FR"),
-          d.pnl[i]!=null?(d.pnl[i]>=0?"+":"")+d.pnl[i]?.toLocaleString("fr-FR"):"-",
-          d.inv?.[i]!=null&&d.inv[i]!==0?(d.inv[i]>0?"+":"")+d.inv[i]?.toLocaleString("fr-FR"):"-",
-          d.pct[i]!=null?((d.pct[i]*100).toFixed(1)+"%"):"-"
-        ]:null).filter(Boolean)
-      ).reverse(),
+      headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
+      rows: (function(){var out=[];Object.entries(CRYPTO_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
     "STOCKS_M": {
-      label:"Stocks — Stats mensuelles",
+      label:"Stocks Monthly",
       desc:"P&L mensuel actions depuis 2026",
-      headers:["Année","Mois","BOM €","EOM €","P&L €","Investi €","%"],
-      rows: Object.entries(STOCKS_MONTHLY).flatMap(([yr,d])=>
-        d.m.map((m,i)=>d.bom[i]!=null?[yr,m,
-          d.bom[i]?.toLocaleString("fr-FR"),
-          d.eom[i]?.toLocaleString("fr-FR"),
-          d.pnl[i]!=null?(d.pnl[i]>=0?"+":"")+d.pnl[i]?.toLocaleString("fr-FR"):"-",
-          d.inv?.[i]!=null&&d.inv[i]!==0?(d.inv[i]>0?"+":"")+d.inv[i]?.toLocaleString("fr-FR"):"-",
-          d.pct[i]!=null?((d.pct[i]*100).toFixed(1)+"%"):"-"
-        ]:null).filter(Boolean)
-      ).reverse(),
+      headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
+      rows: (function(){var out=[];Object.entries(STOCKS_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
     "TOTAL_M": {
-      label:"Total — Stats mensuelles",
+      label:"Total Monthly",
       desc:"P&L mensuel total portefeuille depuis 2026",
-      headers:["Année","Mois","BOM €","EOM €","P&L €","Investi €","%"],
-      rows: Object.entries(TOTAL_MONTHLY).flatMap(([yr,d])=>
-        d.m.map((m,i)=>d.bom[i]!=null?[yr,m,
-          d.bom[i]?.toLocaleString("fr-FR"),
-          d.eom[i]?.toLocaleString("fr-FR"),
-          d.pnl[i]!=null?(d.pnl[i]>=0?"+":"")+d.pnl[i]?.toLocaleString("fr-FR"):"-",
-          d.inv?.[i]!=null&&d.inv[i]!==0?(d.inv[i]>0?"+":"")+d.inv[i]?.toLocaleString("fr-FR"):"-",
-          d.pct[i]!=null?((d.pct[i]*100).toFixed(1)+"%"):"-"
-        ]:null).filter(Boolean)
-      ).reverse(),
+      headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
+      rows: (function(){var out=[];Object.entries(TOTAL_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
   };
 
-  const currentDB = DATABASES[db];
-  const filtered = search
-    ? currentDB.rows.filter(r=>r.some(v=>String(v||"").toLowerCase().includes(search.toLowerCase())))
+  var currentDB = DATABASES[db];
+  var filtered = search
+    ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
+
+  var LOCAL_SUMMARY = [
+    {name:"DD",          count:DD.length,              last:getLast(DD)},
+    {name:"GDBS",        count:GDBS.length,             last:getLast(GDBS)},
+    {name:"GC_FULL",     count:GC_FULL.length,          last:getLast(GC_FULL)},
+    {name:"GS_B100_EXT", count:GS_B100_EXT.length,      last:getLast(GS_B100_EXT)},
+    {name:"DB",          count:DB.length,               last:getLast(DB)},
+    {name:"CRYPTO_M",    count:Object.keys(CRYPTO_MONTHLY).length, last:Object.keys(CRYPTO_MONTHLY).slice(-1)[0]+" ans"},
+    {name:"STOCKS_M",    count:Object.keys(STOCKS_MONTHLY).length, last:Object.keys(STOCKS_MONTHLY).slice(-1)[0]+" ans"},
+    {name:"TOTAL_M",     count:Object.keys(TOTAL_MONTHLY).length,  last:Object.keys(TOTAL_MONTHLY).slice(-1)[0]+" ans"},
+    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
+  ];
 
   return(
     <div>
-      {/* Sélecteur DB */}
-      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
-        {Object.keys(DATABASES).map(k=>(
-          <button key={k} onClick={()=>{setDb(k);setSearch("");}} style={{
-            padding:"5px 8px",borderRadius:7,fontSize:10,fontWeight:700,
-            border:`1px solid ${db===k?C.btc:C.border}`,cursor:"pointer",
-            background:db===k?C.btc+"22":"transparent",color:db===k?C.btc:C.gray,
-          }}>{k}</button>
-        ))}
+      <div style={{display:"flex",gap:6,background:C.bg2,borderRadius:10,padding:4,marginBottom:12}}>
+        {["local","cloud"].map(function(k){
+          var l = k==="local" ? "Bases locales" : "Cloudflare KV";
+          return(
+            <button key={k} onClick={function(){handleViewMode(k);}} style={{
+              flex:1,padding:"7px 0",borderRadius:8,fontSize:11,fontWeight:700,
+              border:"none",cursor:"pointer",
+              background:viewMode===k?C.btc:"transparent",
+              color:viewMode===k?"#000":C.gray,
+            }}>{l}</button>
+          );
+        })}
       </div>
 
-      {/* Info */}
-      <div style={{fontSize:10,color:C.gray,marginBottom:8}}>{currentDB.desc}</div>
-
-      {/* Recherche */}
-      <input
-        value={search} onChange={e=>setSearch(e.target.value)}
-        placeholder="Filtrer..."
-        style={{width:"100%",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,
-          padding:"7px 10px",color:C.text,fontSize:12,marginBottom:10,outline:"none"}}
-      />
-
-      {/* Table */}
-      <div style={{overflowX:"auto",borderRadius:10,border:`1px solid ${C.border}`}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
-          <thead>
-            <tr style={{background:C.bg2}}>
-              {currentDB.headers.map((h,i)=>(
-                <th key={i} style={{
-                  padding:"6px 8px",color:C.gray,fontWeight:700,
-                  textAlign:i===0?"left":"right",
-                  borderBottom:`1px solid ${C.border}`,
-                  whiteSpace:"nowrap",fontSize:9,
-                }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.slice(0,100).map((row,i)=>(
-              <tr key={i} style={{borderBottom:`1px solid ${C.border}22`,background:i%2===0?"transparent":C.bg1+"44"}}>
-                {row.map((cell,j)=>(
-                  <td key={j} style={{
-                    padding:"5px 8px",
-                    textAlign:j===0?"left":"right",
-                    color:typeof cell==="string"&&cell.startsWith("+")
-                      ?C.green:typeof cell==="string"&&(cell.startsWith("-")&&cell!=="-")
-                      ?C.red:j===0?C.text:C.text2,
-                    whiteSpace:"nowrap",fontFamily:j>0?"monospace":"inherit",
-                  }}>{hidden&&j>0&&db==="CRYPTO"||hidden&&j>0&&db==="STOCKS"?"••••":cell??"-"}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {filtered.length>100&&(
-        <div style={{fontSize:10,color:C.gray,textAlign:"center",marginTop:6}}>
-          Affichage des 100 premiers résultats sur {filtered.length} — utilise le filtre pour affiner
+      {viewMode==="local" ? (
+        <div>
+          <div style={{background:C.bg2,borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid "+C.border}}>
+            <div style={{fontSize:9,color:C.gray,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>Bases locales (code source)</div>
+            {LOCAL_SUMMARY.map(function(b,i){
+              return(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:i<LOCAL_SUMMARY.length-1?"1px solid "+C.border+"22":"none"}}>
+                  <span style={{fontSize:11,fontWeight:700,color:C.btc,fontFamily:"monospace"}}>{b.name}</span>
+                  <div style={{textAlign:"right"}}>
+                    <span style={{fontSize:11,color:C.text}}>{b.count} entrees</span>
+                    <span style={{fontSize:9,color:C.gray,marginLeft:8}}>{b.last}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+            {Object.keys(DATABASES).map(function(k){
+              return(
+                <button key={k} onClick={function(){setDb(k);setSearch("");}} style={{
+                  padding:"5px 8px",borderRadius:7,fontSize:10,fontWeight:700,
+                  border:"1px solid "+(db===k?C.btc:C.border),cursor:"pointer",
+                  background:db===k?C.btc+"22":"transparent",color:db===k?C.btc:C.gray,
+                }}>{k}</button>
+              );
+            })}
+          </div>
+          <div style={{fontSize:10,color:C.gray,marginBottom:8}}>{currentDB.label} — {currentDB.desc}</div>
+          <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Filtrer..."
+            style={{width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:12,marginBottom:10,outline:"none"}}/>
+          <div style={{overflowX:"auto",borderRadius:10,border:"1px solid "+C.border}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead>
+                <tr style={{background:C.bg3}}>
+                  {currentDB.headers.map(function(h,i){return(<th key={i} style={{padding:"6px 8px",textAlign:"left",color:C.gray,fontWeight:700,borderBottom:"1px solid "+C.border,whiteSpace:"nowrap"}}>{h}</th>);})}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0,100).map(function(row,ri){
+                  return(
+                    <tr key={ri} style={{borderBottom:"1px solid "+C.border+"44",background:ri%2===0?"transparent":C.bg2+"44"}}>
+                      {row.map(function(cell,ci){return(<td key={ci} style={{padding:"5px 8px",color:ci===0?C.btc:C.text,fontFamily:ci===0?"monospace":"inherit",whiteSpace:"nowrap"}}>{cell}</td>);})}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {filtered.length>100 && (
+            <div style={{fontSize:10,color:C.gray,textAlign:"center",marginTop:6}}>
+              Affichage des 100 premiers resultats sur {filtered.length}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:11,color:C.gray}}>Donnees stockees dans Cloudflare KV</div>
+            <button onClick={doLoadCloud} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"5px 12px",color:C.teal,fontSize:11,fontWeight:700,cursor:"pointer"}}>Actualiser</button>
+          </div>
+          {cloudLoading && <div style={{textAlign:"center",padding:"30px 0",color:C.gray,fontSize:13}}>Chargement...</div>}
+          {cloudError  && <div style={{background:C.red+"15",border:"1px solid "+C.red+"44",borderRadius:8,padding:"12px",color:C.red,fontSize:11}}>Erreur : {cloudError}</div>}
+          {cloudData && !cloudLoading && <CloudKeyList data={cloudData}/>}
         </div>
       )}
     </div>
@@ -4074,18 +4263,8 @@ function App(){
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
   // Initialiser live avec CURRENT pour que EFF soit complet dès le démarrage
-  const[live,setLive]=useState({
-    totalUSD:  CURRENT.totalUSD,
-    totalEUR:  CURRENT.totalEUR,
-    usdEur:    CURRENT.usdEur,
-    eurUsd:    CURRENT.eurUsd,
-    btcPrice:  CURRENT.btcPrice,
-    gdbC:      CURRENT.gdbC,
-    gdbS:      CURRENT.gdbS,
-    crypto:    CURRENT.crypto,
-    stocks:    CURRENT.stocks,
-    bank:      CURRENT.bank,
-  });
+  // live = source unique de vérité (copie complète de CURRENT au départ)
+  const[live,setLive]=useState(()=>({...CURRENT}));
   const[refreshing,setRefreshing]=useState(false);
   const[refreshedAt,setRefreshedAt]=useState(null);
   const[refreshErr,setRefreshErr]=useState(null);
@@ -4117,7 +4296,18 @@ function App(){
       const liveEurUsd = prices.EURUSD || (1/CURRENT.usdEur);
       const liveUsdEur = 1 / liveEurUsd;
       const updated = applyPrices(prices, liveUsdEur, EFF||CURRENT);
-      setLive({...updated, eurUsd: liveEurUsd, usdEur: liveUsdEur, errors:prices.errors});
+      // updated est déjà complet depuis applyPrices(prices, liveUsdEur, prev||CURRENT)
+      // On recalcule GDB depuis les nouvelles valeurs
+      const {gdbS: gdbS_r, gdbC: gdbC_r} = calcGdbPrices(updated);
+      setLive(prev=>({
+        ...(prev||CURRENT),
+        ...updated,
+        eurUsd: liveEurUsd,
+        usdEur: liveUsdEur,
+        gdbS: gdbS_r,
+        gdbC: gdbC_r,
+        errors: prices.errors,
+      }));
 
       // Mettre à jour le point du JOUR dans DD et GDBS avec les prix refreshés
       const todayStr = new Date().toISOString().slice(0,10);
@@ -4166,20 +4356,8 @@ function App(){
   },[]);
 
   // Merge live prices into effective CURRENT data
-  const EFF = live ? {
-    ...CURRENT,
-    totalUSD:  live.totalUSD,
-    totalEUR:  live.totalEUR,
-    usdEur:    live.usdEur,
-    eurUsd:    live.eurUsd,
-    btcPrice:  live.btcPrice,
-    gdbC:      live.gdbC ?? CURRENT.gdbC,
-    gdbS:      live.gdbS ?? CURRENT.gdbS,
-    crypto:    live.crypto,
-    stocks:    live.stocks,
-    bank:      live.bank,
-    portfolio: live.portfolio ?? CURRENT.portfolio,
-  } : CURRENT;
+  // EFF = live est la source unique de vérité
+  const EFF = live || CURRENT;
 
   const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync, liveDD, liveGDBS, liveGC, liveGSB, liveCM};
 
@@ -4242,7 +4420,8 @@ function App(){
             val:Math.round(v*eurUsd),pnl:0,pct:0,
           })),
         ];
-        setLive({
+        const snapEFF = {
+          ...CURRENT,
           totalUSD, totalEUR, usdEur, eurUsd,
           btcPrice: CURRENT.btcPrice,
           gdbC: CURRENT.gdbC,
@@ -4253,7 +4432,9 @@ function App(){
           portfolio: {date:p.date||last.d, items:allItems},
           errors: [],
           _fromSnapshot: p.date || last.d,
-        });
+        };
+        const {gdbS: gdbS_s, gdbC: gdbC_s} = calcGdbPrices(snapEFF);
+        setLive({...snapEFF, gdbS:gdbS_s, gdbC:gdbC_s});
         setRefreshedAt(`snapshot ${p.date||last.d}`);
 
       } else {
@@ -4469,19 +4650,59 @@ function App(){
   },[txns]);
 
   const applyTradeToEFF=useCallback(trade=>{
-    if(trade._directBank){
-      // Dépôt : mise à jour directe de la banque
-      setLive(prev=>{
-        const base = prev||EFF||CURRENT;
-        const totalUSD = base.totalUSD + Math.round(trade.qty*(base.eurUsd||1/base.usdEur));
-        const totalEUR = base.totalEUR + trade.qty;
-        return {...base, bank:trade._directBank, totalUSD, totalEUR};
-      });
-    } else {
-      const updated = applyTrade(trade, EFF);
-      setLive(prev=>({...(prev||{}), ...updated}));
-    }
-  },[EFF]);
+    setLive(prev=>{
+      const base = prev||CURRENT;
+      if(trade._directBank){
+        // Dépôt/Retrait bancaire
+        // Recalcul depuis prev.bank (pas src.bank qui peut être stale)
+        const isRetrait = trade.side==="RETRAIT";
+        const montantEUR = trade.qty; // qty = montant en €
+        const delta = isRetrait ? -montantEUR : montantEUR;
+        const bankName = trade.bankAccount;
+        const eurUsd = base.eurUsd || 1/(base.usdEur||0.852);
+
+        // Nouveau bank depuis prev
+        const newBreakdown = {...base.bank.breakdown};
+        newBreakdown[bankName] = (newBreakdown[bankName]||0) + delta;
+        const newTotalEUR = Object.values(newBreakdown).reduce((s,v)=>s+v, 0);
+        const newBank = {
+          ...base.bank,
+          breakdown: newBreakdown,
+          totalEUR: newTotalEUR,
+        };
+
+        // Mettre à jour portfolio.items pour le Cash Matelas correspondant
+        let newPortfolioItems = base.portfolio?.items;
+        if(newPortfolioItems){
+          newPortfolioItems = newPortfolioItems.map(item=>{
+            if(item.cat!=="Cash Matelas" || item.t!==bankName) return item;
+            const newValEUR = (item.valEUR||item.qty) + delta;
+            const newQty    = newValEUR; // qty = montant €
+            const newVal    = Math.round(newValEUR * eurUsd);
+            return {...item, qty:newQty, valEUR:newValEUR, val:newVal, live:eurUsd};
+          });
+        }
+
+        // Recalc totaux
+        const deltaUSD = Math.round(delta * eurUsd);
+        const newTotalUSD = base.totalUSD + deltaUSD;
+        const newTotalEURtot = Math.round(newTotalUSD * (base.usdEur||0.852));
+
+        return {
+          ...base,
+          bank: newBank,
+          totalUSD: newTotalUSD,
+          totalEUR: newTotalEURtot,
+          ...(newPortfolioItems ? {portfolio:{...base.portfolio, items:newPortfolioItems}} : {}),
+        };
+      }
+      // Achat/Vente : applyTrade retourne un objet complet
+      const updated = applyTrade(trade, base);
+      // Recalculer GDB.C et GDB.S depuis les nouvelles valeurs
+      const {gdbS, gdbC} = calcGdbPrices(updated);
+      return {...base, ...updated, gdbS, gdbC};
+    });
+  },[]);
 
   const delTxn=useCallback(async id=>{
     const next=txns.filter(t=>t.id!==id);setTxns(next);await save(SK.txns,next);

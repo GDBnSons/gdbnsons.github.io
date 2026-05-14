@@ -3993,14 +3993,15 @@ const ICONS=["◎","◑","▲","◈","⇅","⬡"];
 
 function CloudKeyList({data}){
   const CLOUD_KEYS = [
-    {key:"chart",    label:"Snapshots journaliers"},
-    {key:"txns",     label:"Transactions (achats/ventes)"},
-    {key:"gdb_dd",   label:"DD (historique quotidien)"},
-    {key:"gdb_gdbs", label:"GDBS (GDB.C et GDB.S)"},
-    {key:"gdb_gc",   label:"GC_FULL (GDB.C historique)"},
-    {key:"gdb_cm",   label:"CRYPTO_MONTHLY (mensuel crypto)"},
-    {key:"gdb_sm",   label:"STOCKS_MONTHLY (mensuel stocks)"},
-    {key:"gdb_tm",   label:"TOTAL_MONTHLY (mensuel total)"},
+    {key:"gdb_data",  label:"Snapshots journaliers"},
+    {key:"gdb_txns",  label:"Transactions"},
+    {key:"gdb_dd",    label:"DD (historique quotidien)"},
+    {key:"gdb_gdbs",  label:"GDBS (GDB.C et GDB.S)"},
+    {key:"gdb_gc",    label:"GC_FULL (GDB.C historique)"},
+    {key:"gdb_gsb",   label:"GS_B100_EXT"},
+    {key:"gdb_cm",    label:"CRYPTO_MONTHLY"},
+    {key:"gdb_sm",    label:"STOCKS_MONTHLY"},
+    {key:"gdb_tm",    label:"TOTAL_MONTHLY"},
   ];
   return(
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -4624,23 +4625,28 @@ function App(){
     const {next, newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM} = snapResult;
     const uploadLog = [], uploadErrors = [];
 
+    // 1. Sauvegarder les snapshots journaliers
     try {
       await save(SK.chart, next);
-      uploadLog.push("✓ Cloudflare : snapshots sauvegardés");
-    } catch(e){ uploadErrors.push("✗ Cloudflare snapshots : "+e.message); }
+      uploadLog.push("✓ Snapshots journaliers sauvegardés");
+    } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 
-    // Les bases statiques DD/GDBS/etc. sont dans le code — on les stocke aussi dans KV
-    // pour que la prochaine session puisse les lire si plus récentes
+    // 2. Sauvegarder toutes les bases en un seul appel /write-bases
     try {
-      await save("gdb_dd",     newDD);
-      await save("gdb_gdbs",   newGDBS);
-      await save("gdb_gc",     newGC);
-      await save("gdb_gsb",    newGSB);
-      await save("gdb_cm",     newCM);
-      await save("gdb_sm",     newSM);
-      await save("gdb_tm",     newTM);
-      uploadLog.push("✓ Cloudflare : bases de données sauvegardées (DD, GDBS, GC, Monthly)");
-    } catch(e){ uploadErrors.push("✗ Cloudflare bases : "+e.message); }
+      const bases = {
+        gdb_dd: newDD, gdb_gdbs: newGDBS, gdb_gc: newGC, gdb_gsb: newGSB,
+        gdb_cm: newCM, gdb_sm: newSM,    gdb_tm: newTM,
+      };
+      const res = await fetch(CF_WORKER_URL+"/write-bases", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+        body: JSON.stringify(bases),
+        signal: AbortSignal.timeout(15000),
+      });
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      uploadLog.push("✓ Bases sauvegardées : "+((data.written||[]).join(", ")));
+    } catch(e){ uploadErrors.push("✗ Bases : "+e.message); }
 
     setSnapResult(prev=>({...prev, pendingUpload:false, uploadLog, uploadErrors, uploadDone:true}));
   },[snapResult]);

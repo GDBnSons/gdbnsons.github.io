@@ -4057,10 +4057,15 @@ function PageData({EFF, hidden}){
   function doLoadCloud(){
     setCloudLoading(true);
     setCloudError(null);
-    fetch(CF_WORKER_URL+"/read", {headers:{"X-Auth-Key":CF_AUTH_KEY}})
+    fetch(CF_WORKER_URL+"/read", {
+      headers:{"X-Auth-Key":CF_AUTH_KEY},
+      signal: AbortSignal.timeout(10000),
+    })
       .then(function(r){
-        if(!r.ok) throw new Error("HTTP "+r.status);
-        return r.json();
+        return r.json().then(function(d){
+          if(!r.ok) throw new Error("HTTP "+r.status+" — "+(d.error||"erreur inconnue"));
+          return d;
+        });
       })
       .then(function(d){ setCloudData(d); setCloudLoading(false); })
       .catch(function(e){ setCloudError(e.message); setCloudLoading(false); });

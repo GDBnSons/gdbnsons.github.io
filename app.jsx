@@ -595,13 +595,19 @@ function applyPrices(prices, usdEur, effSrc){
   const src  = effSrc || CURRENT;  // ← utilise EFF live, pas CURRENT statique
   const rate = usdEur || src.usdEur;
   const eurUsd = 1 / rate;
-  const EUR_TICKERS = new Set(["AVIO", "AI", "GOLD"]);
+  // Suffixes Yahoo Finance des bourses EU (prix en €)
+  const EU_SUFFIXES = [".PA",".MI",".AS",".BR",".DE",".F",".HA",".BE",".MU",".SG",".DU",".HM",".VI"];
+  // Un ticker est coté en EUR si son Yahoo symbol a un suffixe EU
+  const isEurTicker = t => {
+    const sym = YF_MAP[t] || t;
+    return EU_SUFFIXES.some(s => sym.endsWith(s));
+  };
 
   /* Updated stocks items — depuis src (EFF live) pour conserver les quantités */
   const stocksItems = src.stocks.items.map(item => {
     let newLive = prices[item.t];
     if(!newLive) return item;
-    if(EUR_TICKERS.has(item.t)){
+    if(isEurTicker(item.t)){
       let priceEUR = newLive;
       if(priceEUR < 1) priceEUR = priceEUR * 100;
       newLive = parseFloat((priceEUR * eurUsd).toFixed(4));
@@ -3516,7 +3522,13 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                     <FI label="Symbole ticker *" value={form.newTicker||""} onChange={v=>setForm({...form,newTicker:v.toUpperCase()})} placeholder="NVDA"/>
                     <FI label="Icône (emoji)" value={form.newIcon||""} onChange={v=>setForm({...form,newIcon:v})} placeholder="🟩"/>
                   </div>
-                  <FI label={"Symbole Yahoo Finance (facultatif)"} value={form.yahooSymbol||""} onChange={v=>setForm({...form,yahooSymbol:v})} placeholder="NVDA, NVDA.PA, NVDA.L ..."/>
+                  <FI label={"Symbole Yahoo Finance (facultatif)"} value={form.yahooSymbol||""} onChange={v=>{
+        const isEU = [".PA",".MI",".AS",".BR",".DE",".F",".HA",".L"].some(s=>v.endsWith(s));
+        setForm({...form, yahooSymbol:v, currency: isEU ? "EUR" : form.currency});
+      }} placeholder="NVDA, NVDA.PA, NVDA.L ..."/>
+      {(form.yahooSymbol||"").match(/\.(PA|MI|AS|BR|DE|F|L)$/) && (
+        <div style={{fontSize:10,color:C.teal,marginTop:-8}}>Détecté : bourse EU — prix en EUR</div>
+      )}
                   <div style={{fontSize:9,color:C.gray}}>Laisse vide = même symbole que le ticker. Exemples : AVIO.MI, AI.PA, JEDI.L</div>
                   <FS label="Catégorie" value={form.cat} onChange={v=>setForm({...form,cat:v})}
                     options={["Crypto","Indices","Picking","Or","Cash"]}/>
@@ -4029,15 +4041,20 @@ const ICONS=["◎","◑","▲","◈","⇅","⬡"];
 
 function CloudKeyList({data}){
   const CLOUD_KEYS = [
-    {key:"gdb_data",  label:"Snapshots journaliers"},
-    {key:"gdb_txns",  label:"Transactions"},
-    {key:"gdb_dd",    label:"DD (historique quotidien)"},
-    {key:"gdb_gdbs",  label:"GDBS (GDB.C et GDB.S)"},
-    {key:"gdb_gc",    label:"GC_FULL (GDB.C historique)"},
-    {key:"gdb_gsb",   label:"GS_B100_EXT"},
-    {key:"gdb_cm",    label:"CRYPTO_MONTHLY"},
-    {key:"gdb_sm",    label:"STOCKS_MONTHLY"},
-    {key:"gdb_tm",    label:"TOTAL_MONTHLY"},
+    {key:"gdb_data",      label:"Snapshots journaliers"},
+    {key:"gdb_txns",      label:"Transactions"},
+    {key:"gdb_dd",        label:"DD (historique quotidien)"},
+    {key:"gdb_gdbs",      label:"GDBS (GDB.C et GDB.S)"},
+    {key:"gdb_gc",        label:"GC_FULL (GDB.C historique)"},
+    {key:"gdb_gsb",       label:"GS_B100_EXT"},
+    {key:"gdb_cm",        label:"CRYPTO_MONTHLY"},
+    {key:"gdb_sm",        label:"STOCKS_MONTHLY"},
+    {key:"gdb_tm",        label:"TOTAL_MONTHLY"},
+    {key:"gdb_portfolio", label:"Portfolio (positions)"},
+    {key:"gdb_crypto",    label:"Crypto (positions)"},
+    {key:"gdb_stocks",    label:"Stocks (positions)"},
+    {key:"gdb_bank",      label:"Banque (cash matelas)"},
+    {key:"gdb_yfmap",     label:"YF_MAP (tickers Yahoo)"},
   ];
   return(
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -4074,7 +4091,15 @@ function CloudKeyList({data}){
   );
 }
 
-function PageData({EFF, hidden}){
+function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM}){
+  // Utiliser les séries live (post-snapshot/refresh) si disponibles
+  var _DD   = liveDD   || DD;
+  var _GDBS = liveGDBS || GDBS;
+  var _GC   = liveGC   || GC_FULL;
+  var _GSB  = liveGSB  || GS_B100_EXT;
+  var _CM   = liveCM   || CRYPTO_MONTHLY;
+  var _SM   = liveSM   || STOCKS_MONTHLY;
+  var _TM   = liveTM   || TOTAL_MONTHLY;
   var db_state = useState("DD");
   var db = db_state[0]; var setDb = db_state[1];
   var search_state = useState(""); 
@@ -4124,21 +4149,27 @@ function PageData({EFF, hidden}){
   var DATABASES = {
     "DD": {
       label:"DD — Historique quotidien",
-      desc:"Valeurs quotidiennes depuis 2020 ("+DD.length+" points)",
+      desc:"Valeurs quotidiennes depuis 2020 ("+_DD.length+" points)",
       headers:["Date","Crypto EUR","Total EUR","BTC $","GDB.S $","usdEur"],
-      rows: DD.slice().reverse().map(function(r){return[r[0],fmt(r[1]),fmt(r[2]),fmt(r[3]),fmtF(r[4],4),fmtF(r[5],6)];}),
+      rows: _DD.slice().reverse().map(function(r){return[r[0],fmt(r[1]),fmt(r[2]),fmt(r[3]),fmtF(r[4],4),fmtF(r[5],6)];}),
     },
     "GDBS": {
       label:"GDBS — Cours GDB.C et GDB.S",
-      desc:"Cours journaliers depuis aout 2025 ("+GDBS.length+" points)",
+      desc:"Cours journaliers depuis aout 2025 ("+_GDBS.length+" points)",
       headers:["Date","GDB.S $","GDB.C $"],
-      rows: GDBS.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4),fmtF(r[2],4)];}),
+      rows: _GDBS.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4),fmtF(r[2],4)];}),
     },
     "GC_FULL": {
       label:"GC_FULL — Historique GDB.C",
-      desc:"Cours GDB.C depuis 2020 ("+GC_FULL.length+" points)",
+      desc:"Cours GDB.C depuis 2020 ("+_GC.length+" points)",
       headers:["Date","GDB.C $"],
-      rows: GC_FULL.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4)];}),
+      rows: _GC.slice().reverse().map(function(r){return[r[0],fmtF(r[1],4)];}),
+    },
+    "GS_B100": {
+      label:"GS_B100 — GDB.S base 100",
+      desc:"GDB.S rebase 100 au 1er jan 2026 ("+_GSB.length+" points)",
+      headers:["Date","GDB.S base100"],
+      rows: _GSB.slice().reverse().map(function(r){return[r[0],fmtF(r[1],3)];}),
     },
     "DB": {
       label:"DB — Indices base 100",
@@ -4164,23 +4195,60 @@ function PageData({EFF, hidden}){
       headers:["Ticker","Cat","Qty","PA $","Live $","Val $","P&L $"],
       rows: src.stocks.items.map(function(x){return[x.t,x.cat,x.qty,fmtF(x.pa,2),fmtF(x.live,2),"$"+fmt(x.val),fmtPnl(x.pnl)];}),
     },
+    "BANK": {
+      label:"Banque — Cash Matelas",
+      desc:"Comptes bancaires",
+      headers:["Banque","Solde EUR","Solde USD"],
+      rows: Object.entries(src.bank && src.bank.breakdown ? src.bank.breakdown : {}).map(function(e){
+        var name=e[0]; var valEUR=e[1];
+        var valUSD = Math.round(valEUR*(src.eurUsd||1.173));
+        return[name, valEUR.toLocaleString("fr-FR")+" EUR", valUSD.toLocaleString("fr-FR")+" $"];
+      }),
+    },
+    "TXNS": {
+      label:"Transactions — Achats / Ventes",
+      desc:"Journal de toutes les transactions ("+(txns||[]).length+" lignes)",
+      headers:["Date","Type","Ticker","Cat","Qty","Prix $","Montant $","Contrepartie","Note"],
+      rows: (txns||[]).slice().sort(function(a,b){return b.date.localeCompare(a.date);}).map(function(t){
+        var valo = Math.round((t.qty||0)*(t.price||0));
+        return[t.date, t.side, t.ticker, t.cat||"—", t.qty, fmtF(t.price,2), "$"+fmt(valo), t.bankAccount||"—", t.note||""];
+      }),
+    },
+    "SNAPSHOTS": {
+      label:"Snapshots journaliers",
+      desc:"Historique des snapshots ("+(chartData||[]).length+" points)",
+      headers:["Date","Total EUR","Total USD","usdEur","GDB.S","GDB.C"],
+      rows: (chartData||[]).slice().sort(function(a,b){return b.d.localeCompare(a.d);}).map(function(s){
+        return[s.d, s.ao||"—", s.ao_usd||"—", s.eur||"—", s.gdbs||"—", s.gdbc||"—"];
+      }),
+    },
     "MONTHLY": {
       label:"Crypto Monthly",
       desc:"P&L mensuel crypto depuis 2020",
       headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
-      rows: (function(){var out=[];Object.entries(CRYPTO_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
+      rows: (function(){var out=[];Object.entries(_CM).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
     "STOCKS_M": {
       label:"Stocks Monthly",
       desc:"P&L mensuel actions depuis 2026",
       headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
-      rows: (function(){var out=[];Object.entries(STOCKS_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
+      rows: (function(){var out=[];Object.entries(_SM).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
     "TOTAL_M": {
       label:"Total Monthly",
       desc:"P&L mensuel total portefeuille depuis 2026",
       headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
-      rows: (function(){var out=[];Object.entries(TOTAL_MONTHLY).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
+      rows: (function(){var out=[];Object.entries(_TM).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
+    },
+    "YF_MAP": {
+      label:"YF_MAP — Tickers Yahoo Finance",
+      desc:"Correspondance ticker interne -> symbole Yahoo ("+(Object.keys(YF_MAP).length)+" tickers)",
+      headers:["Ticker","Symbole Yahoo","Bourse EU"],
+      rows: Object.entries(YF_MAP).map(function(e){
+        var t=e[0]; var sym=e[1];
+        var isEU=[".PA",".MI",".AS",".BR",".DE",".F",".L"].some(function(s){return sym.endsWith(s);});
+        return[t, sym, isEU ? "OUI" : "—"];
+      }),
     },
   };
 
@@ -4190,15 +4258,18 @@ function PageData({EFF, hidden}){
     : currentDB.rows;
 
   var LOCAL_SUMMARY = [
-    {name:"DD",          count:DD.length,              last:getLast(DD)},
-    {name:"GDBS",        count:GDBS.length,             last:getLast(GDBS)},
-    {name:"GC_FULL",     count:GC_FULL.length,          last:getLast(GC_FULL)},
-    {name:"GS_B100_EXT", count:GS_B100_EXT.length,      last:getLast(GS_B100_EXT)},
+    {name:"DD",          count:_DD.length,              last:getLast(_DD)},
+    {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
+    {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
+    {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
     {name:"DB",          count:DB.length,               last:getLast(DB)},
-    {name:"CRYPTO_M",    count:Object.keys(CRYPTO_MONTHLY).length, last:Object.keys(CRYPTO_MONTHLY).slice(-1)[0]+" ans"},
-    {name:"STOCKS_M",    count:Object.keys(STOCKS_MONTHLY).length, last:Object.keys(STOCKS_MONTHLY).slice(-1)[0]+" ans"},
-    {name:"TOTAL_M",     count:Object.keys(TOTAL_MONTHLY).length,  last:Object.keys(TOTAL_MONTHLY).slice(-1)[0]+" ans"},
+    {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
+    {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
+    {name:"TOTAL_M",     count:Object.keys(_TM).length,  last:Object.keys(_TM).slice(-1)[0]+" ans"},
     {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
+    {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
+    {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
+    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
   ];
 
   return(
@@ -4411,6 +4482,66 @@ function App(){
       const[cd,tx]=await Promise.all([load(SK.chart,CHART_MONTHLY),load(SK.txns,SEED_TXNS)]);
       setChartData(cd);
       setTxns(tx);
+
+      // ── Charger les bases depuis Cloudflare KV (remplace les constantes statiques) ─
+      try {
+        const res = await fetch(CF_WORKER_URL+"/read",{
+          headers:{"X-Auth-Key":CF_AUTH_KEY},
+          signal: AbortSignal.timeout(10000),
+        });
+        if(res.ok){
+          const kvData = await res.json();
+          // Remplacer les séries statiques si KV a des données plus récentes
+          const kvDD   = kvData.gdb_dd;
+          const kvGDBS = kvData.gdb_gdbs;
+          const kvGC   = kvData.gdb_gc;
+          const kvGSB  = kvData.gdb_gsb;
+          const kvCM   = kvData.gdb_cm;
+          const kvSM   = kvData.gdb_sm;
+          const kvTM   = kvData.gdb_tm;
+          const kvYF   = kvData.gdb_yfmap;
+          const kvPort = kvData.gdb_portfolio;
+          const kvCryp = kvData.gdb_crypto;
+          const kvStk  = kvData.gdb_stocks;
+          const kvBank = kvData.gdb_bank;
+
+          // N'utiliser les données KV que si elles sont plus récentes que le build
+          const buildLastDate = DD[DD.length-1] && DD[DD.length-1][0];
+          const kvLastDate    = kvDD && kvDD.length>0 ? kvDD[kvDD.length-1][0] : null;
+          const kvIsNewer     = kvLastDate && kvLastDate > buildLastDate;
+
+          if(kvIsNewer){
+            if(kvDD)   setLiveDD(kvDD);
+            if(kvGDBS) setLiveGDBS(kvGDBS);
+            if(kvGC)   setLiveGC(kvGC);
+            if(kvGSB)  setLiveGSB(kvGSB);
+            if(kvCM)   setLiveCM(kvCM);
+            if(kvSM)   setLiveSM(kvSM);
+            if(kvTM)   setLiveTM(kvTM);
+            console.info("Bases KV chargées ("+kvLastDate+" > "+buildLastDate+")");
+          } else {
+            console.info("Build plus récent que KV ("+buildLastDate+" >= "+kvLastDate+") — bases locales conservées");
+          }
+
+          // YF_MAP : toujours merger (nouveaux tickers ajoutés par l'utilisateur)
+          if(kvYF && typeof kvYF === "object"){
+            Object.assign(YF_MAP, kvYF);
+          }
+
+          // Portfolio KV : utilisé si plus récent que le snapshot _portfolio
+          // → sera écrasé par le snapshot si celui-ci est plus récent
+          if(kvPort && kvCryp && kvStk && kvBank){
+            const kvPortDate = kvPort.date || null;
+            const snapDate   = cd && cd.length>0 ? cd.sort((a,b)=>b.d.localeCompare(a.d))[0].d : null;
+            if(kvPortDate && (!snapDate || kvPortDate >= snapDate)){
+              // Le portfolio KV est plus récent ou équivalent au snapshot — on l'utilisera
+              console.info("Portfolio KV disponible au "+kvPortDate);
+            }
+          }
+        }
+      } catch(e){
+        console.warn("Chargement bases KV échoué:", e.message);
+      }
 
       // Dernier snapshot disponible
       const snapshots = cd.filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
@@ -4664,20 +4795,42 @@ function App(){
     if(!snapResult) return;
     const {next, newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM} = snapResult;
     const uploadLog = [], uploadErrors = [];
+    const liveState = snapResult.snap && snapResult.snap._portfolio
+      ? snapResult.snap._portfolio : (EFF || CURRENT);
 
     // 1. Sauvegarder les snapshots journaliers
     try {
       await save(SK.chart, next);
-      uploadLog.push("✓ Snapshots journaliers sauvegardés");
+      uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 
-    // 2. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
+    // 2. Sauvegarder les transactions
+    try {
+      await save(SK.txns, txns);
+      uploadLog.push("✓ Transactions ("+txns.length+" lignes)");
+    } catch(e){ uploadErrors.push("✗ Transactions : "+e.message); }
+
+    // 3. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
     let basesOk = false;
     for(let attempt = 1; attempt <= 3 && !basesOk; attempt++){
       try {
         const bases = {
-          gdb_dd: newDD, gdb_gdbs: newGDBS, gdb_gc: newGC, gdb_gsb: newGSB,
-          gdb_cm: newCM, gdb_sm: newSM,    gdb_tm: newTM,
+          // Séries temporelles
+          gdb_dd:   newDD,
+          gdb_gdbs: newGDBS,
+          gdb_gc:   newGC,
+          gdb_gsb:  newGSB,
+          // Monthly
+          gdb_cm:   newCM,
+          gdb_sm:   newSM,
+          gdb_tm:   newTM,
+          // Portfolio complet
+          gdb_portfolio: (EFF||CURRENT).portfolio || CURRENT.portfolio,
+          gdb_crypto:    (EFF||CURRENT).crypto    || CURRENT.crypto,
+          gdb_stocks:    (EFF||CURRENT).stocks    || CURRENT.stocks,
+          gdb_bank:      (EFF||CURRENT).bank      || CURRENT.bank,
+          // YF_MAP (tickers refresh)
+          gdb_yfmap: YF_MAP,
         };
         const res = await fetch(CF_WORKER_URL+"/write-bases", {
           method:"POST",
@@ -4687,7 +4840,7 @@ function App(){
         });
         const data = await res.json();
         if(!res.ok) throw new Error("HTTP "+res.status+" — "+(data.error||""));
-        uploadLog.push("✓ Bases sauvegardées : "+((data.written||[]).join(", ")));
+        uploadLog.push("✓ Bases sauvegardées ("+((data.written||[]).length)+" clés) : "+((data.written||[]).join(", ")));
         basesOk = true;
       } catch(e){
         if(attempt < 3){
@@ -4699,7 +4852,7 @@ function App(){
     }
 
     setSnapResult(prev=>({...prev, pendingUpload:false, uploadLog, uploadErrors, uploadDone:true}));
-  },[snapResult]);
+  },[snapResult, txns, EFF]);
 
   const addTxn=useCallback(async t=>{
     const next=[t,...txns];setTxns(next);await save(SK.txns,next);
@@ -4828,7 +4981,9 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
-        {tab===5 && <PageData EFF={EFF} hidden={hidden}/> }
+        {tab===5 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
+          liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveGSB={liveGSB}
+          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM}/> }
         {tab===4 && <PageTrades txns={txns} onAdd={addTxn} onDel={delTxn} hidden={hidden} EFF={EFF} onTradeApplied={applyTradeToEFF} showAdd={showTrade} setShowAdd={setShowTrade} eur={eur}/>}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

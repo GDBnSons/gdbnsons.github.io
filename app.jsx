@@ -1181,14 +1181,14 @@ const FI=({label,value,onChange,type="text",placeholder=""})=>(
   <div style={{marginBottom:13}}>
     <div style={{fontSize:11,color:C.text2,marginBottom:5,fontWeight:600}}>{label}</div>
     <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-      style={{width:"100%",background:C.bg2,border:`1px solid ${C.border2}`,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+      style={{width:"100%",background:C.bg2,border:`1px solid ${C.border2}`,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:16,outline:"none"}}/>
   </div>
 );
 const FS=({label,value,onChange,options})=>(
   <div style={{marginBottom:13}}>
     <div style={{fontSize:11,color:C.text2,marginBottom:5,fontWeight:600}}>{label}</div>
     <select value={value} onChange={e=>onChange(e.target.value)}
-      style={{width:"100%",background:C.bg2,border:`1px solid ${C.border2}`,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,outline:"none"}}>
+      style={{width:"100%",background:C.bg2,border:`1px solid ${C.border2}`,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:16,outline:"none"}}>
       {options.map(o=><option key={o} value={o}>{o}</option>)}
     </select>
   </div>
@@ -3395,17 +3395,25 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   };
 
   const submit=()=>{
-    if(!form.qty||!form.price||!form.ticker)return;
+    const resolvedTicker = form.ticker==="NOUVEAU" ? (form.newTicker||"").toUpperCase() : form.ticker;
+    if(!form.qty||!form.price||!resolvedTicker)return;
     const priceUSD = form.currency==="EUR"
       ? parseFloat(form.price)*src.eurUsd
       : parseFloat(form.price);
     const valoUSD = parseFloat(form.qty)*priceUSD;
     const valoEUR = Math.round(valoUSD*src.usdEur);
-    const trade={...form,qty:parseFloat(form.qty),price:priceUSD,priceRaw:parseFloat(form.price),currency:form.currency,id:uid(),bankAccount:form.bank||"Aucune"};
+    // Enregistrer Yahoo symbol et icône pour nouveau token
+    if(form.ticker==="NOUVEAU"){
+      const yahooSym = (form.yahooSymbol||"").trim() || resolvedTicker;
+      YF_MAP[resolvedTicker] = yahooSym;
+      if(form.newIcon) TICKER_ICONS[resolvedTicker] = form.newIcon;
+    }
+    const trade={...form, ticker:resolvedTicker, qty:parseFloat(form.qty),
+      price:priceUSD, priceRaw:parseFloat(form.price), currency:form.currency,
+      id:uid(), bankAccount:form.bank||"Aucune"};
     onAdd(trade);
     onTradeApplied(trade);
-    // Afficher écran de confirmation au lieu de fermer immédiatement
-    setDone({type:"trade", side:form.side, ticker:form.ticker, qty:parseFloat(form.qty), valoUSD, valoEUR, bank:form.bank, note:form.note, date:form.date});
+    setDone({type:"trade", side:form.side, ticker:resolvedTicker, qty:parseFloat(form.qty), valoUSD, valoEUR, bank:form.bank, note:form.note, date:form.date});
   };
 
   return(
@@ -3484,14 +3492,42 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={form.date} onChange={v=>setForm({...form,date:v})}/></div>
-            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v,ticker:v==="SELL"?(src.portfolio?.items?.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0)[0]?.t||"BTC"):"BTC"})} options={["BUY","SELL"]}/>
+            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v,ticker:v==="SELL"?(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC":"BTC"):"_PORTFOLIO_0"})} options={["BUY","SELL"]}/>
             {form.side==="SELL" ? (
               <FS label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v})}
-                options={(src.portfolio?.items||[]).filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)}/>
+                options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>
-              <FI label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v.toUpperCase()})} placeholder="BTC, QQQ..."/>
-              <FS label="Catégorie" value={form.cat} onChange={v=>setForm({...form,cat:v})}
-                options={["Crypto","Indices","Picking","Or","Cash"]}/>
+              {/* Dropdown : tickers existants + "Nouveau token" */}
+              <FS label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v,
+                cat: v==="NOUVEAU" ? form.cat :
+                     (src.portfolio&&src.portfolio.items?src.portfolio.items.find(x=>x.t===v):null)
+                       ? (src.portfolio.items.find(x=>x.t===v).cat||"Picking") : form.cat
+              })}
+                options={[
+                  ...(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]),
+                  "NOUVEAU",
+                ]}/>
+
+              {/* Formulaire nouveau token */}
+              {form.ticker==="NOUVEAU" && (
+                <div style={{gridColumn:"1/-1",background:C.bg2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.teal+"44",display:"flex",flexDirection:"column",gap:10}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.teal}}>Nouveau token</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <FI label="Symbole ticker *" value={form.newTicker||""} onChange={v=>setForm({...form,newTicker:v.toUpperCase()})} placeholder="NVDA"/>
+                    <FI label="Icône (emoji)" value={form.newIcon||""} onChange={v=>setForm({...form,newIcon:v})} placeholder="🟩"/>
+                  </div>
+                  <FI label={"Symbole Yahoo Finance (facultatif)"} value={form.yahooSymbol||""} onChange={v=>setForm({...form,yahooSymbol:v})} placeholder="NVDA, NVDA.PA, NVDA.L ..."/>
+                  <div style={{fontSize:9,color:C.gray}}>Laisse vide = même symbole que le ticker. Exemples : AVIO.MI, AI.PA, JEDI.L</div>
+                  <FS label="Catégorie" value={form.cat} onChange={v=>setForm({...form,cat:v})}
+                    options={["Crypto","Indices","Picking","Or","Cash"]}/>
+                </div>
+              )}
+
+              {/* Catégorie pour ticker existant */}
+              {form.ticker!=="NOUVEAU" && (
+                <FS label="Catégorie" value={form.cat} onChange={v=>setForm({...form,cat:v})}
+                  options={["Crypto","Indices","Picking","Or","Cash"]}/>
+              )}
             </>)}
             <FI label="Quantité" type="number" value={form.qty} onChange={v=>setForm({...form,qty:v})} placeholder="0.01"/>
             <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
@@ -4210,7 +4246,7 @@ function PageData({EFF, hidden}){
           </div>
           <div style={{fontSize:10,color:C.gray,marginBottom:8}}>{currentDB.label} — {currentDB.desc}</div>
           <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Filtrer..."
-            style={{width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:12,marginBottom:10,outline:"none"}}/>
+            style={{width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:16,marginBottom:10,outline:"none"}}/>
           <div style={{overflowX:"auto",borderRadius:10,border:"1px solid "+C.border}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
@@ -4297,52 +4333,51 @@ function App(){
     setRefreshing(true); setRefreshErr(null);
     try{
       const prices = await fetchAllPrices();
-      // prices.EURUSD = taux EUR→USD (ex: 1.1734) = eurUsd
-      // applyPrices attend usdEur ($ → €) = 1/eurUsd
       const liveEurUsd = prices.EURUSD || (1/CURRENT.usdEur);
       const liveUsdEur = 1 / liveEurUsd;
-      const updated = applyPrices(prices, liveUsdEur, EFF||CURRENT);
-      // updated est déjà complet depuis applyPrices(prices, liveUsdEur, prev||CURRENT)
-      // On recalcule GDB depuis les nouvelles valeurs
-      const {gdbS: gdbS_r, gdbC: gdbC_r} = calcGdbPrices(updated);
-      setLive(prev=>({
-        ...(prev||CURRENT),
-        ...updated,
-        eurUsd: liveEurUsd,
-        usdEur: liveUsdEur,
-        gdbS: gdbS_r,
-        gdbC: gdbC_r,
-        errors: prices.errors,
-      }));
-
-      // Mettre à jour le point du JOUR dans DD et GDBS avec les prix refreshés
       const todayStr = new Date().toISOString().slice(0,10);
-      const cryptoEUR_refresh = Math.round((updated.crypto?.total||0)*liveUsdEur);
-      const totalEUR_refresh   = updated.totalEUR;
-      const gdbSCalc = updated.gdbS || CURRENT.gdbS;
-      const gdbCCalc = updated.gdbC || CURRENT.gdbC;
-      const btcRefresh = updated.btcPrice || CURRENT.btcPrice;
 
-      setLiveDD(prev => {
-        const last = prev[prev.length-1];
-        const newRow = [todayStr, cryptoEUR_refresh, totalEUR_refresh, btcRefresh, gdbSCalc, liveUsdEur];
-        if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
-        return [...prev, newRow];
+      // Utiliser setLive(prev=>) pour avoir l'état live courant (post-trades)
+      setLive(prev=>{
+        const srcEFF = prev || CURRENT;
+        const updated = applyPrices(prices, liveUsdEur, srcEFF);
+        const {gdbS: gdbS_r, gdbC: gdbC_r} = calcGdbPrices(updated);
+
+        // Mettre à jour DD/GDBS/GC en même temps
+        const cryptoEUR_r = Math.round((updated.crypto && updated.crypto.total ? updated.crypto.total : 0)*liveUsdEur);
+        const totalEUR_r  = updated.totalEUR;
+        const gdbSCalc    = gdbS_r || CURRENT.gdbS;
+        const gdbCCalc    = gdbC_r || CURRENT.gdbC;
+        const btcR        = updated.btcPrice || CURRENT.btcPrice;
+
+        setLiveDD(d => {
+          const last = d[d.length-1];
+          const row = [todayStr, cryptoEUR_r, totalEUR_r, btcR, gdbSCalc, liveUsdEur];
+          return last && last[0]===todayStr ? [...d.slice(0,-1), row] : [...d, row];
+        });
+        if(gdbSCalc && gdbCCalc){
+          setLiveGDBS(d => {
+            const last = d[d.length-1];
+            const row = [todayStr, gdbSCalc, gdbCCalc];
+            return last && last[0]===todayStr ? [...d.slice(0,-1), row] : [...d, row];
+          });
+          setLiveGC(d => {
+            const last = d[d.length-1];
+            const row = [todayStr, gdbCCalc];
+            return last && last[0]===todayStr ? [...d.slice(0,-1), row] : [...d, row];
+          });
+        }
+
+        return {
+          ...srcEFF,
+          ...updated,
+          eurUsd: liveEurUsd,
+          usdEur: liveUsdEur,
+          gdbS: gdbS_r,
+          gdbC: gdbC_r,
+          errors: prices.errors,
+        };
       });
-      if(gdbSCalc && gdbCCalc){
-        setLiveGDBS(prev => {
-          const last = prev[prev.length-1];
-          const newRow = [todayStr, gdbSCalc, gdbCCalc];
-          if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
-          return [...prev, newRow];
-        });
-        setLiveGC(prev => {
-          const last = prev[prev.length-1];
-          const newRow = [todayStr, gdbCCalc];
-          if(last?.[0] === todayStr) return [...prev.slice(0,-1), newRow];
-          return [...prev, newRow];
-        });
-      }
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
       // Rapport détaillé : succès et échecs
@@ -4636,22 +4671,32 @@ function App(){
       uploadLog.push("✓ Snapshots journaliers sauvegardés");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 
-    // 2. Sauvegarder toutes les bases en un seul appel /write-bases
-    try {
-      const bases = {
-        gdb_dd: newDD, gdb_gdbs: newGDBS, gdb_gc: newGC, gdb_gsb: newGSB,
-        gdb_cm: newCM, gdb_sm: newSM,    gdb_tm: newTM,
-      };
-      const res = await fetch(CF_WORKER_URL+"/write-bases", {
-        method:"POST",
-        headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-        body: JSON.stringify(bases),
-        signal: AbortSignal.timeout(15000),
-      });
-      if(!res.ok) throw new Error("HTTP "+res.status);
-      const data = await res.json();
-      uploadLog.push("✓ Bases sauvegardées : "+((data.written||[]).join(", ")));
-    } catch(e){ uploadErrors.push("✗ Bases : "+e.message); }
+    // 2. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
+    let basesOk = false;
+    for(let attempt = 1; attempt <= 3 && !basesOk; attempt++){
+      try {
+        const bases = {
+          gdb_dd: newDD, gdb_gdbs: newGDBS, gdb_gc: newGC, gdb_gsb: newGSB,
+          gdb_cm: newCM, gdb_sm: newSM,    gdb_tm: newTM,
+        };
+        const res = await fetch(CF_WORKER_URL+"/write-bases", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+          body: JSON.stringify(bases),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await res.json();
+        if(!res.ok) throw new Error("HTTP "+res.status+" — "+(data.error||""));
+        uploadLog.push("✓ Bases sauvegardées : "+((data.written||[]).join(", ")));
+        basesOk = true;
+      } catch(e){
+        if(attempt < 3){
+          await new Promise(r=>setTimeout(r, 2000));
+        } else {
+          uploadErrors.push("✗ Bases ("+attempt+" essais) : "+e.message);
+        }
+      }
+    }
 
     setSnapResult(prev=>({...prev, pendingUpload:false, uploadLog, uploadErrors, uploadDone:true}));
   },[snapResult]);

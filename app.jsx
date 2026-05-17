@@ -92,16 +92,12 @@ function makeTFCuts(){
 const GDB_S_NB_PARTS = 11942;  // col AK onglet Chart
 const GDB_C_NB_PARTS = 5610;   // col P onglet Chart
 function calcGdbPrices(src){
-  // Fonds GDB.S = Indices + Stock Picking (dont IBKR action) + Gold
-  // KuCoin (cat==="Cash") est exclu
-  const gdsSfondsUSD = src.stocks.items
-    .filter(x=>x.cat!=="Cash")
-    .reduce((s,x)=>s+x.val, 0);
-  // Cash IBKR = item EURO cat=Cash (cash sur plateforme IBKR) — inclus dans GDB.S
-  const ibkrCashUSD = src.stocks.items.find(x=>x.t==="EURO")?.val||0;
-  const gdbSfondsUSD = gdsSfondsUSD + ibkrCashUSD;
+  // GDB.S = Indices + Picking + Or + Cash plateforme (EURO/USD/STRC)
+  // → tout sauf KuCoin (absent du portfolio, val=0)
+  const gdbSfondsUSD = src.stocks.items
+    .reduce((s,x)=>s+x.val, 0);  // tous les stocks incl. Cash (EURO+USD+STRC)
   const gdbS = parseFloat((gdbSfondsUSD / GDB_S_NB_PARTS).toFixed(4));
-  // Fonds GDB.C = crypto uniquement
+  // GDB.C = crypto (BTC) + KuCoin (0$)
   const gdbC = parseFloat((src.crypto.total / GDB_C_NB_PARTS).toFixed(4));
   return {gdbS, gdbC, gdbSfondsUSD};
 }
@@ -252,7 +248,7 @@ const CURRENT={
   crypto:{date:"2026-05-17",total:194480,items:[{t:"BTC",qty:2.5,pa:63618.4412,live:77792,val:194480,pnl:35434,pct:0.2228}]},
   stocks:{date:"2026-05-17",total:166375,items:[{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291},{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":0.8403,"live":0,"val":-5430,"pnl":0,"pct":0}]},
   bank:{date:"2026-05-17",totalEUR:16600,breakdown:{"BCI":5000,"Bourso":11300,"DeBlock":300}},
-  portfolio:{date:"2026-05-17",items:[{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004,"valEUR":8536},{"t":"BTC","cat":"Crypto","qty":2.5,"pa":63618.4412,"live":77792,"val":194480,"pnl":35434,"pct":0.2228,"valEUR":167360},{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585,"valEUR":19522},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221,"valEUR":26148},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069,"valEUR":2443},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082,"valEUR":3800},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351,"valEUR":2645},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712,"valEUR":20240},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753,"valEUR":11373},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655,"valEUR":11509},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154,"valEUR":19016},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245,"valEUR":15500},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514,"valEUR":3730},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291,"valEUR":1144},{"t":"BCI","cat":"Cash Matelas","qty":5000,"pa":1.0,"live":1.1620489552555813,"val":5810,"pnl":0,"pct":0.0,"valEUR":5000},{"t":"Bourso","cat":"Cash Matelas","qty":11300,"pa":1.0,"live":1.1620489552555813,"val":13131,"pnl":0,"pct":0.0,"valEUR":11300},{"t":"DeBlock","cat":"Cash Matelas","qty":300,"pa":1.0,"live":1.1620489552555813,"val":349,"pnl":0,"pct":0.0,"valEUR":300},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0.0,"valEUR":2240}]},
+  portfolio:{date:"2026-05-17",items:[{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004,"valEUR":8536},{"t":"BTC","cat":"Crypto","qty":2.5,"pa":63618.4412,"live":77792,"val":194480,"pnl":35434,"pct":0.2228,"valEUR":167360},{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585,"valEUR":19522},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221,"valEUR":26148},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069,"valEUR":2443},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082,"valEUR":3800},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351,"valEUR":2645},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712,"valEUR":20240},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753,"valEUR":11373},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655,"valEUR":11509},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154,"valEUR":19016},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245,"valEUR":15500},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514,"valEUR":3730},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291,"valEUR":1144},{"t":"BCI","cat":"Cash Matelas","qty":5000,"pa":1.0,"live":1.1620489552555813,"val":5810,"pnl":0,"pct":0.0,"valEUR":5000},{"t":"Bourso","cat":"Cash Matelas","qty":11300,"pa":1.0,"live":1.1620489552555813,"val":13131,"pnl":0,"pct":0.0,"valEUR":11300},{"t":"DeBlock","cat":"Cash Matelas","qty":300,"pa":1.0,"live":1.1620489552555813,"val":349,"pnl":0,"pct":0.0,"valEUR":300},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0.0,"valEUR":2240},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":1.0,"live":1.0,"val":-5430,"pnl":0,"pct":0.0,"valEUR":-4673}]},
   alloc:[
     {n:"Crypto",  pct:51.2, tgt:50, c:"#F7931A"},
     {n:"Indices",      pct:33.0, tgt:22, c:"#4A90D9"},
@@ -446,7 +442,7 @@ function applyTrade(trade, currentEFF){
     const tradeEUR = Math.round(tradeUSD * usdEur);
     const current  = bank.breakdown[bankAccount] || 0;
     bank.breakdown[bankAccount] = isBuy
-      ? Math.max(0, current - tradeEUR)
+      ? current - tradeEUR   // peut devenir négatif (découvert autorisé)
       : current + tradeEUR;
     bank.totalEUR = Object.values(bank.breakdown).reduce((s,v)=>s+v, 0);
 
@@ -458,7 +454,7 @@ function applyTrade(trade, currentEFF){
         const euroItem = {...stocksItems[euroIdx]};
         const eurUsd = 1/usdEur;
         const newQtyEUR = isBuy
-          ? Math.max(0, euroItem.qty - tradeEUR)
+          ? euroItem.qty - tradeEUR   // peut devenir négatif (découvert)
           : euroItem.qty + tradeEUR;
         euroItem.qty = newQtyEUR;
         euroItem.val = Math.round(newQtyEUR * euroItem.live); // live = taux eurUsd
@@ -480,10 +476,10 @@ function applyTrade(trade, currentEFF){
   /* ── Suppression des items à quantité zéro ── */
   // On mémorise les tickers à zéro AVANT de les supprimer
   const zeroTickers = new Set([
-    ...stocksItems.filter(x=>x.qty<=0).map(x=>x.t),
+    ...stocksItems.filter(x=>x.qty<=0 && x.cat!=="Cash").map(x=>x.t),
     ...cryptoItems.filter(x=>x.qty<=0).map(x=>x.t),
   ]);
-  stocksItems = stocksItems.filter(x => x.qty > 0);
+  stocksItems = stocksItems.filter(x => x.cat==="Cash" || x.qty > 0);
 
   /* ── Ajout du nouveau ticker dans YF_MAP si achat nouveau ticker ── */
   if(isBuy && idx < 0 && ticker.toUpperCase() !== "BTC"){
@@ -510,7 +506,7 @@ function applyTrade(trade, currentEFF){
       if(item.cat==="Cash Matelas"){
         if(bankAccount && bankAccount===item.t){
           const tradeEUR = Math.round(tradeUSD * usdEur);
-          const newValEUR = isBuy ? Math.max(0,(item.valEUR||item.qty)-tradeEUR) : (item.valEUR||item.qty)+tradeEUR;
+          const newValEUR = isBuy ? (item.valEUR||item.qty)-tradeEUR : (item.valEUR||item.qty)+tradeEUR;  // négatif autorisé
           const newValUSD = Math.round(newValEUR * (src.eurUsd||1/usdEur));
           return {...item, qty:newValEUR, valEUR:newValEUR, val:newValUSD};
         }
@@ -1205,11 +1201,12 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
   const cv    = v => { const n=parseFloat(v); return isNaN(n)?0: eur ? Math.round(n * usdEur) : Math.round(n); };
   const cvPnl = v => { const n=parseFloat(v); return isNaN(n)?0: eur ? Math.round(n * usdEur) : Math.round(n); };
   const cur   = eur ? "€" : "$";
-  const fmtV  = v => cur + fmtK(Math.abs(cv(v)));
+  const fmtV  = v => { const n=cv(v); return (n<0?"-":"")+cur+fmtK(Math.abs(n)); };
   const fmtP2 = v => { const n=parseFloat(v); return isNaN(n)?"—":(n>=0?"+":"")+cur+fmtK(Math.abs(cvPnl(n))); };
   const fmtPrice = (n, rate=1) => { const v=n*rate; return v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2); };
   const fmtLive = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+fmtPrice(n,usdEur) : "$"+fmtPrice(n)); };
   const fmtPA   = v => { const n=parseFloat(v); return isNaN(n)?"—":(eur ? "€"+fmtPrice(n,usdEur) : "$"+fmtPrice(n)); };
+  const barPct  = Math.min(Math.max(pct, 0), 100);  // 0% si négatif, 100% max
 
   return(
     <div style={{marginBottom:6}}>
@@ -1246,9 +1243,9 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
           </div>
           <div style={{display:"flex", alignItems:"center", gap:8, marginTop:5}}>
             <div style={{flex:1, background:C.bg3, borderRadius:3, height:4}}>
-              <div style={{height:4, borderRadius:3, background:color, width:Math.min(pct,100)+"%", transition:"width .3s"}}/>
+              <div style={{height:4, borderRadius:3, background:color, width:barPct+"%", transition:"width .3s"}}/>
             </div>
-            <span style={{fontSize:10, color:color, fontWeight:700, flexShrink:0}}>{pct.toFixed(1)}%</span>
+            <span style={{fontSize:10, color:pct<0?C.red:color, fontWeight:700, flexShrink:0}}>{pct.toFixed(1)}%</span>
             <span style={{fontSize:11, color: open?"#fff":C.text3, transition:"transform .2s",
               display:"inline-block", transform: open?"rotate(180deg)":"rotate(0deg)"}}>
               ▾
@@ -1821,6 +1818,13 @@ function GdbBlock({label, price, d, w, m, color}){
 
 /* Mini SVG logos pour les banques sans emoji natif */
 const BankLogo = {
+  KUCOIN: () => (
+    <svg width="22" height="22" viewBox="0 0 22 22">
+      <rect width="22" height="22" rx="5" fill="#000"/>
+      <text x="11" y="16" textAnchor="middle" fontSize="14" fontWeight="bold" fill="#0EAF7C" fontFamily="Arial,sans-serif">K</text>
+    </svg>
+  ),
+
   DeBlock: ()=>(
     <svg width="22" height="22" viewBox="0 0 22 22">
       <rect x="2" y="2" width="18" height="18" rx="5" fill="#1A1A2E"/>
@@ -1938,10 +1942,8 @@ function buildSections(L){
   const pickingUSD = src.stocks.items.filter(x=>x.cat==="Picking").reduce((s,x)=>s+x.val,0);
   const orUSD      = src.stocks.items.filter(x=>x.cat==="Or").reduce((s,x)=>s+x.val,0);
   const cashStocksUSD = src.stocks.items.filter(x=>x.cat==="Cash").reduce((s,x)=>s+x.val,0);
-  // Cash Dip = EURO item (cash plateforme IBKR) + KuCoin ($0)
-  const ibkrItem   = null;  // IBKR est une action dans Picking
-  const euroItem   = src.stocks.items.find(x=>x.t==="EURO");  // cash IBKR
-  const cashDipUSD = (euroItem?.val||0);  // KuCoin = 0
+  // Cash Dip = tous les items cat="Cash" (EURO, STRC, USD négatif...)
+  const cashDipUSD = cashStocksUSD;  // peut être négatif si USD < 0
   // Cash Matelas = comptes bancaires (BCI + Bourso + DeBlock)
   const cashMatelasUSD = Math.round(src.bank.totalEUR * eurUsd);
   const bankUSD    = cashDipUSD + cashMatelasUSD;
@@ -2012,24 +2014,59 @@ function buildSections(L){
       totalUSD: cashDipUSD,
       totalEUR: Math.round(cashDipUSD*usdEur),
       pct: pct(cashDipUSD),
-      items: [
-        // IBKR Cash (EURO item = cash sur plateforme IBKR)
-        ...(euroItem ? [{
-          ticker:"EURO", icon:"📊", iconComponent:"IBKR",
-          label:"IBKR Cash",
-          detail:`$${euroItem.val.toLocaleString("fr-FR")} en cash IBKR`,
-          valUSD: euroItem.val, valEUR: Math.round(euroItem.val*usdEur),
-          pnl: euroItem.pnl, pct: euroItem.pct,
-          pa: euroItem.pa.toFixed(4), live: euroItem.live.toFixed(4),
-          qty: euroItem.qty, investi: euroItem.pa*euroItem.qty,
-        }] : []),
-        // KuCoin — toujours présent, valeur $0
-        {
-          ticker:"KUCOIN", icon:"💶", iconComponent:"EURO",
-          label:"KuCoin", detail:"Compte vide",
-          valUSD: 0, valEUR: 0, pnl: 0, pct: 0,
-        },
-      ],
+      items: (()=>{
+        // Chercher dans portfolio.items ET stocks.items (selon ce qui est disponible)
+        const allItems = src.portfolio?.items?.length>0 ? src.portfolio.items : src.stocks.items;
+        const findItem = t => allItems.find(x=>x.t===t) || src.stocks.items?.find(x=>x.t===t);
+        const usdItem  = findItem("USD");
+        const euroItem = findItem("EURO");
+        const strcItem = findItem("STRC");
+        const out = [];
+        // IBKR Dollar
+        if(usdItem){
+          const qty = usdItem.qty||0;
+          const val = usdItem.val!=null ? usdItem.val : qty;
+          out.push({
+            ticker:"USD", icon:"💵", label:"IBKR Dollar",
+            detail:`${qty<0?"-":""}$${Math.abs(qty).toLocaleString("fr-FR")} cash USD IBKR`,
+            valUSD: val, valEUR: Math.round(val*usdEur),
+            pnl:0, pct:0, pa:"1.0000", live:"1.0000", qty, investi:qty,
+          });
+        } else {
+          // Valeur fixe si non trouvée
+          out.push({ticker:"USD",icon:"💵",label:"IBKR Dollar",detail:"$-5 430 cash USD IBKR",valUSD:-5430,valEUR:Math.round(-5430*usdEur),pnl:0,pct:0,pa:"1.0000",live:"1.0000",qty:-5430,investi:-5430});
+        }
+        // IBKR Euro
+        if(euroItem){
+          const qty = euroItem.qty||0;
+          const val = euroItem.val!=null ? euroItem.val : Math.round(qty*eurUsd);
+          out.push({
+            ticker:"EURO", icon:"💶", label:"IBKR Euro",
+            detail:`€${qty.toLocaleString("fr-FR")} en cash IBKR`,
+            valUSD: val, valEUR: qty,
+            pnl:0, pct:0,
+            pa:(euroItem.pa||1.17).toFixed(4),
+            live:(euroItem.live||eurUsd).toFixed(4),
+            qty, investi:(euroItem.pa||1.17)*qty,
+          });
+        } else {
+          out.push({ticker:"EURO",icon:"💶",label:"IBKR Euro",detail:"€2 240 en cash IBKR",valUSD:2603,valEUR:2240,pnl:0,pct:0,pa:"1.1700",live:eurUsd.toFixed(4),qty:2240,investi:2621});
+        }
+        // STRC
+        if(strcItem){
+          out.push({
+            ticker:"STRC", icon:TICKER_ICONS["STRC"]||"₿", label:"Strike (STRC)",
+            detail:`${strcItem.qty} actions × $${(strcItem.live||0).toFixed(2)}`,
+            valUSD:strcItem.val, valEUR:Math.round((strcItem.val||0)*usdEur),
+            pnl:strcItem.pnl||0, pct:strcItem.pct||0,
+            pa:(strcItem.pa||0).toFixed(2), live:(strcItem.live||0).toFixed(2),
+            qty:strcItem.qty, investi:(strcItem.pa||0)*strcItem.qty,
+          });
+        }
+        // KuCoin
+        out.push({ticker:"KUCOIN",icon:null,iconComponent:"KUCOIN",label:"KuCoin",detail:"Compte vide — rattaché GDB.C",valUSD:0,valEUR:0,pnl:0,pct:0,pa:"0",live:"0",qty:0});
+        return out;
+      })(),
     },
     {
       key:"matelas", n:"Cash Matelas", icon:"🏦", color:C.gray,
@@ -5068,7 +5105,7 @@ function App(){
         if(newPortfolioItems){
           newPortfolioItems = newPortfolioItems.map(item=>{
             if(item.cat!=="Cash Matelas" || item.t!==bankName) return item;
-            const newValEUR = (item.valEUR||item.qty) + delta;
+            const newValEUR = (item.valEUR||item.qty) + delta;  // peut être négatif (découvert)
             const newQty    = newValEUR; // qty = montant €
             const newVal    = Math.round(newValEUR * eurUsd);
             return {...item, qty:newQty, valEUR:newValEUR, val:newVal, live:eurUsd};

@@ -4539,19 +4539,23 @@ function App(){
   const[showTrade,setShowTrade]=useState(false);
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
-  // Initialiser live avec CURRENT pour que EFF soit complet dès le démarrage
-  // live = source unique de vérité (copie complète de CURRENT au départ)
   const[live,setLive]=useState(()=>({...CURRENT}));
   const[refreshing,setRefreshing]=useState(false);
   const[refreshedAt,setRefreshedAt]=useState(null);
   const[refreshErr,setRefreshErr]=useState(null);
   const[gistSync,setGistSync]=useState(null);
-  const[gistError,setGistError]=useState(null); // détail erreur connexion
+  const[gistError,setGistError]=useState(null);
   const[showGistDiag,setShowGistDiag]=useState(false);
   const[themeName,setThemeName]=useState(()=>{
     try{ return localStorage.getItem('gdb_theme')||'dark'; }catch{ return 'dark'; }
   });
   const[showTheme,setShowTheme]=useState(false);
+  // ── Écran de démarrage ──────────────────────────────────────────────────
+  const[startScreen,setStartScreen]=useState(true); // afficher l'écran de choix
+  const[startLoading,setStartLoading]=useState(true); // en train de charger les 2 sources
+  const[localData,setLocalData]=useState(null);     // {totalUSD, totalEUR, date}
+  const[kvData_snap,setKvData_snap]=useState(null); // {totalUSD, totalEUR, date, raw}
+  const[kvError,setKvError]=useState(null);         // message si KV inaccessible
   // Apply theme to global C on every render
   C = THEMES[themeName]||THEMES.dark;
   cc = getCC();
@@ -4636,6 +4640,59 @@ function App(){
   const EFF = live || CURRENT;
 
   const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync, liveDD, liveGDBS, liveGC, liveGSB, liveCM};
+
+  // ── Préchargement au démarrage — charge local + KV en parallèle ──────────
+  useEffect(()=>{
+    (async()=>{
+      setLocalData({totalUSD:CURRENT.totalUSD,totalEUR:CURRENT.totalEUR,date:CURRENT.date,gdbS:CURRENT.gdbS,gdbC:CURRENT.gdbC});
+      try {
+        const res=await fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(8000)});
+        if(res.ok){
+          const kv=await res.json();
+          const kvPort=kv.gdb_portfolio,kvStk=kv.gdb_stocks,kvCryp=kv.gdb_crypto,kvBank=kv.gdb_bank;
+          if(kvPort&&kvCryp&&kvStk&&kvBank){
+            const uE=CURRENT.usdEur,eU=1/uE;
+            const cryptoT=kvCryp.total||(kvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+            const stocksT=kvStk.total||(kvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
+            const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
+            const totalUSD=cryptoT+stocksT+bankUSD;
+            const lastGDBS=kv.gdb_gdbs&&kv.gdb_gdbs.length>0?kv.gdb_gdbs[kv.gdb_gdbs.length-1]:null;
+            setKvData_snap({totalUSD,totalEUR:Math.round(totalUSD*uE),date:kvPort.date||"—",gdbS:lastGDBS?.[1]||CURRENT.gdbS,gdbC:lastGDBS?.[2]||CURRENT.gdbC,raw:kv});
+          } else { setKvError("Bases KV incomplètes"); }
+        } else { setKvError("KV inaccessible ("+res.status+")"); }
+      } catch(e){ setKvError("KV hors ligne"); }
+      setStartLoading(false);
+    })();
+  },[]);
+
+  function applyStartChoice(useKV){
+    setStartScreen(false);
+    if(useKV&&kvData_snap?.raw){
+      const kv=kvData_snap.raw;
+      if(kv.gdb_dd)   setLiveDD(kv.gdb_dd);
+      if(kv.gdb_gdbs) setLiveGDBS(kv.gdb_gdbs);
+      if(kv.gdb_gc)   setLiveGC(kv.gdb_gc);
+      if(kv.gdb_gsb)  setLiveGSB(kv.gdb_gsb);
+      if(kv.gdb_cm)   setLiveCM(kv.gdb_cm);
+      if(kv.gdb_sm)   setLiveSM(kv.gdb_sm);
+      if(kv.gdb_tm)   setLiveTM(kv.gdb_tm);
+      if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
+      const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
+      if(kvPort&&kvCryp&&kvStk&&kvBank){
+        const uE=CURRENT.usdEur,eU=1/uE;
+        const cryptoT=kvCryp.total||(kvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const stocksT=kvStk.total||(kvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
+        const totalUSD=cryptoT+stocksT+bankUSD;
+        const newLive={...CURRENT,date:kvPort.date||CURRENT.date,totalUSD,totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
+          crypto:{...CURRENT.crypto,...kvCryp},stocks:{...CURRENT.stocks,...kvStk},bank:{...CURRENT.bank,...kvBank},
+          portfolio:{...kvPort},_fromSnapshot:kvPort.date};
+        const{gdbS,gdbC}=calcGdbPrices(newLive);
+        setLive({...newLive,gdbS,gdbC});
+        setRefreshedAt("cloudflare "+kvPort.date);
+      }
+    }
+  }
 
   useEffect(()=>{
     (async()=>{
@@ -5142,6 +5199,90 @@ function App(){
       <div style={{fontSize:40}}>₿</div>
       <div style={{color:C.btc,fontWeight:800,fontSize:18}}>GDB & Sons</div>
       <div style={{color:C.gray,fontSize:12}}>Chargement...</div>
+    </div>
+  );
+
+  // ── Écran de démarrage ────────────────────────────────────────────────────
+  if(startScreen) return(
+    <div style={{fontFamily:"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+      {/* Logo */}
+      <div style={{fontSize:48,marginBottom:8}}>₿</div>
+      <div style={{fontSize:22,fontWeight:800,color:C.btc,marginBottom:4}}>GDB & Sons</div>
+      <div style={{fontSize:12,color:C.gray,marginBottom:32}}>Choisir la source de données</div>
+
+      {startLoading ? (
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+          <div style={{fontSize:24,animation:"spin 1s linear infinite"}}>↻</div>
+          <div style={{fontSize:12,color:C.gray}}>Connexion à Cloudflare...</div>
+        </div>
+      ) : (
+        <div style={{width:"100%",display:"flex",flexDirection:"column",gap:14}}>
+
+          {/* Carte LOCAL */}
+          <div onClick={()=>applyStartChoice(false)} style={{
+            background:C.bg2,borderRadius:16,padding:"18px 20px",
+            border:`2px solid ${C.btc}`,cursor:"pointer",
+            boxShadow:"0 4px 20px rgba(247,147,26,.15)",
+          }}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>📱</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:C.text}}>Base locale</div>
+                  <div style={{fontSize:10,color:C.gray}}>Build intégré dans l'app</div>
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.btc}}>${fmtK(localData?.totalUSD||0)}</div>
+                <div style={{fontSize:11,color:C.gray}}>€{fmtK(localData?.totalEUR||0)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.gray,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+              <span>📅 {localData?.date||"—"}</span>
+              <span>GDB.S ${localData?.gdbS||"—"} · GDB.C ${localData?.gdbC||"—"}</span>
+            </div>
+          </div>
+
+          {/* Carte CLOUDFLARE */}
+          {kvError ? (
+            <div style={{background:C.bg2,borderRadius:16,padding:"18px 20px",border:`2px solid ${C.border}`,opacity:.6}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>☁️</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:C.gray}}>Cloudflare KV</div>
+                  <div style={{fontSize:10,color:C.red}}>{kvError}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div onClick={()=>applyStartChoice(true)} style={{
+              background:C.bg2,borderRadius:16,padding:"18px 20px",
+              border:`2px solid ${C.teal}`,cursor:"pointer",
+              boxShadow:"0 4px 20px rgba(56,189,248,.1)",
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:22}}>☁️</span>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>Cloudflare KV</div>
+                    <div style={{fontSize:10,color:C.gray}}>Dernier snapshot cloud</div>
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:18,fontWeight:800,color:C.teal}}>${fmtK(kvData_snap?.totalUSD||0)}</div>
+                  <div style={{fontSize:11,color:C.gray}}>€{fmtK(kvData_snap?.totalEUR||0)}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.gray,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                <span>📅 {kvData_snap?.date||"—"}</span>
+                <span>GDB.S ${kvData_snap?.gdbS||"—"} · GDB.C ${kvData_snap?.gdbC||"—"}</span>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+      <style>{"@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
     </div>
   );
 

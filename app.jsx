@@ -246,9 +246,9 @@ const CURRENT={
   gdbC:34.6674,
   gdbS:13.9319,
   crypto:{date:"2026-05-17",total:194480,items:[{t:"BTC",qty:2.5,pa:63618.4412,live:77792,val:194480,pnl:35434,pct:0.2228}]},
-  stocks:{date:"2026-05-17",total:166375,items:[{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291},{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":0.8403,"live":0,"val":-5430,"pnl":0,"pct":0}]},
+  stocks:{date:"2026-05-17",total:166375,items:[{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291},{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":0.8403,"live":0,"val":-5430,"pnl":0,"pct":0},{"t":"KUCOIN","cat":"Cash","qty":0,"pa":1.0,"live":1.0,"val":0,"pnl":0,"pct":0.0}]},
   bank:{date:"2026-05-17",totalEUR:16600,breakdown:{"BCI":5000,"Bourso":11300,"DeBlock":300}},
-  portfolio:{date:"2026-05-17",items:[{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004,"valEUR":8536},{"t":"BTC","cat":"Crypto","qty":2.5,"pa":63618.4412,"live":77792,"val":194480,"pnl":35434,"pct":0.2228,"valEUR":167360},{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585,"valEUR":19522},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221,"valEUR":26148},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069,"valEUR":2443},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082,"valEUR":3800},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351,"valEUR":2645},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712,"valEUR":20240},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753,"valEUR":11373},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655,"valEUR":11509},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154,"valEUR":19016},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245,"valEUR":15500},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514,"valEUR":3730},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291,"valEUR":1144},{"t":"BCI","cat":"Cash Matelas","qty":5000,"pa":1.0,"live":1.1620489552555813,"val":5810,"pnl":0,"pct":0.0,"valEUR":5000},{"t":"Bourso","cat":"Cash Matelas","qty":11300,"pa":1.0,"live":1.1620489552555813,"val":13131,"pnl":0,"pct":0.0,"valEUR":11300},{"t":"DeBlock","cat":"Cash Matelas","qty":300,"pa":1.0,"live":1.1620489552555813,"val":349,"pnl":0,"pct":0.0,"valEUR":300},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0.0,"valEUR":2240},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":1.0,"live":1.0,"val":-5430,"pnl":0,"pct":0.0,"valEUR":-4673}]},
+  portfolio:{date:"2026-05-17",items:[{"t":"STRC","cat":"Cash","qty":100.0,"pa":99.15,"live":99.19,"val":9919,"pnl":4,"pct":0.0004,"valEUR":8536},{"t":"BTC","cat":"Crypto","qty":2.5,"pa":63618.4412,"live":77792,"val":194480,"pnl":35434,"pct":0.2228,"valEUR":167360},{"t":"QQQ","cat":"Indices","qty":32.0,"pa":611.92,"live":708.93,"val":22686,"pnl":3104,"pct":0.1585,"valEUR":19522},{"t":"AIA","cat":"Indices","qty":230.0,"pa":108.2,"live":132.11,"val":30385,"pnl":5499,"pct":0.221,"valEUR":26148},{"t":"ANET","cat":"Picking","qty":20.0,"pa":141.0,"live":141.97,"val":2839,"pnl":19,"pct":0.0069,"valEUR":2443},{"t":"2CRSI","cat":"Picking","qty":100.0,"pa":44.5225,"live":44.1579,"val":4416,"pnl":-36,"pct":-0.0082,"valEUR":3800},{"t":"HUT","cat":"Picking","qty":30.0,"pa":99.0,"live":102.47,"val":3074,"pnl":104,"pct":0.0351,"valEUR":2645},{"t":"JEDI","cat":"Indices","qty":210.0,"pa":76.13,"live":112.0,"val":23520,"pnl":7533,"pct":0.4712,"valEUR":20240},{"t":"OIH","cat":"Indices","qty":30.0,"pa":374.8,"live":440.52,"val":13216,"pnl":1972,"pct":0.1753,"valEUR":11373},{"t":"XLE","cat":"Indices","qty":225.0,"pa":51.0,"live":59.44,"val":13374,"pnl":1899,"pct":0.1655,"valEUR":11509},{"t":"ROBO","cat":"Indices","qty":260.0,"pa":73.65,"live":84.99,"val":22097,"pnl":2948,"pct":0.154,"valEUR":19016},{"t":"GOLD","cat":"Or","qty":100.0,"pa":175.818,"live":180.1176,"val":18012,"pnl":430,"pct":0.0245,"valEUR":15500},{"t":"DJT","cat":"Picking","qty":500.0,"pa":9.14,"live":8.67,"val":4335,"pnl":-235,"pct":-0.0514,"valEUR":3730},{"t":"IBKR","cat":"Picking","qty":15.2762,"pa":65.46,"live":87.0,"val":1329,"pnl":329,"pct":0.3291,"valEUR":1144},{"t":"BCI","cat":"Cash Matelas","qty":5000,"pa":1.0,"live":1.1620489552555813,"val":5810,"pnl":0,"pct":0.0,"valEUR":5000},{"t":"Bourso","cat":"Cash Matelas","qty":11300,"pa":1.0,"live":1.1620489552555813,"val":13131,"pnl":0,"pct":0.0,"valEUR":11300},{"t":"DeBlock","cat":"Cash Matelas","qty":300,"pa":1.0,"live":1.1620489552555813,"val":349,"pnl":0,"pct":0.0,"valEUR":300},{"t":"EURO","cat":"Cash","qty":2240.0,"pa":1.17,"live":1.162,"val":2603,"pnl":0,"pct":0.0,"valEUR":2240},{"t":"USD","cat":"Cash","qty":-5430.0,"pa":1.0,"live":1.0,"val":-5430,"pnl":0,"pct":0.0,"valEUR":-4673},{"t":"KUCOIN","cat":"Cash","qty":0,"pa":1.0,"live":1.0,"val":0,"pnl":0,"pct":0.0,"valEUR":0}]},
   alloc:[
     {n:"Crypto",  pct:51.2, tgt:50, c:"#F7931A"},
     {n:"Indices",      pct:33.0, tgt:22, c:"#4A90D9"},
@@ -446,21 +446,34 @@ function applyTrade(trade, currentEFF){
       : current + tradeEUR;
     bank.totalEUR = Object.values(bank.breakdown).reduce((s,v)=>s+v, 0);
 
-    // Si contrepartie = IBKR → mettre à jour l'item EURO (cash IBKR) dans stocksItems
-    // L'item EURO représente le cash sur la plateforme IBKR
+    // Si contrepartie = IBKR → mouvementer IBKR Euro OU IBKR Dollar selon la devise
     if(bankAccount === "IBKR"){
-      const euroIdx = stocksItems.findIndex(x=>x.t==="EURO");
-      if(euroIdx >= 0){
-        const euroItem = {...stocksItems[euroIdx]};
-        const eurUsd = 1/usdEur;
-        const newQtyEUR = isBuy
-          ? euroItem.qty - tradeEUR   // peut devenir négatif (découvert)
-          : euroItem.qty + tradeEUR;
-        euroItem.qty = newQtyEUR;
-        euroItem.val = Math.round(newQtyEUR * euroItem.live); // live = taux eurUsd
-        euroItem.pnl = Math.round(euroItem.val - euroItem.pa * newQtyEUR);
-        euroItem.valEUR = newQtyEUR;
-        stocksItems[euroIdx] = euroItem;
+      const tradeInEUR = trade.currency === "EUR";
+      if(tradeInEUR){
+        // IBKR Euro : mouvementer l'item EURO (qty en €)
+        const euroIdx = stocksItems.findIndex(x=>x.t==="EURO");
+        if(euroIdx >= 0){
+          const euroItem = {...stocksItems[euroIdx]};
+          const newQtyEUR = isBuy ? euroItem.qty - tradeEUR : euroItem.qty + tradeEUR;
+          euroItem.qty = newQtyEUR;
+          euroItem.val = Math.round(newQtyEUR * (euroItem.live||1/usdEur));
+          euroItem.pnl = Math.round(euroItem.val - (euroItem.pa||1.17) * newQtyEUR);
+          euroItem.valEUR = newQtyEUR;
+          stocksItems[euroIdx] = euroItem;
+        }
+      } else {
+        // IBKR Dollar : mouvementer l'item USD (qty en $)
+        const usdIdx = stocksItems.findIndex(x=>x.t==="USD");
+        if(usdIdx >= 0){
+          const usdItem = {...stocksItems[usdIdx]};
+          const tradeUSD_amt = Math.round(tradeUSD);
+          const newQtyUSD = isBuy ? usdItem.qty - tradeUSD_amt : usdItem.qty + tradeUSD_amt;
+          usdItem.qty = newQtyUSD;
+          usdItem.val = newQtyUSD;  // 1 USD = 1 USD
+          usdItem.pnl = 0;
+          usdItem.valEUR = Math.round(newQtyUSD * usdEur);
+          stocksItems[usdIdx] = usdItem;
+        }
       }
     }
   }
@@ -1300,12 +1313,12 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                     </div>
                     <div style={{textAlign:"right"}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.text}}>
-                        {hidden?"***":fmtV(item.valUSD)}
+                        {hidden?"***":(item.valUSD===0?"$0":fmtV(item.valUSD))}
                       </div>
-                      {/* Ligne secondaire : si €→$ affiché, montrer aussi $ brut ; si $ affiché, montrer € */}
-                      {item.valEUR && (
+                      {/* Ligne secondaire € */}
+                      {item.valEUR!=null && (
                         <div style={{fontSize:10,color:C.gray}}>
-                          {hidden?"***":(eur?"$"+fmtK(item.valUSD):"€"+fmtK(item.valEUR))}
+                          {hidden?"***":(eur?"$"+fmtK(item.valUSD):"€"+(item.valEUR===0?"0":fmtK(item.valEUR)))}
                         </div>
                       )}
                     </div>
@@ -1315,17 +1328,17 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                   {item.pnl!==undefined&&item.pnl!==null&&(
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
                       <div style={{display:"flex",gap:12}}>
-                        {item.pa&&(
+                        {item.pa!=null&&item.pa!==false&&(
                           <span style={{fontSize:10,color:C.gray}}>
                             PA <b style={{color:C.text2}}>{fmtPA(item.pa)}</b>
                           </span>
                         )}
-                        {item.live&&(
+                        {item.live!=null&&item.live!==false&&(
                           <span style={{fontSize:10,color:C.gray}}>
                             Live <b style={{color}}>{fmtLive(item.live)}</b>
                           </span>
                         )}
-                        {item.qty&&(
+                        {item.qty!=null&&(
                           <span style={{fontSize:10,color:C.gray}}>
                             Qté <b style={{color:C.text2}}>{item.qty}</b>
                           </span>
@@ -2064,7 +2077,25 @@ function buildSections(L){
           });
         }
         // KuCoin
-        out.push({ticker:"KUCOIN",icon:null,iconComponent:"KUCOIN",label:"KuCoin",detail:"Compte vide — rattaché GDB.C",valUSD:0,valEUR:0,pnl:0,pct:0,pa:"0",live:"0",qty:0});
+        // KuCoin — wallet crypto, peut être à 0 ou négatif
+        const kucoinItem = allItems.find(x=>x.t==="KUCOIN") || src.stocks.items?.find(x=>x.t==="KUCOIN");
+        const kQty  = kucoinItem?.qty  ?? 0;
+        const kVal  = kucoinItem?.val  ?? 0;
+        const kLive = kucoinItem?.live ?? 0;
+        const kPA   = kucoinItem?.pa   ?? 0;
+        out.push({
+          ticker:"KUCOIN", icon:null, iconComponent:"KUCOIN", label:"KuCoin",
+          detail: kQty === 0 ? "Compte vide — rattaché GDB.C"
+                : kQty > 0  ? `${kQty} USDT · live $${kLive}`
+                :              `${kQty} USDT (découvert)`,
+          valUSD: kVal, valEUR: Math.round(kVal*usdEur),
+          pnl: kucoinItem?.pnl ?? 0,
+          pct: kucoinItem?.pct ?? 0,
+          pa:   String(kPA),
+          live: String(kLive),
+          qty:  kQty,
+          investi: kPA * kQty,
+        });
         return out;
       })(),
     },
@@ -2087,7 +2118,7 @@ function buildSections(L){
 /* ═══════════════════════════════════════════════════════════
    PAGE OVERVIEW
 ═══════════════════════════════════════════════════════════ */
-function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC}){
+function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,chosenSource}){
   const _DD_PO=liveDD||DD;
   const _CM_PO=liveCM||CRYPTO_MONTHLY;
   const [chartTF, setChartTF] = useState("YTD");
@@ -2120,11 +2151,23 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
         }}>
           <div style={{flex:1}}>
             <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>
-              {refreshedAt
-                ? fromSnapshot
-                  ? (d=>{const dt=new Date(d.replace("snapshot ","")); const m=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"][dt.getMonth()]; return `ACTU HISTO ${String(dt.getDate()).padStart(2,"0")} - ${m} - ${String(dt.getFullYear()).slice(2)} 📂`;})(refreshedAt)
-                  : "ACTU "+refreshedAt+" ⟳"
-                : (_DD_PO[_DD_PO.length-1]?.[0] || CURRENT.date)}
+              {(()=>{
+                const src = chosenSource==="cloudflare" ? "BASE CF" : "BASE LOCALE";
+                const snapDate = (EFF||CURRENT).date || CURRENT.date;
+                const fmtDate = d => {
+                  if(!d) return "—";
+                  const dt = new Date(d);
+                  if(isNaN(dt)) return d;
+                  const m=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"][dt.getMonth()];
+                  return String(dt.getDate()).padStart(2,"0")+" "+m+" "+String(dt.getFullYear()).slice(2);
+                };
+                if(refreshedAt){
+                  // Un refresh a été effectué
+                  const refreshDate = refreshedAt.replace(/^(cloudflare|snapshot|locale)\s*/i,"");
+                  return `${src} · REFRESH ${fmtDate(refreshDate)} ⟳`;
+                }
+                return `${src} · ${fmtDate(snapDate)} 📂`;
+              })()}
             </div>
             <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.green}}>
               {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
@@ -2399,8 +2442,8 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
   };
   const tgtD = SECTIONS.map(function(s){
     var allocName = SECT_TO_ALLOC[s.n] || s.n;
-    var a = allocByName[allocName] || {tgt:0, c:s.color, n:s.n};
-    return {v:a.tgt/100, c:a.c||s.color, n:s.n, pct:a.tgt};
+    var a = allocByName[allocName] || {tgt:0, n:s.n};
+    return {v:a.tgt/100, c:s.color, n:s.n, pct:a.tgt};
   });
 
   /* totals for footer */
@@ -3546,17 +3589,45 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={form.date} onChange={v=>setForm({...form,date:v})}/></div>
-            <FS label="Type" value={form.side} onChange={v=>setForm({...form,side:v,ticker:v==="SELL"?(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC":"BTC"):"_PORTFOLIO_0"})} options={["BUY","SELL"]}/>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{display:"flex",gap:6,background:C.bg2,borderRadius:8,padding:3}}>
+                {[["BUY","🟢 Acheter"],["SELL","🔴 Vendre"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>{
+                    const firstSellTicker = k==="SELL" && src.portfolio?.items
+                      ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC"
+                      : form.ticker;
+                    const ticker = k==="SELL" ? firstSellTicker : form.ticker;
+                    const item = src.portfolio?.items?.find(x=>x.t===ticker);
+                    const livePrice = item?.live ? String(item.live) : form.price;
+                    const cur = item?.live && (YF_MAP[ticker]||ticker).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : form.currency;
+                    setForm({...form, side:k, ticker: k==="SELL" ? firstSellTicker : "_PORTFOLIO_0", price:livePrice, currency:cur});
+                  }} style={{
+                    flex:1,padding:"8px 0",borderRadius:6,fontSize:13,fontWeight:700,
+                    border:"none",cursor:"pointer",
+                    background:form.side===k?(k==="BUY"?C.green:C.red):"transparent",
+                    color:form.side===k?"#fff":C.gray,
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
             {form.side==="SELL" ? (
-              <FS label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v})}
+              <FS label="Ticker" value={form.ticker} onChange={v=>{
+                const item = src.portfolio?.items?.find(x=>x.t===v);
+                const livePrice = item?.live ? String(item.live) : "";
+                const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
+                setForm({...form,ticker:v,price:livePrice,currency:cur});
+              }}
                 options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>
               {/* Dropdown : tickers existants + "Nouveau token" */}
-              <FS label="Ticker" value={form.ticker} onChange={v=>setForm({...form,ticker:v,
-                cat: v==="NOUVEAU" ? form.cat :
-                     (src.portfolio&&src.portfolio.items?src.portfolio.items.find(x=>x.t===v):null)
-                       ? (src.portfolio.items.find(x=>x.t===v).cat||"Picking") : form.cat
-              })}
+              <FS label="Ticker" value={form.ticker} onChange={v=>{
+                const item = src.portfolio?.items?.find(x=>x.t===v);
+                const livePrice = item?.live ? String(item.live) : "";
+                const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
+                const cat = v==="NOUVEAU" ? form.cat :
+                  (item ? (item.cat||"Picking") : form.cat);
+                setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
+              }}
                 options={[
                   ...(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]),
                   "NOUVEAU",
@@ -3590,8 +3661,35 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
               )}
             </>)}
             <FI label="Quantité" type="number" value={form.qty} onChange={v=>setForm({...form,qty:v})} placeholder="0.01"/>
-            <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
-            <FS label="Devise" value={form.currency} onChange={v=>setForm({...form,currency:v})} options={["USD","EUR"]}/>
+            <div>
+              <FI label={`Prix (${form.currency})`} type="number" value={form.price} onChange={v=>setForm({...form,price:v})} placeholder={form.currency==="USD"?"77000":"68000"}/>
+              {(()=>{
+                const item = src.portfolio?.items?.find(x=>x.t===(form.ticker==="NOUVEAU"?form.newTicker:form.ticker));
+                if(!item?.live) return null;
+                const isLive = form.price === String(item.live);
+                return(
+                  <div style={{fontSize:9,color:isLive?C.green:C.gray,marginTop:3,paddingLeft:2}}>
+                    {isLive?"✓ Prix live":"Live: "}
+                    {!isLive&&<span style={{color:C.teal,cursor:"pointer",textDecoration:"underline"}}
+                      onClick={()=>setForm({...form,price:String(item.live)})}>
+                      {item.live} {form.currency} (cliquer pour appliquer)
+                    </span>}
+                  </div>
+                );
+              })()}
+            </div>
+            <FS label="Devise" value={form.currency} onChange={v=>{
+              const oldPrice = parseFloat(form.price);
+              let newPrice = form.price;
+              if(!isNaN(oldPrice) && oldPrice > 0){
+                if(v==="EUR" && form.currency==="USD"){
+                  newPrice = String(parseFloat((oldPrice * src.usdEur).toFixed(4)));
+                } else if(v==="USD" && form.currency==="EUR"){
+                  newPrice = String(parseFloat((oldPrice * src.eurUsd).toFixed(4)));
+                }
+              }
+              setForm({...form, currency:v, price:newPrice});
+            }} options={["USD","EUR"]}/>
             <div style={{gridColumn:"1/-1"}}><FI label="Note" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="DCA, TP..."/></div>
             <div style={{gridColumn:"1/-1"}}>
               <FS label="Contrepartie" value={form.bank||"Aucune"}
@@ -3617,14 +3715,20 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                       </div>
                     </div>
                     {form.bank&&form.bank!=="Aucune"&&(()=>{
-                      const isStockCash=form.bank==="KuCoin"||form.bank==="IBKR";
-                      const bal=isStockCash?(src.stocks.items.find(x=>x.t==="EURO")?.val||0):(src.bank.breakdown[form.bank]||0);
-                      const impact=isStockCash?Math.round(valoUSD):Math.round(valoEUR);
-                      const after=form.side==="BUY"?bal-impact:bal+impact;
+                      const isStockCash=form.bank==="KuCoin"||(form.bank==="IBKR"&&form.currency==="USD");
+                      const isIBKR_EUR = form.bank==="IBKR"&&form.currency==="EUR";
+                      const bal = isIBKR_EUR
+                        ? (src.stocks.items.find(x=>x.t==="EURO")?.qty||0)
+                        : isStockCash
+                        ? (src.stocks.items.find(x=>x.t==="USD")?.val||0)
+                        : (src.bank.breakdown[form.bank]||0);
+                      const impact = isIBKR_EUR ? Math.round(valoEUR) : isStockCash ? Math.round(valoUSD) : Math.round(valoEUR);
+                      const after = form.side==="BUY" ? bal-impact : bal+impact;
+                      const sym = isIBKR_EUR ? "€" : isStockCash ? "$" : "€";
                       return(
                         <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,paddingTop:4}}>
                           <span style={{fontSize:10,color:C.gray}}>{form.bank} après</span>
-                          <span style={{fontSize:12,fontWeight:700,color:after<0?C.red:C.green}}>{isStockCash?"$":"€"}{fmt(after)}</span>
+                          <span style={{fontSize:12,fontWeight:700,color:after<0?C.red:C.green}}>{sym}{fmt(after)}</span>
                         </div>
                       );
                     })()}
@@ -3924,75 +4028,75 @@ function SnapshotModal({onSave, onClose, EFF}){
       },
     };
     onSave(snap);
-    setSaved(snap);
+    onClose(); // fermer le modal immédiatement, le panneau snapResult prend le relais
   };
 
   return(
     <Modal title="📸 Snapshot journalier" onClose={onClose}>
       {saved ? (
         <div style={{padding:"8px 0"}}>
-          {/* Header succès */}
-          <div style={{textAlign:"center",marginBottom:16}}>
+          <div style={{textAlign:"center",marginBottom:20}}>
             <div style={{fontSize:36,marginBottom:8}}>✅</div>
             <div style={{fontSize:16,fontWeight:800,color:C.green}}>Snapshot enregistré</div>
             <div style={{fontSize:12,color:C.gray,marginTop:3}}>{saved.d}</div>
           </div>
 
-          {/* Résumé de ce qui a été sauvegardé */}
-          <div style={{background:C.bg2,borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",flexDirection:"column",gap:7}}>
+          {/* ── Base locale : ce qui a été écrit ── */}
+          <div style={{background:C.bg2,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+            <div style={{fontSize:10,color:C.gray,fontWeight:800,textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>📱 Base locale mise à jour</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
 
-            {/* Patrimoine */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>💼 Patrimoine total</span>
-              <div style={{textAlign:"right"}}>
-                <span style={{fontSize:12,fontWeight:800,color:C.btc}}>${fmt(saved.ao_usd||0)}</span>
-                <span style={{fontSize:10,color:C.gray,marginLeft:6}}>€{fmt(saved.ao||0)}</span>
+              {/* DD */}
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
+                <span style={{color:C.text2}}>📈 DD (historique quotidien)</span>
+                <span style={{color:C.green,fontWeight:700}}>✓ {saved.d}</span>
               </div>
-            </div>
 
-            {/* BTC */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>₿ Bitcoin</span>
-              <span style={{fontSize:12,fontWeight:800,color:C.btc}}>${fmt(Math.round(saved.btc_price||0))}</span>
-            </div>
-
-            {/* GDB.C et GDB.S */}
-            <div style={{display:"flex",gap:10,borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:9,color:C.gray,marginBottom:2}}>GDB.C</div>
-                <div style={{fontSize:12,fontWeight:800,color:C.orange||C.btc}}>${(saved.gc||0).toFixed(2)}</div>
-                <div style={{fontSize:9,color:C.gray}}>€{(saved.gc_eur||0).toFixed(2)}</div>
+              {/* Patrimoine */}
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+                <span style={{color:C.text2}}>💼 Patrimoine</span>
+                <span style={{color:C.btc,fontWeight:700}}>
+                  ${fmt(saved.ao_usd||0)} · €{fmt(saved.ao||0)}
+                </span>
               </div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:9,color:C.gray,marginBottom:2}}>GDB.S</div>
-                <div style={{fontSize:12,fontWeight:800,color:C.blue}}>${(saved.gdbs||0).toFixed(2)}</div>
-                <div style={{fontSize:9,color:C.gray}}>€{(saved.gs_eur||0).toFixed(2)}</div>
-              </div>
-            </div>
 
-            {/* Stocks */}
-            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              <div style={{fontSize:9,color:C.gray,marginBottom:5}}>POSITIONS ({saved._portfolio?.stocks?.items?.length||0} lignes)</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                {(saved._portfolio?.stocks?.items||[]).map((x,i)=>(
-                  <div key={i} style={{
-                    background:C.bg3,borderRadius:5,padding:"2px 7px",
-                    fontSize:9,color:C.text2,fontWeight:600,
-                  }}>
-                    {x.t} <span style={{color:x.pnl>=0?C.green:C.red}}>{x.pnl>=0?"+":""}${fmtK(Math.abs(x.pnl||0))}</span>
-                  </div>
-                ))}
+              {/* BTC */}
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
+                <span style={{color:C.text2}}>₿ Bitcoin</span>
+                <span style={{color:C.btc,fontWeight:700}}>${fmt(Math.round(saved.btc_price||0))}</span>
               </div>
-            </div>
 
-            {/* Banque */}
-            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              <div style={{fontSize:9,color:C.gray,marginBottom:4}}>BANQUE</div>
-              <div style={{display:"flex",gap:8}}>
+              {/* GDB.C / GDB.S */}
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
+                <span style={{color:C.text2}}>GDB.C / GDB.S</span>
+                <span style={{color:C.text2,fontWeight:700}}>
+                  <span style={{color:C.orange||C.btc}}>${(saved.gc||0).toFixed(2)}</span>
+                  {" / "}
+                  <span style={{color:C.blue}}>${(saved.gdbs||0).toFixed(2)}</span>
+                </span>
+              </div>
+
+              {/* Positions */}
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+                <div style={{fontSize:10,color:C.gray,marginBottom:5}}>
+                  📦 {(saved._portfolio?.stocks?.items||[]).length} positions enregistrées
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  {(saved._portfolio?.stocks?.items||[]).map((x,i)=>(
+                    <div key={i} style={{background:C.bg3,borderRadius:5,padding:"2px 7px",fontSize:9,color:C.text2,fontWeight:600}}>
+                      {x.t} <span style={{color:(x.pnl||0)>=0?C.green:C.red}}>{(x.pnl||0)>=0?"+":""}{fmtK(Math.abs(x.pnl||0))}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Banque */}
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:6,display:"flex",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:10,color:C.gray}}>🏦 Banque :</span>
                 {Object.entries(saved._portfolio?.bank?.breakdown||{}).map(([k,v])=>(
-                  <div key={k} style={{fontSize:10,color:C.text2}}>
+                  <span key={k} style={{fontSize:10,color:C.text2}}>
                     {k} <span style={{color:C.teal,fontWeight:700}}>€{fmt(Math.round(v))}</span>
-                  </div>
+                  </span>
                 ))}
               </div>
             </div>
@@ -4148,8 +4252,13 @@ function CloudKeyList({data, onRefresh}){
     var rows = []; var headers = [];
     if(Array.isArray(val)){
       if(val.length>0){
-        if(Array.isArray(val[0])){ headers=val[0].map(function(_,i){return "Col "+(i+1);}); rows=val; }
-        else if(typeof val[0]==="object"){ headers=Object.keys(val[0]); rows=val.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
+        var sorted = val.slice().sort(function(a,b){
+          var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
+          var db = Array.isArray(b)?b[0]:(b.d||b.date||"");
+          return db.localeCompare(da); // décroissant
+        });
+        if(Array.isArray(sorted[0])){ headers=sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
+        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
       }
     } else if(val && typeof val==="object"){
       var entries=Object.entries(val);
@@ -4223,8 +4332,12 @@ function CloudKeyList({data, onRefresh}){
         {CLOUD_KEYS.map(function(item){
           var val = data[item.key];
           var count = Array.isArray(val) ? val.length : (val && typeof val==="object") ? Object.keys(val).length : 0;
-          var lastItem = Array.isArray(val) && val.length>0 ? val[val.length-1] : null;
-          var last = lastItem ? (lastItem.d || lastItem[0] || "—") : null;
+          var last = null;
+          if(Array.isArray(val) && val.length>0){
+            // Trouver la date max (la plus récente) pour l'aperçu
+            var dates = val.map(function(r){ return Array.isArray(r)?r[0]:(r.d||r.date||null); }).filter(Boolean);
+            last = dates.length>0 ? dates.sort().reverse()[0] : null;
+          }
           var empty = !val || (Array.isArray(val) && val.length===0);
           return(
             <div key={item.key} style={{background:C.bg2,borderRadius:10,padding:"10px 12px",border:"1px solid "+(empty?C.border:C.teal+"44"),display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
@@ -4556,6 +4669,7 @@ function App(){
   const[localData,setLocalData]=useState(null);     // {totalUSD, totalEUR, date}
   const[kvData_snap,setKvData_snap]=useState(null); // {totalUSD, totalEUR, date, raw}
   const[kvError,setKvError]=useState(null);         // message si KV inaccessible
+  const[chosenSource,setChosenSource]=useState("local"); // "local" | "cloudflare"
   // Apply theme to global C on every render
   C = THEMES[themeName]||THEMES.dark;
   cc = getCC();
@@ -4667,6 +4781,7 @@ function App(){
 
   function applyStartChoice(useKV){
     setStartScreen(false);
+    setChosenSource(useKV ? "cloudflare" : "local");
     if(useKV&&kvData_snap?.raw){
       const kv=kvData_snap.raw;
       if(kv.gdb_dd)   setLiveDD(kv.gdb_dd);
@@ -5361,7 +5476,7 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
@@ -5476,32 +5591,38 @@ function App(){
           }}>
             <div style={{width:36,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
 
-            {/* Titre */}
-            <div style={{fontSize:14,fontWeight:800,color:snapResult.ok?C.green:C.red,marginBottom:12}}>
+            <div style={{fontSize:14,fontWeight:800,color:snapResult.ok?C.green:C.red,marginBottom:14}}>
               {snapResult.ok?"✅ Bases de données mises à jour":"⚠️ Erreurs lors de la mise à jour"}
             </div>
 
-            {/* Log */}
-            <div style={{background:C.bg2,borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:5}}>
+            {/* ── Base locale ── */}
+            <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>📱 Base locale</div>
               {snapResult.log.map((l,i)=>(
-                <div key={i} style={{fontSize:10,color:C.green,fontFamily:"monospace"}}>{l}</div>
+                <div key={i} style={{fontSize:11,color:l.startsWith("✓")?C.green:C.red,fontFamily:"monospace",marginBottom:3}}>{l}</div>
               ))}
               {snapResult.errors.map((e,i)=>(
-                <div key={i} style={{fontSize:10,color:C.red,fontFamily:"monospace"}}>{e}</div>
+                <div key={i} style={{fontSize:11,color:C.red,fontFamily:"monospace",marginBottom:3}}>{e}</div>
               ))}
             </div>
 
-            {/* Résultat upload si fait */}
-            {snapResult.uploadDone&&(
-              <div style={{background:C.bg2,borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:5}}>
+            {/* ── Cloudflare KV ── */}
+            {snapResult.uploadDone ? (
+              <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
+                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>☁️ Cloudflare KV</div>
                 {(snapResult.uploadLog||[]).map((l,i)=>(
-                  <div key={i} style={{fontSize:10,color:C.green,fontFamily:"monospace"}}>{l}</div>
+                  <div key={i} style={{fontSize:11,color:l.startsWith("✓")?C.green:C.red,fontFamily:"monospace",marginBottom:3}}>{l}</div>
                 ))}
                 {(snapResult.uploadErrors||[]).map((e,i)=>(
-                  <div key={i} style={{fontSize:10,color:C.red,fontFamily:"monospace"}}>{e}</div>
+                  <div key={i} style={{fontSize:11,color:C.red,fontFamily:"monospace",marginBottom:3}}>{e}</div>
                 ))}
               </div>
-            )}
+            ) : snapResult.pendingUpload ? (
+              <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
+                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>☁️ Cloudflare KV</div>
+                <div style={{fontSize:11,color:C.gray}}>En attente d'envoi…</div>
+              </div>
+            ) : null}
 
             {/* Boutons */}
             {snapResult.pendingUpload&&!snapResult.uploadDone&&(

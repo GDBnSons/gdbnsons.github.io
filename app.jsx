@@ -3460,6 +3460,81 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:sh
 /* ═══════════════════════════════════════════════════════════
    TRADE MODAL — top-level pour s'afficher depuis n'importe quel onglet
 ═══════════════════════════════════════════════════════════ */
+/* ── YahooTickerSearch : recherche de tickers par nom via Yahoo Finance ──── */
+function YahooTickerSearch({onSelect}){
+  var query_s=useState(""); var query=query_s[0]; var setQuery=query_s[1];
+  var results_s=useState([]); var results=results_s[0]; var setResults=results_s[1];
+  var loading_s=useState(false); var loading=loading_s[0]; var setLoading=loading_s[1];
+  var timer_s=useState(null); var timer=timer_s[0]; var setTimer=timer_s[1];
+
+  var EU_SUFFIXES=[".PA",".MI",".AS",".BR",".DE",".F",".HA",".L",".SW",".CO",".ST"];
+
+  function doSearch(q){
+    if(!q||q.length<2){setResults([]);return;}
+    setLoading(true);
+    var url="https://corsproxy.io/?url="+encodeURIComponent("https://query2.finance.yahoo.com/v1/finance/search?q="+encodeURIComponent(q)+"&lang=en&quotesCount=8&newsCount=0");
+    fetch(url)
+      .then(function(r){return r.json();})
+      .then(function(data){
+        var quotes=(data?.finance?.result?.[0]?.quotes||[])
+          .filter(function(x){return x.symbol&&["EQUITY","ETF","CRYPTOCURRENCY","MUTUALFUND"].includes(x.quoteType);})
+          .slice(0,7);
+        setResults(quotes);
+      })
+      .catch(function(){setResults([]);})
+      .finally(function(){setLoading(false);});
+  }
+
+  function handleChange(v){
+    setQuery(v);
+    if(timer) clearTimeout(timer);
+    var t=setTimeout(function(){doSearch(v);},200);
+    setTimer(t);
+  }
+
+  return(
+    <div>
+      <div style={{fontSize:10,color:C.gray,marginBottom:4,fontWeight:600}}>🔍 Rechercher par nom de société</div>
+      <div style={{position:"relative"}}>
+        <input value={query} onChange={function(e){handleChange(e.target.value);}}
+          placeholder="Ex: Nvidia, Apple, TotalEnergies..."
+          style={{width:"100%",background:C.bg3,border:"1px solid "+C.border,borderRadius:8,
+            padding:"8px 10px",color:C.text,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+        {loading&&<div style={{position:"absolute",right:8,top:8,fontSize:11,color:C.gray,animation:"spin .8s linear infinite"}}>↻</div>}
+      </div>
+      {results.length>0&&(
+        <div style={{background:C.bg3,borderRadius:8,border:"1px solid "+C.teal+"66",marginTop:4,overflow:"hidden"}}>
+          {results.map(function(q,i){
+            var isEU=EU_SUFFIXES.some(function(s){return q.symbol.endsWith(s);});
+            var shortName=q.shortname||q.longname||q.symbol;
+            return(
+              <div key={i} onClick={function(){
+                var base=q.symbol.includes(".")?q.symbol.split(".")[0]:q.symbol;
+                onSelect({ticker:base,yahooSym:q.symbol,name:shortName,currency:isEU?"EUR":"USD"});
+                setQuery(shortName+" ("+q.symbol+")");
+                setResults([]);
+              }} style={{
+                padding:"8px 12px",cursor:"pointer",
+                borderBottom:i<results.length-1?"1px solid "+C.border+"44":"none",
+                display:"flex",justifyContent:"space-between",alignItems:"center",
+              }}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.teal}}>{q.symbol}</div>
+                  <div style={{fontSize:10,color:C.text2,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{shortName}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:10,color:C.gray}}>{q.exchange||""}</div>
+                  <div style={{fontSize:9,color:isEU?C.blue:C.green}}>{isEU?"🇪🇺 EUR":"🇺🇸 USD"}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[mode,setMode]=useState("trade");
   const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
@@ -3637,6 +3712,15 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
               {form.ticker==="NOUVEAU" && (
                 <div style={{gridColumn:"1/-1",background:C.bg2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.teal+"44",display:"flex",flexDirection:"column",gap:10}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.teal}}>Nouveau token</div>
+
+                  {/* Recherche par nom de société → suggestions de tickers */}
+                  <YahooTickerSearch
+                    onSelect={({ticker, yahooSym, name, currency})=>{
+                      const isEU = [".PA",".MI",".AS",".BR",".DE",".F",".HA",".L"].some(s=>(yahooSym||"").endsWith(s));
+                      setForm({...form, newTicker:ticker, yahooSymbol:yahooSym||ticker, currency:isEU?"EUR":form.currency});
+                    }}
+                  />
+
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <FI label="Symbole ticker *" value={form.newTicker||""} onChange={v=>setForm({...form,newTicker:v.toUpperCase()})} placeholder="NVDA"/>
                     <FI label="Icône (emoji)" value={form.newIcon||""} onChange={v=>setForm({...form,newIcon:v})} placeholder="🟩"/>
@@ -5040,11 +5124,20 @@ function App(){
     };
   },[pullY,refreshing,handleRefresh]);
 
-  function updateBasesFromSnapshot(snap, src){
+  function updateBasesFromSnapshot(snap, src, liveSeries){
     const log = [], errors = [];
     const today = snap.d;
     const usdEur = snap.eur || src.usdEur;
     const eurUsd = 1/usdEur;
+
+    // Utiliser les séries live (post-snapshots précédents) si disponibles
+    const _DD    = liveSeries?.liveDD    || liveDD    || DD;
+    const _GDBS  = liveSeries?.liveGDBS  || liveGDBS  || GDBS;
+    const _GC    = liveSeries?.liveGC    || liveGC    || GC_FULL;
+    const _GSB   = liveSeries?.liveGSB   || liveGSB   || GS_B100_EXT;
+    const _CM    = liveSeries?.liveCM    || liveCM    || CRYPTO_MONTHLY;
+    const _SM    = liveSeries?.liveSM    || liveSM    || STOCKS_MONTHLY;
+    const _TM    = liveSeries?.liveTM    || liveTM    || TOTAL_MONTHLY;
 
     // ── Valeurs live du snapshot ───────────────────────────────────────────
     const btcLive  = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || src.btcPrice;
@@ -5056,12 +5149,12 @@ function App(){
     const MONTHS_FR= ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
 
     // ── 1. Mise à jour DD ─────────────────────────────────────────────────
-    let newDD = [...DD];
+    let newDD = [..._DD];
     const lastDD = newDD[newDD.length-1];
     const newRow = [today, cryptoEUR, totalEUR, btcLive, gdbS, usdEur];
     if(lastDD?.[0] === today){
       newDD[newDD.length-1] = newRow;
-      log.push("✓ DD : ligne du jour mise à jour");
+      log.push("✓ DD : ligne du jour mise à jour ("+today+")");
     } else if(today > (lastDD?.[0]||"")){
       newDD.push(newRow);
       newDD.sort((a,b)=>a[0].localeCompare(b[0]));
@@ -5071,7 +5164,7 @@ function App(){
     }
 
     // ── 2. Mise à jour GDBS ───────────────────────────────────────────────
-    let newGDBS = [...GDBS];
+    let newGDBS = [..._GDBS];
     if(gdbS && gdbC){
       const lastG = newGDBS[newGDBS.length-1];
       const gRow  = [today, gdbS, gdbC];
@@ -5081,7 +5174,7 @@ function App(){
     } else errors.push("GDBS : gdbS ou gdbC manquant");
 
     // ── 3. Mise à jour GC_FULL ────────────────────────────────────────────
-    let newGC = [...GC_FULL];
+    let newGC = [..._GC];
     if(gdbC){
       const lastGC = newGC[newGC.length-1];
       const gcRow  = [today, gdbC];
@@ -5091,7 +5184,7 @@ function App(){
     }
 
     // ── 4. Mise à jour GS_B100_EXT ────────────────────────────────────────
-    let newGSB = [...GS_B100_EXT];
+    let newGSB = [..._GSB];
     if(gdbS){
       const gsb = round2(gdbS/GS_JAN*100);
       const lastGSB = newGSB[newGSB.length-1];
@@ -5146,17 +5239,17 @@ function App(){
     const monthI = todayD.getMonth();
 
     // ── 6. CRYPTO_MONTHLY ─────────────────────────────────────────────────
-    let newCM = updateMonthly({...CRYPTO_MONTHLY}, cryptoEUR, year, monthI);
+    let newCM = updateMonthly({..._CM}, cryptoEUR, year, monthI);
     log.push("✓ CRYPTO_MONTHLY : mis à jour ("+year+" "+MONTHS_FR[monthI]+" EOM=€"+cryptoEUR+")");
 
     // ── 7. STOCKS_MONTHLY ─────────────────────────────────────────────────
     const stocksEUR = Math.round((src.stocks?.items||[]).filter(x=>x.cat!=="Cash"&&x.cat!=="Cash Matelas").reduce((s,x)=>s+(x.val||0),0)*usdEur);
-    let newSM = updateMonthly({...STOCKS_MONTHLY}, stocksEUR, year, monthI);
+    let newSM = updateMonthly({..._SM}, stocksEUR, year, monthI);
     log.push("✓ STOCKS_MONTHLY : mis à jour (€"+stocksEUR+")");
 
     // ── 8. TOTAL_MONTHLY ──────────────────────────────────────────────────
     const totalLiveEUR = Math.round(totalEUR);
-    let newTM = updateMonthly({...TOTAL_MONTHLY}, totalLiveEUR, year, monthI);
+    let newTM = updateMonthly({..._TM}, totalLiveEUR, year, monthI);
     log.push("✓ TOTAL_MONTHLY : mis à jour (€"+totalLiveEUR+")");
 
     // ── 9. Portfolio / Crypto / Stocks dans CURRENT (via snap) ───────────
@@ -5169,7 +5262,7 @@ function App(){
   }
 
   const addSnap=useCallback(async snap=>{
-    const result = updateBasesFromSnapshot(snap, EFF||CURRENT);
+    const result = updateBasesFromSnapshot(snap, EFF||CURRENT, {liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM});
 
     // Sauvegarder dans chartData (snapshots journaliers)
     const next=[...chartData.filter(r=>r.d!==snap.d),snap]

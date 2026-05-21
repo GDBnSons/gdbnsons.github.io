@@ -4869,6 +4869,17 @@ function App(){
       });
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
+      // Mettre à jour localData avec les nouvelles valeurs live
+      setLive(prev2=>{
+        if(prev2) setLocalData({
+          totalUSD: prev2.totalUSD||CURRENT.totalUSD,
+          totalEUR: prev2.totalEUR||CURRENT.totalEUR,
+          date: todayNC(),
+          gdbS: prev2.gdbS||CURRENT.gdbS,
+          gdbC: prev2.gdbC||CURRENT.gdbC,
+        });
+        return prev2;
+      });
       // Rapport détaillé : succès et échecs
       const successList = Object.keys(YF_MAP).filter(k=>prices[k]!=null);
       if(prices.BTC) successList.push("BTC");
@@ -4917,7 +4928,9 @@ function App(){
             const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
             const totalUSD=cryptoT+stocksT+bankUSD;
             const lastGDBS=kv.gdb_gdbs&&kv.gdb_gdbs.length>0?kv.gdb_gdbs[kv.gdb_gdbs.length-1]:null;
-            setKvData_snap({totalUSD,totalEUR:Math.round(totalUSD*uE),date:kvPort.date||"—",gdbS:lastGDBS?.[1]||CURRENT.gdbS,gdbC:lastGDBS?.[2]||CURRENT.gdbC,raw:kv});
+            const lastDD_kv=kv.gdb_dd&&kv.gdb_dd.length>0?kv.gdb_dd[kv.gdb_dd.length-1]:null;
+            const kvDate = lastDD_kv?.[0] || kvPort.date || "—";
+            setKvData_snap({totalUSD,totalEUR:Math.round(totalUSD*uE),date:kvDate,gdbS:lastGDBS?.[1]||CURRENT.gdbS,gdbC:lastGDBS?.[2]||CURRENT.gdbC,raw:kv});
           } else { setKvError("Bases KV incomplètes"); }
         } else { setKvError("KV inaccessible ("+res.status+")"); }
       } catch(e){ setKvError("KV hors ligne"); }
@@ -5326,6 +5339,15 @@ function App(){
     // Mettre à jour les états React des séries — les graphiques voient les nouvelles valeurs immédiatement
     setLiveDD(result.newDD);
     setLiveGDBS(result.newGDBS);
+    // Mettre à jour localData avec les valeurs du snapshot
+    const src = EFF||CURRENT;
+    setLocalData({
+      totalUSD: src.totalUSD,
+      totalEUR: src.totalEUR,
+      date: snap.d || todayNC(),
+      gdbS: snap.gdbs || src.gdbS,
+      gdbC: snap.gdbc || src.gdbC,
+    });
     setLiveGC(result.newGC);
     setLiveGSB(result.newGSB);
     setLiveCM(result.newCM);

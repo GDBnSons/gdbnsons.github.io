@@ -680,6 +680,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
+const APP_VERSION = "v21.23";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4333,7 +4334,7 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_stocks",    label:"Stocks (positions)"},
     {key:"gdb_bank",      label:"Banque (cash matelas)"},
     {key:"gdb_yfmap",     label:"YF_MAP (tickers Yahoo)"},
-    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)"},
+    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
   ];
 
   function doDelete(keys, all) {
@@ -4373,7 +4374,7 @@ function CloudKeyList({data, onRefresh}){
           var db = Array.isArray(b)?b[0]:(b.d||b.date||"");
           return db.localeCompare(da); // décroissant
         });
-        if(Array.isArray(sorted[0])){ headers=sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
+        if(Array.isArray(sorted[0])){ headers=meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
         else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
       }
     } else if(val && typeof val==="object"){
@@ -4484,8 +4485,7 @@ function CloudKeyList({data, onRefresh}){
 }
 
 
-function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM}){
-  // Utiliser les séries live (post-snapshot/refresh) si disponibles
+function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench}){
   var _DD   = liveDD   || DD;
   var _GDBS = liveGDBS || GDBS;
   var _GC   = liveGC   || GC_FULL;
@@ -4493,6 +4493,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
   var _CM   = liveCM   || CRYPTO_MONTHLY;
   var _SM   = liveSM   || STOCKS_MONTHLY;
   var _TM   = liveTM   || TOTAL_MONTHLY;
+  var _BENCH = liveBench || BENCH_IDX;
   var db_state = useState("DD");
   var db = db_state[0]; var setDb = db_state[1];
   var search_state = useState(""); 
@@ -4563,6 +4564,12 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       desc:"GDB.S rebase 100 au 1er jan 2026 ("+_GSB.length+" points)",
       headers:["Date","GDB.S base100"],
       rows: _GSB.slice().reverse().map(function(r){return[r[0],fmtF(r[1],3)];}),
+    },
+    "BENCH_IDX": {
+      label:"BENCH_IDX — Indices de référence",
+      desc:"BTC/ETH/SP500/NASDAQ/MSCI World depuis 2020 ("+_BENCH.length+" points)",
+      headers:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"],
+      rows: _BENCH.slice().reverse().map(function(r){return[r[0],fmtF(r[1],0),fmtF(r[2],2),fmtF(r[3],2),fmtF(r[4],2),fmtF(r[5],2)];}),
     },
     "DB": {
       label:"DB — Indices base 100",
@@ -4655,6 +4662,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
     {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
     {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
+    {name:"BENCH_IDX",   count:_BENCH.length,     last:getLast(_BENCH)},
     {name:"DB",          count:DB.length,               last:getLast(DB)},
     {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
     {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
@@ -5214,6 +5222,7 @@ function App(){
     const _CM    = liveSeries?.liveCM    || liveCM    || CRYPTO_MONTHLY;
     const _SM    = liveSeries?.liveSM    || liveSM    || STOCKS_MONTHLY;
     const _TM    = liveSeries?.liveTM    || liveTM    || TOTAL_MONTHLY;
+    const _BENCH = liveSeries?.liveBench || liveBench || BENCH_IDX;
 
     // ── Valeurs live du snapshot ───────────────────────────────────────────
     const btcLive  = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || src.btcPrice;
@@ -5318,25 +5327,47 @@ function App(){
     let newTM = updateMonthly({..._TM}, totalLiveEUR, year, monthI);
     log.push("✓ TOTAL_MONTHLY : mis à jour (€"+totalLiveEUR+")");
 
-    // ── 9. Portfolio / Crypto / Stocks dans CURRENT (via snap) ───────────
+    // ── 9. BENCH_IDX (indices de référence BTC/ETH/SP500/NASDAQ/MSCI) ──────
+    // Récupérer les valeurs depuis le snapshot (issues du dernier refresh)
+    const benchBTC   = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || btcLive || null;
+    const benchETH   = null;  // non stocké dans snap — inchangé
+    const benchSP    = null;
+    const benchNQ    = null;
+    const benchMSCI  = null;
+    // On upsert seulement si on a au moins BTC (qui vient du snapshot)
+    let newBench = [..._BENCH];
+    if(benchBTC){
+      // Garder les valeurs existantes pour ETH/SP/NQ/MSCI si pas disponibles
+      const existing = _BENCH.find(r=>r[0]===today);
+      newBench = upsert(newBench, [
+        today,
+        benchBTC,
+        existing?.[2] || null,   // ETH
+        existing?.[3] || null,   // SP500
+        existing?.[4] || null,   // NASDAQ
+        existing?.[5] || null,   // MSCI
+      ]);
+      log.push("✓ BENCH_IDX : BTC mis à jour ("+today+", $"+benchBTC+")");
+    }
+
+    // ── 10. Portfolio / Crypto / Stocks dans CURRENT (via snap) ───────────
     log.push("✓ _portfolio : sauvegardé avec date "+today);
 
     return {
       ok: errors.length===0, log, errors,
-      newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM,
+      newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM, newBench,
     };
   }
 
   const addSnap=useCallback(async snap=>{
-    const result = updateBasesFromSnapshot(snap, EFF||CURRENT, {liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM});
+    const result = updateBasesFromSnapshot(snap, EFF||CURRENT, {liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench});
 
     // Sauvegarder dans chartData (snapshots journaliers)
     const next=[...chartData.filter(r=>r.d!==snap.d),snap]
       .sort((a,b)=>a.d.localeCompare(b.d));
     setChartData(next);
 
-    // Afficher l'écran de résultat AVANT l'upload Cloudflare
-    // Mettre à jour les états React des séries — les graphiques voient les nouvelles valeurs immédiatement
+    // Mettre à jour les états React des séries
     setLiveDD(result.newDD);
     setLiveGDBS(result.newGDBS);
     // Mettre à jour localData avec les valeurs du snapshot
@@ -5353,12 +5384,13 @@ function App(){
     setLiveCM(result.newCM);
     setLiveSM(result.newSM);
     setLiveTM(result.newTM);
+    if(result.newBench) setLiveBench(result.newBench);
     setSnapResult({...result, snap, next, pendingUpload:true});
   },[chartData, EFF]);
 
   const doSnapUpload = useCallback(async()=>{
     if(!snapResult) return;
-    const {next, newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM} = snapResult;
+    const {next, newDD, newGDBS, newGC, newGSB, newCM, newSM, newTM, newBench} = snapResult;
     const uploadLog = [], uploadErrors = [];
     const liveState = snapResult.snap && snapResult.snap._portfolio
       ? snapResult.snap._portfolio : (EFF || CURRENT);
@@ -5375,7 +5407,7 @@ function App(){
       try {
         const bases = {
           gdb_txns: txns,
-          gdb_bench: liveBench || BENCH_IDX,
+          gdb_bench: newBench || liveBench || BENCH_IDX,
           // Séries temporelles
           gdb_dd:   newDD,
           gdb_gdbs: newGDBS,
@@ -5492,7 +5524,8 @@ function App(){
       {/* Logo */}
       <div style={{fontSize:48,marginBottom:8}}>₿</div>
       <div style={{fontSize:22,fontWeight:800,color:C.btc,marginBottom:4}}>GDB & Sons</div>
-      <div style={{fontSize:12,color:C.gray,marginBottom:32}}>Choisir la source de données</div>
+      <div style={{fontSize:11,color:C.gray,marginBottom:32}}>Choisir la source de données</div>
+      <div style={{position:"absolute",top:16,right:20,fontSize:10,color:C.btc,fontFamily:"monospace"}}>{APP_VERSION}</div>
 
       {startLoading ? (
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
@@ -5651,7 +5684,7 @@ function App(){
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC}/>}
         {tab===5 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveGSB={liveGSB}
-          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM}/> }
+          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench}/> }
         {tab===4 && <PageTrades txns={txns} onAdd={addTxn} onDel={delTxn} hidden={hidden} EFF={EFF} onTradeApplied={applyTradeToEFF} showAdd={showTrade} setShowAdd={setShowTrade} eur={eur}/>}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.28";
+const APP_VERSION = "v21.40";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1214,9 +1214,208 @@ const Btn=({label,onClick,color,full,outline})=>(
 );
 
 /* ═══════════════════════════════════════════════════════════
+   TICKER MODAL — chart courbe + infos live via Cloudflare proxy
+═══════════════════════════════════════════════════════════ */
+const TF_CONFIG = [
+  { label:"1h",  interval:"5m",   range:"1d"   },
+  { label:"4h",  interval:"15m",  range:"5d"   },
+  { label:"1J",  interval:"1h",   range:"5d"   },
+  { label:"1S",  interval:"1d",   range:"1mo"  },
+  { label:"1M",  interval:"1d",   range:"3mo"  },
+];
+
+function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
+  const [tf, setTf]       = useState(3);       // default 1S
+  const [data, setData]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]     = useState(null);
+
+  const fetchChart = async (tfIdx) => {
+    setLoading(true); setErr(null);
+    const { interval, range } = TF_CONFIG[tfIdx];
+    try {
+      const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(ticker)
+        + "&interval=" + interval + "&range=" + range;
+      const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
+      const d = await r.json();
+      if(d.error) throw new Error(d.error);
+      setData(d);
+    } catch(e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchChart(tf); }, [ticker, tf]);
+
+  const fmtMktCap = v => {
+    if(!v) return "—";
+    if(v >= 1e12) return (v/1e12).toFixed(2)+"T";
+    if(v >= 1e9)  return (v/1e9).toFixed(1)+"B";
+    if(v >= 1e6)  return (v/1e6).toFixed(0)+"M";
+    return v.toLocaleString("fr-FR");
+  };
+
+  const price     = data?.price;
+  const prevClose = data?.prevClose;
+  const currency  = data?.currency || "USD";
+  const isUSD     = currency === "USD";
+  // Conversion vers monnaie observée
+  const cvPrice = v => v == null ? null : (eur ? v * usdEur : (isUSD ? v : v));
+  const priceDisp  = cvPrice(price);
+  const pnl1d      = (price != null && prevClose != null) ? cvPrice(price - prevClose) : null;
+  const pct1d      = (price != null && prevClose != null && prevClose !== 0) ? (price - prevClose)/prevClose : null;
+  const cur        = eur ? "€" : (isUSD ? "$" : currency);
+  const fmtP       = v => v == null ? "—" : (v>=0?"+":"")+cur+(Math.abs(v)>=100?Math.round(Math.abs(v)).toLocaleString("fr-FR"):Math.abs(v).toFixed(2));
+  const fmtPct     = v => v == null ? "—" : (v>=0?"+":"")+( Math.abs(v)*100).toFixed(2)+"%";
+
+  // Chart SVG — courbe simple
+  const candles = data?.candles || [];
+  const closes  = candles.map(c=>c.c).filter(v=>v!=null);
+  const W=320, H=120, PAD=6;
+  const minV = Math.min(...closes), maxV = Math.max(...closes);
+  const range2 = maxV - minV || 1;
+  const toY = v => PAD + (1-(v-minV)/range2)*(H-PAD*2);
+  const toX = (i,n) => PAD + (i/(n-1||1))*(W-PAD*2);
+  const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
+  const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
+  const lineColor = isUp ? C.green : C.red;
+
+  // Formater l'axe de temps
+  const fmtTs = ts => {
+    const d = new Date(ts);
+    const tfL = TF_CONFIG[tf].label;
+    if(["1h","4h"].includes(tfL)) return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
+    return d.getDate()+"/"+(d.getMonth()+1);
+  };
+
+  // Quelques labels X (5 max)
+  const xLabels = closes.length > 1
+    ? [0, Math.floor(closes.length/4), Math.floor(closes.length/2), Math.floor(3*closes.length/4), closes.length-1]
+        .filter((v,i,a)=>a.indexOf(v)===i)
+        .map(i=>({ i, x: toX(i, closes.length), label: fmtTs(candles[i]?.t) }))
+    : [];
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:1000,
+      background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end",
+    }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
+        padding:"0 0 32px 0", maxHeight:"85vh", overflowY:"auto",
+      }}>
+        {/* Handle */}
+        <div style={{display:"flex",justifyContent:"center",padding:"10px 0 4px"}}>
+          <div style={{width:36,height:4,borderRadius:2,background:C.border}}/>
+        </div>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 18px 12px"}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:800,color:C.text}}>{ticker}</div>
+            {data?.name && <div style={{fontSize:11,color:C.gray,marginTop:2}}>{data.name}</div>}
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:C.gray,fontSize:22,cursor:"pointer",padding:"4px 8px"}}>✕</button>
+        </div>
+
+        <div style={{padding:"0 16px"}}>
+          {/* Prix live + P&L 1d */}
+          {!loading && !err && price != null && (
+            <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:14}}>
+              <span style={{fontSize:26,fontWeight:900,color:C.text}}>
+                {cur}{priceDisp>=100?Math.round(priceDisp).toLocaleString("fr-FR"):priceDisp?.toFixed(2)}
+              </span>
+              <span style={{fontSize:13,fontWeight:700,color:pnl1d>=0?C.green:C.red}}>
+                {fmtP(pnl1d)}
+              </span>
+              <span style={{fontSize:12,fontWeight:700,padding:"3px 8px",borderRadius:6,
+                background:pct1d>=0?C.green+"22":C.red+"22",color:pct1d>=0?C.green:C.red}}>
+                {fmtPct(pct1d)}
+              </span>
+            </div>
+          )}
+
+          {/* Market Cap */}
+          {data?.marketCap && (
+            <div style={{fontSize:10,color:C.gray,marginBottom:14}}>
+              Market Cap <b style={{color:C.text2}}>{fmtMktCap(data.marketCap)}</b>
+              {data.exchange && <span style={{marginLeft:10}}>Bourse <b style={{color:C.text2}}>{data.exchange}</b></span>}
+            </div>
+          )}
+
+          {/* Timeframe selector */}
+          <div style={{display:"flex",gap:4,marginBottom:12,background:C.bg1,borderRadius:10,padding:3}}>
+            {TF_CONFIG.map((t,i)=>(
+              <button key={i} onClick={()=>setTf(i)} style={{
+                flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
+                border:"none",cursor:"pointer",
+                background:tf===i?C.blue:"transparent",
+                color:tf===i?"#fff":C.gray,
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Chart */}
+          <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4}}>
+            {loading && (
+              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:12}}>
+                Chargement…
+              </div>
+            )}
+            {err && (
+              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.red,fontSize:11,textAlign:"center",padding:"0 16px"}}>
+                {err}
+              </div>
+            )}
+            {!loading && !err && closes.length > 1 && (
+              <svg width="100%" viewBox={"0 0 "+W+" "+(H+16)} style={{display:"block",overflow:"visible"}}>
+                {/* Zone sous la courbe */}
+                <defs>
+                  <linearGradient id={"tcg_"+ticker} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={lineColor} stopOpacity="0.25"/>
+                    <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
+                  </linearGradient>
+                </defs>
+                <polygon
+                  points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)}
+                  fill={"url(#tcg_"+ticker+")"}
+                />
+                {/* Courbe */}
+                <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round"/>
+                {/* Labels X */}
+                {xLabels.map(({x,label},i)=>(
+                  <text key={i} x={x} y={H+14} textAnchor="middle" fill={C.text3} fontSize={7}>{label}</text>
+                ))}
+                {/* Dernier prix label */}
+                {closes.length>0&&(()=>{
+                  const lastY = toY(closes[closes.length-1]);
+                  const lastX = toX(closes.length-1, closes.length);
+                  return (
+                    <g>
+                      <circle cx={lastX} cy={lastY} r={3} fill={lineColor}/>
+                    </g>
+                  );
+                })()}
+              </svg>
+            )}
+            {!loading && !err && closes.length <= 1 && (
+              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:11}}>
+                Données insuffisantes
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
    PORTFOLIO SECTION ROW — cliquable, expand avec ligne détail
 ═══════════════════════════════════════════════════════════ */
-function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.852, eurUsd=1.173}){
+function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.852, eurUsd=1.173, onTickerClick}){
   const {n, icon, color, totalUSD, totalEUR, pct, items} = section;
   const totalPnl = items.reduce((s,x)=>s+(x.pnl||0), 0);
 
@@ -1284,26 +1483,12 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
           borderTop:"none", borderRadius:"0 0 12px 12px",
           overflow:"hidden",
         }}>
-          {/* Section summary bar */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border,borderBottom:`1px solid ${color+"33"}`}}>
-            {[
-              ["Valorisation", hidden?"***":fmtV(totalUSD), C.text],
-              ["P&L total", hidden?"***":fmtP2(totalPnl), totalPnl>=0?C.green:C.red],
-              ["Part portefeuille", pct.toFixed(1)+"%", color],
-            ].map(([l,v,c],i)=>(
-              <div key={i} style={{background:C.bg2,padding:"10px 12px",textAlign:"center"}}>
-                <div style={{fontSize:9,color:C.gray,marginBottom:3}}>{l}</div>
-                <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
-              </div>
-            ))}
-          </div>
-
           {/* Line items */}
           {items.map((item,i)=>{
             const isLast=i===items.length-1;
             const pnlPct=item.pct??(item.pnl&&item.investi?item.pnl/item.investi:null);
             return(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66"}}>
+              <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
                 {/* Icon */}
                 {(()=>{
                   const Logo=item.iconComponent?BankLogo[item.iconComponent]:null;
@@ -2034,7 +2219,7 @@ function buildSections(L){
       })),
     },
     {
-      key:"indices", n:"Indices ETF", icon:"📈", color:"#1E40AF",
+      key:"indices", n:"Indices ETF", icon:"📈", color:"#4A90D9",
       totalUSD: indicesUSD,
       totalEUR: Math.round(indicesUSD*usdEur),
       pct: pct(indicesUSD),
@@ -2048,7 +2233,7 @@ function buildSections(L){
       })),
     },
     {
-      key:"picking", n:"Stock Picking", icon:"🎯", color:"#0EA5E9",
+      key:"picking", n:"Stock Picking", icon:"🎯", color:"#7B68EE",
       totalUSD: pickingUSD,
       totalEUR: Math.round(pickingUSD*usdEur),
       pct: pct(pickingUSD),
@@ -2499,6 +2684,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
   const[mode,setMode]=useState("detail");
   const[selSlice,setSelSlice]=useState(null);
   const[openSec,setOpenSec]=useState(null);
+  const[tickerModal,setTickerModal]=useState(null);
   const SECTIONS = buildSections(EFF||CURRENT);
   // realD = même source que le donut portfolio — SECTIONS live
   const sectionsTotal = SECTIONS.reduce((s,sec)=>s+sec.totalUSD, 0);
@@ -2530,6 +2716,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
   const totalDisplay = eur ? totalEUR : totalUSD;
 
   return(
+    <>
     <div>
       {/* ── View selector — 2 onglets ── */}
       <div style={{display:"flex",gap:4,background:C.bg1,borderRadius:10,padding:4,marginBottom:14}}>
@@ -2708,6 +2895,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
               section={sec}
               open={openSec===sec.key}
               onToggle={()=>setOpenSec(openSec===sec.key?null:sec.key)}
+              onTickerClick={t=>setTickerModal(t)}
               hidden={hidden}
               eur={eur}
               usdEur={_src.usdEur||0.852}
@@ -2762,6 +2950,15 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
         </>
       )}
     </div>
+    {tickerModal && (
+      <TickerModal
+        ticker={tickerModal}
+        eur={eur}
+        usdEur={(_src||EFF||CURRENT).usdEur||0.86}
+        onClose={()=>setTickerModal(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -2797,9 +2994,14 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
     const lastDay = new Date(parseInt(year), mi+1, 0).getDate();
     return usdEurAtDate(`${year}-${pad(mi)}-${lastDay}`);
   };
-  // Convertit un montant USD selon mode eur/$ et taux spécifique
-  const cvt = (usd, rate) => usd == null ? null : eur ? Math.round(usd * rate) : usd;
   const cur = eur ? "€" : "$";
+
+  // ── Unités des données statiques par catégorie ────────────────────────────
+  // crypto  → BOM/EOM/PNL en €, INV en €
+  // stocks  → BOM/EOM/PNL en $, INV en €
+  // total   → BOM/EOM/PNL en €, INV en €
+  // dataInEUR = true : BOM/EOM/PNL sont en € pour toutes les catégories
+  const dataInEUR = true;
 
   // ── Fusionne les données historiques avec les snapshots récents ────────────
   const getMonthlyData = (category, year) => {
@@ -2807,18 +3009,47 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
                 : category==="stocks" ? STOCKS_MONTHLY[year]
                 : TOTAL_MONTHLY[year];
     if(!base) return null;
-
-    // Override avec les données live (EFF) pour le mois courant
     const result = {...base};
-    if(category==="crypto" && EFF){
-      const now = new Date(); const mi = now.getMonth();
-      if(year==="2026"&&mi<12){
-        // EOM live en USD (les données statiques sont en USD)
-        const liveValUSD = EFF.crypto.total;
-        result.eom = [...result.eom]; result.eom[mi] = Math.round(liveValUSD);
-        const bom = result.bom[mi]||0;
-        result.pnl = [...result.pnl]; result.pnl[mi] = bom?Math.round(liveValUSD)-bom:null;
-        result.pct = [...result.pct]; result.pct[mi] = bom?(Math.round(liveValUSD)-bom)/bom:null;
+    if(category==="crypto"){
+      const nowNC   = new Date(Date.now() + 11*60*60*1000);
+      const curYear = String(nowNC.getFullYear());
+      const curMI   = nowNC.getMonth();
+      const curYYMM = `${curYear}-${String(curMI+1).padStart(2,"0")}`;
+      if(year === curYear && curMI < 12){
+        // Priorité 1 : valeur live EFF
+        const liveEUR = EFF ? Math.round(EFF.crypto.total * (src?.usdEur || 0.86)) : null;
+        // Priorité 2 : valeur la plus récente dans DD col[1] pour ce mois
+        const ddRows  = _DD_ST.filter(r=>r[0]&&r[0].startsWith(curYYMM)&&r[1]!=null);
+        const ddEUR   = ddRows.length ? ddRows[ddRows.length-1][1] : null;
+        const eomVal  = liveEUR || ddEUR;
+
+        // Vérifie si le mois courant est déjà dans la base
+        const MONTHS_FR_LOCAL = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
+        const curMonLabel = MONTHS_FR_LOCAL[curMI];
+        const existingM   = result.m || [];
+        const monthExists = existingM.includes(curMonLabel);
+
+        if(!monthExists && eomVal){
+          // Nouveau mois : figer EOM du mois précédent, créer ligne mois courant
+          // BOM = dernier EOM non-null de la base
+          const prevEOM = [...(result.eom||[])].filter(v=>v!=null).slice(-1)[0] || eomVal;
+          const inv     = result.inv?.[curMI] || 0;
+          const pnl     = Math.round(eomVal - prevEOM - inv);
+          const pct     = prevEOM ? pnl / prevEOM : 0;
+          result.m   = [...existingM]; result.m[curMI]   = curMonLabel;
+          result.bom = [...(result.bom||[])]; result.bom[curMI] = prevEOM;
+          result.eom = [...(result.eom||[])]; result.eom[curMI] = eomVal;
+          result.pnl = [...(result.pnl||[])]; result.pnl[curMI] = pnl;
+          result.pct = [...(result.pct||[])]; result.pct[curMI] = pct;
+          result.inv = [...(result.inv||[])]; result.inv[curMI] = inv;
+        } else if(monthExists && eomVal){
+          // Mois existant : mise à jour EOM live
+          result.eom = [...result.eom]; result.eom[curMI] = eomVal;
+          const bom = result.bom[curMI] || 0;
+          const inv = result.inv?.[curMI] || 0;
+          result.pnl = [...result.pnl]; result.pnl[curMI] = bom ? eomVal - bom - inv : null;
+          result.pct = [...result.pct]; result.pct[curMI] = bom ? (eomVal - bom - inv)/bom : null;
+        }
       }
     }
     return result;
@@ -2833,24 +3064,52 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
   const catLabel = cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total";
   const catColor = cat==="crypto"?C.btc:cat==="stocks"?C.blue:C.green;
 
-  // ── Calcul résumé annuel — % invariant (ratio), montants convertis ─────────
-  // Les données statiques BOM/EOM/PNL sont en USD → convertir avec taux du mois
-  const realPct = (data?.bom||[]).map((bom,i)=>{
-    const pnl = data.pnl?.[i];
-    return (pnl!=null && bom!=null && bom!==0) ? pnl/bom : null;
-  });
-
-  // Tableaux convertis (en € ou en $ selon mode)
-  const cvtBOM = i => { const v=data?.bom?.[i]; if(v==null) return null; return cvt(v, bomRate(safeYr,i)); };
-  const cvtEOM = i => { const v=data?.eom?.[i]; if(v==null) return null; return cvt(v, eomRate(safeYr,i)); };
-  const cvtPNL = i => {
-    // P&L FX-aware : EOM(€) - BOM(€) - inv(€)  /  ou EOM($) - BOM($) - inv($)
-    const bom=data?.bom?.[i], eom=data?.eom?.[i], inv=data?.inv?.[i]??0;
-    if(bom==null||eom==null) return data?.pnl?.[i]!=null ? cvt(data.pnl[i], eomRate(safeYr,i)) : null;
-    if(!eur) return eom - bom - inv;
-    return Math.round(eom*eomRate(safeYr,i)) - Math.round(bom*bomRate(safeYr,i)) - Math.round(inv*bomRate(safeYr,i));
+  // ── Fonctions de conversion ───────────────────────────────────────────────
+  // BOM/EOM/PNL : si dataInEUR → déjà en €, sinon en $
+  //   mode € : dataInEUR → garder | data$ → × taux
+  //   mode $ : dataInEUR → ÷ taux | data$ → garder
+  const cvtBOM_EOM = (v, rate) => {
+    if(v == null) return null;
+    if(eur)  return dataInEUR ? v                    : Math.round(v * rate);
+    else     return dataInEUR ? Math.round(v / rate) : v;
   };
-  const cvtINV = i => { const v=data?.inv?.[i]; if(!v) return null; return cvt(v, bomRate(safeYr,i)); };
+  // INV toujours en € dans les données statiques
+  //   mode € → garder | mode $ → ÷ taux
+  const cvtINV_val = (v, rate) => {
+    if(!v) return null;
+    return eur ? v : Math.round(v / rate);
+  };
+
+  const cvtBOM = i => cvtBOM_EOM(data?.bom?.[i], bomRate(safeYr,i));
+  const cvtEOM = i => cvtBOM_EOM(data?.eom?.[i], eomRate(safeYr,i));
+  const cvtINV = i => cvtINV_val(data?.inv?.[i], bomRate(safeYr,i));
+
+  const cvtPNL = i => {
+    const bom = data?.bom?.[i], eom = data?.eom?.[i];
+    const invEUR = data?.inv?.[i] ?? 0;
+    const rate_bom = bomRate(safeYr, i);
+    const rate_eom = eomRate(safeYr, i);
+    if(bom == null || eom == null) {
+      const rawPnl = data?.pnl?.[i];
+      if(rawPnl == null) return null;
+      // rawPnl est dans l'unité native (€ ou $)
+      if(eur)  return dataInEUR ? rawPnl                    : Math.round(rawPnl * rate_eom);
+      else     return dataInEUR ? Math.round(rawPnl / rate_eom) : rawPnl;
+    }
+    // P&L = EOM_cible - BOM_cible - INV_cible
+    const eomC = cvtBOM_EOM(eom, rate_eom);
+    const bomC = cvtBOM_EOM(bom, rate_bom);
+    const invC = eur ? invEUR : Math.round(invEUR / rate_bom);
+    return eomC - bomC - invC;
+  };
+
+  // ── % FX-aware : P&L converti / BOM converti ─────────────────────────────
+  const realPct = (data?.bom||[]).map((bom,i)=>{
+    if(bom==null) return null;
+    const pnl = cvtPNL(i);
+    const bomC = cvtBOM(i);
+    return (pnl!=null && bomC && bomC!==0) ? pnl/bomC : null;
+  });
 
   const validPnlC = data?.m?.map((_,i)=>cvtPNL(i)).filter(v=>v!=null)??[];
   const validPct = realPct.filter(v=>v!=null);

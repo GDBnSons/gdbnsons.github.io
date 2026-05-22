@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.47";
+const APP_VERSION = "v21.48";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1239,6 +1239,15 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const [dragY, setDragY]   = useState(0);
   const touchStartY = useRef(null);
   const sheetRef    = useRef(null);
+  const [crosshair, setCrosshair] = useState(null); // {i, x, y, price, ts}
+  const svgRef = useRef(null);
+
+  // Bloquer le scroll du body quand le modal est ouvert
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
 
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
@@ -1459,6 +1468,13 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             </div>
           )}
 
+          {/* Debug info — visible si marketCap manquant */}
+          {data && !data.marketCap && !data.sector && (
+            <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
+              <b>Debug:</b> marketCap={String(data.marketCap)} sector="{data.sector}" name="{data.name}" quoteType="{data.quoteType}"
+            </div>
+          )}
+
           {/* Cap. boursière + Secteur — style Yahoo Finance */}
           {(data?.marketCap || data?.sector || data?.exchange) && (
             <div style={{marginBottom:14,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
@@ -1525,34 +1541,105 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               </div>
             )}
             {err && (
-              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.red,fontSize:11,textAlign:"center",padding:"0 16px"}}>
-                Données indisponibles
+              <div style={{padding:"12px 16px",background:C.red+"11",borderRadius:8,border:`1px solid ${C.red}44`,marginBottom:4}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:4}}>⚠ Erreur de chargement</div>
+                <div style={{fontSize:10,color:C.red+"cc",wordBreak:"break-all"}}>{err}</div>
+                <button onClick={()=>fetchChart(tf)} style={{marginTop:8,fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer"}}>
+                  Réessayer
+                </button>
               </div>
             )}
-            {!loading && !err && closes.length > 1 && (
-              <svg width="100%" viewBox={"0 0 "+W+" "+(H+18)} style={{display:"block",overflow:"visible"}}>
-                <defs>
-                  <linearGradient id={"tcg_"+ticker.replace(/[^a-z0-9]/gi,"_")} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
-                    <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
-                  </linearGradient>
-                </defs>
-                <polygon
-                  points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)}
-                  fill={"url(#tcg_"+ticker.replace(/[^a-z0-9]/gi,"_")+")"}
-                />
-                <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
-                {xIdxs.map((ci,i)=>(
-                  <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
-                    {fmtTs(candles[ci]?.t)}
-                  </text>
-                ))}
-                {closes.length>0&&(()=>{
-                  const lx=toX(closes.length-1,closes.length), ly=toY(closes[closes.length-1]);
-                  return <circle cx={lx} cy={ly} r={3} fill={lineColor}/>;
-                })()}
-              </svg>
-            )}
+            {!loading && !err && closes.length > 1 && (()=>{
+              // Crosshair handlers
+              const SVG_W = 320, SVG_H = H + 18;
+              const hitTest = (clientX, svgEl) => {
+                if(!svgEl) return null;
+                const rect = svgEl.getBoundingClientRect();
+                const relX = (clientX - rect.left) / rect.width * SVG_W;
+                const n = closes.length;
+                // Trouver l'index le plus proche
+                let best = 0, bestDist = Infinity;
+                for(let i=0;i<n;i++){
+                  const d = Math.abs(toX(i,n) - relX);
+                  if(d < bestDist){ bestDist=d; best=i; }
+                }
+                return { i:best, x:toX(best,n), y:toY(closes[best]), price:closes[best], ts:candles[best]?.t };
+              };
+              const onSvgTouchMove = e => {
+                e.preventDefault();
+                const ch = hitTest(e.touches[0].clientX, svgRef.current);
+                if(ch) setCrosshair(ch);
+              };
+              const onSvgTouchEnd = () => setCrosshair(null);
+              const onMouseMove = e => {
+                const ch = hitTest(e.clientX, svgRef.current);
+                if(ch) setCrosshair(ch);
+              };
+              const onMouseLeave = () => setCrosshair(null);
+              const ch = crosshair;
+              const gradId = "tcg_"+ticker.replace(/[^a-z0-9]/gi,"_");
+              return (
+                <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
+                  style={{display:"block",overflow:"visible",touchAction:"none"}}
+                  onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
+                  onMouseMove={onMouseMove} onMouseLeave={onMouseLeave}>
+                  <defs>
+                    <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
+                      <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
+                    </linearGradient>
+                  </defs>
+                  <polygon
+                    points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)}
+                    fill={"url(#"+gradId+")"}
+                  />
+                  <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+                  {/* Labels X */}
+                  {xIdxs.map((ci,i)=>(
+                    <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
+                      {fmtTs(candles[ci]?.t)}
+                    </text>
+                  ))}
+                  {/* Point dernier prix */}
+                  {!ch && (()=>{
+                    const lx=toX(closes.length-1,closes.length), ly=toY(closes[closes.length-1]);
+                    return <circle cx={lx} cy={ly} r={3} fill={lineColor}/>;
+                  })()}
+                  {/* Crosshair */}
+                  {ch && (<>
+                    {/* Ligne verticale */}
+                    <line x1={ch.x} y1={PAD} x2={ch.x} y2={H-PAD}
+                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
+                    {/* Ligne horizontale */}
+                    <line x1={PAD} y1={ch.y} x2={SVG_W-PAD} y2={ch.y}
+                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
+                    {/* Point */}
+                    <circle cx={ch.x} cy={ch.y} r={4} fill={lineColor} stroke={C.bg0} strokeWidth={1.5}/>
+                    {/* Label prix — axe Y gauche */}
+                    {(()=>{
+                      const priceDisp2 = eur ? ch.price * usdEur : ch.price;
+                      const pLabel = cur + (priceDisp2 >= 100 ? Math.round(priceDisp2).toLocaleString("fr-FR") : priceDisp2.toFixed(2));
+                      const labelY = Math.max(10, Math.min(ch.y + 4, H-4));
+                      return (<>
+                        <rect x={PAD} y={labelY-8} width={pLabel.length*5.5+4} height={11} rx={3}
+                          fill={lineColor} opacity={0.9}/>
+                        <text x={PAD+3} y={labelY+1} fill="#000" fontSize={7.5} fontWeight="700">{pLabel}</text>
+                      </>);
+                    })()}
+                    {/* Label date — axe X bas */}
+                    {ch.ts && (()=>{
+                      const dLabel = fmtTs(ch.ts);
+                      const lx2 = Math.max(20, Math.min(ch.x, SVG_W-24));
+                      return (<>
+                        <rect x={lx2-dLabel.length*3-2} y={H+5} width={dLabel.length*6+4} height={10} rx={3}
+                          fill={lineColor} opacity={0.9}/>
+                        <text x={lx2} y={H+12} textAnchor="middle" fill="#000" fontSize={7} fontWeight="700">{dLabel}</text>
+                      </>);
+                    })()}
+                  </>)}
+                </svg>
+              );
+            })()}
             {!loading && !err && closes.length <= 1 && (
               <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:11}}>
                 Données insuffisantes

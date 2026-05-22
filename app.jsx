@@ -300,6 +300,8 @@ let YF_MAP = {
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"GOLD.PA", IBKR:"IBKR", STRC:"STRC", ANET:"ANET", HUT:"HUT", URTH:"URTH",
 };
+// Icônes personnalisées pour les nouveaux tickers (mutable, sauvegardé dans gdb_icons)
+let CUSTOM_ICONS = {};
 // Tickers EU dont le prix est en € → à convertir en $ après fetch
 const EUR_YAHOO_TICKERS_SET = new Set(["AVIO","AI","GOLD"]);
 
@@ -680,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.23";
+const APP_VERSION = "v21.27";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1682,42 +1684,82 @@ function round2(v){ return Math.round(v * 100) / 100; }
 ─────────────────────────────────────────────────────── */
 function PerfStrip({eur, EFF}){
   const usd=!eur;
-  // P&L in € always (portfolio is tracked in €), convert to $ if needed
   const _src = EFF||CURRENT;
   const rate = _src.eurUsd;
-  const pnl = (v) => eur ? v : Math.round(v * rate);
   const cur  = eur ? "€" : "$";
-  // P&L calculés depuis _DD col 2 (total hors immo €)
+  // Utiliser les séries live (mises à jour par snapshots/refresh)
+  const _DD   = liveDD   || DD;
+  const _GDBS = liveGDBS || GDBS;
+  // P&L calculés depuis _DD — col 2 = totalEUR
   const _ddAt = days => {
-    const t=new Date(); t.setDate(t.getDate()-days);
+    const t=new Date(Date.now() + NC_OFFSET_MS); t.setDate(t.getUTCDate()-days);
     const ds=t.toISOString().slice(0,10);
-    return _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
+    return _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r:null),null);
   };
-  // _aoNow = valeur live si refreshée (EFF), sinon dernier point _DD
   const _ddLast = _DD.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
-  const _aoNow  = _src.totalEUR || _ddLast; // EFF.totalEUR prioritaire après refresh
-  const _ao1j  = _ddAt(1)   ?? _aoNow;
-  const _ao1s  = _ddAt(7)   ?? _aoNow;
-  const _ao1m  = _ddAt(30)  ?? _aoNow;
-  const _ao6m  = _ddAt(182) ?? _aoNow;
-  const _ao1y  = _ddAt(365) ?? _aoNow;
+  const _aoNow  = _src.totalEUR || _ddLast;
+  // Variation : € = différence en €, $ = convertir les deux extrémités au taux de leur date
+  const _pnlCell = days => {
+    const ref = _ddAt(days);
+    if(!ref) return {pnl:0, pct:0};
+    const refEUR = ref[2];
+    if(eur){
+      const diff = _aoNow - refEUR;
+      return {pnl:Math.round(diff), pct:refEUR?diff/refEUR:0};
+    } else {
+      // Convertir chaque valeur au taux de sa date
+      const usdEurRef = ref[5] || _src.usdEur;
+      const refUSD = Math.round(refEUR / usdEurRef);
+      const nowUSD = Math.round(_aoNow / _src.usdEur);
+      const diff = nowUSD - refUSD;
+      return {pnl:diff, pct:refUSD?diff/refUSD:0};
+    }
+  };
+  const _ao1j  = _ddAt(1);
+  const _ao1s  = _ddAt(7);
+  const _ao1m  = _ddAt(30);
+  const _ao6m  = _ddAt(182);
+  const _ao1y  = _ddAt(365);
   const cells = [
-    { label:"1J",  pnl:pnl(Math.round(_aoNow-_ao1j)), pct:_ao1j?(_aoNow-_ao1j)/_ao1j:0 },
-    { label:"1S",  pnl:pnl(Math.round(_aoNow-_ao1s)), pct:_ao1s?(_aoNow-_ao1s)/_ao1s:0 },
-    { label:"1M",  pnl:pnl(Math.round(_aoNow-_ao1m)), pct:_ao1m?(_aoNow-_ao1m)/_ao1m:0 },
-    { label:"6M",  pnl:pnl(Math.round(_aoNow-_ao6m)), pct:_ao6m?(_aoNow-_ao6m)/_ao6m:0 },
-    { label:"1A",  pnl:pnl(Math.round(_aoNow-_ao1y)), pct:_ao1y?(_aoNow-_ao1y)/_ao1y:0 },
+    { label:"1J",  ..._pnlCell(1)   },
+    { label:"1S",  ..._pnlCell(7)   },
+    { label:"1M",  ..._pnlCell(30)  },
+    { label:"6M",  ..._pnlCell(182) },
+    { label:"1A",  ..._pnlCell(365) },
   ];
-  // Perfs GDB.C / GDB.S depuis _GDBS
+  // Perfs GDB.C / GDB.S depuis _GDBS — tenant compte du taux de change si mode €
   const _gdbsAt = days => {
-    const t=new Date(); t.setDate(t.getDate()-days);
+    const t=new Date(Date.now() + NC_OFFSET_MS); t.setDate(t.getUTCDate()-days);
     const ds=t.toISOString().slice(0,10);
     return _GDBS.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
   };
+  // Taux de change à une date donnée (depuis _DD col 5)
+  const _usdEurAt = days => {
+    const t=new Date(Date.now() + NC_OFFSET_MS); t.setDate(t.getUTCDate()-days);
+    const ds=t.toISOString().slice(0,10);
+    const row = _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[5]?r:null),null);
+    return row ? row[5] : _src.usdEur; // fallback taux actuel
+  };
+  const usdEurNow = _src.usdEur;
   const _gcNow = calcGdbPrices(_src).gdbC;
   const _gsNow = calcGdbPrices(_src).gdbS;
-  const _gcPerf = d => { const r=_gdbsAt(d); return r&&r[2]?parseFloat((_gcNow/r[2]-1).toFixed(4)):null; };
-  const _gsPerf = d => { const r=_gdbsAt(d); return r&&r[1]?parseFloat((_gsNow/r[1]-1).toFixed(4)):null; };
+  // Variation : en $ = ratio pur, en € = corrigé du taux de change
+  const _gcPerf = d => {
+    const r=_gdbsAt(d); if(!r||!r[2]) return null;
+    if(eur){
+      const usdEurRef = _usdEurAt(d);
+      return parseFloat((((_gcNow*usdEurNow)/(r[2]*usdEurRef))-1).toFixed(4));
+    }
+    return parseFloat((_gcNow/r[2]-1).toFixed(4));
+  };
+  const _gsPerf = d => {
+    const r=_gdbsAt(d); if(!r||!r[1]) return null;
+    if(eur){
+      const usdEurRef = _usdEurAt(d);
+      return parseFloat((((_gsNow*usdEurNow)/(r[1]*usdEurRef))-1).toFixed(4));
+    }
+    return parseFloat((_gsNow/r[1]-1).toFixed(4));
+  };
   // GDB prices depuis _GDBS
   const _gdbs26 = _GDBS.filter(r=>r[0]>='2026-01-01');
   const {gdbS: _gsT, gdbC: _gcT} = calcGdbPrices(EFF||CURRENT);
@@ -1891,25 +1933,30 @@ const BankLogo = {
   ),
 };
 
-const TICKER_ICONS = {
+const TICKER_ICONS_BASE = {
   BTC:   "₿",
-  QQQ:   "🖥️",   // Nasdaq 100
-  AIA:   "🌏",   // Asia 50
-  JEDI:  "🚀",   // Space/Defence
-  AVIO:  "✈️",   // Aviation/Aerospace
-  ROBO:  "🤖",   // Robotics
-  XLE:   "⚡",   // Energy
-  OIH:   "🛢️",   // Oil & Gas
-  AI:    "☁️",   // Air Liquide
-  DJT:   "☢️",   // Trump Media
-  GOLD:  "🏅",   // Or
+  QQQ:   "🖥️",
+  AIA:   "🌏",
+  JEDI:  "🚀",
+  AVIO:  "✈️",
+  ROBO:  "🤖",
+  XLE:   "⚡",
+  OIH:   "🛢️",
+  AI:    "☁️",
+  DJT:   "☢️",
+  GOLD:  "🏅",
   BCI:   "🏦",
-  IBKR:  "💼",   // Interactive Brokers
-  STRC:  "₿",   // Strike — Bitcoin payments
-  ANET:  "🌐",   // Arista Networks — cloud networking
-  HUT:   "⛏️",   // Hut 8 — Bitcoin mining
-  "2CRSI": "🖥️", // 2CRSi — serveurs HPC
+  IBKR:  "💼",
+  STRC:  "₿",
+  ANET:  "🌐",
+  HUT:   "⛏️",
+  "2CRSI": "🖥️",
 };
+// Proxy qui fusionne les icônes custom (CUSTOM_ICONS écrase TICKER_ICONS_BASE)
+const TICKER_ICONS = new Proxy({}, {
+  get(_, key){ return CUSTOM_ICONS[key] || TICKER_ICONS_BASE[key]; },
+  has(_, key){ return key in CUSTOM_ICONS || key in TICKER_ICONS_BASE; },
+});
 
 /* ─── PORTFOLIO — nouvelle structure unifiée ─────────────────────────
    Remplace la distinction crypto/stocks/bank par une seule collection
@@ -2225,67 +2272,68 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
         {/* P&L 1J / 1S / 1M / 6M / 1A */}
         {(()=>{
           const _src2 = EFF||CURRENT;
-          const _rate = _src2.eurUsd;
-          const _pval = v => eur ? v : Math.round(v * _rate);
           const _cur2 = eur ? "€" : "$";
+          const usdEurNow = _src2.usdEur;
 
-          // Valeur portefeuille courante (col 2 = total hors immo €)
+          // Valeur portefeuille courante en €
           const _ddLast2 = _DD_PO.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
-          const _now = _src2.totalEUR || _ddLast2; // EFF.totalEUR prioritaire après refresh
+          const _nowEUR = _src2.totalEUR || _ddLast2;
+          const _nowUSD = _nowEUR / usdEurNow;
 
-          // Valeur à une date donnée (jours en arrière)
-          const _ddAt2 = days => {
-            const t=new Date(); t.setDate(t.getDate()-days);
+          // Ligne DD à une date donnée (retourne la ligne entière pour accès au taux)
+          const _ddRowAt = days => {
+            const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
             const ds=t.toISOString().slice(0,10);
-            return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r[2]:null),null);
+            return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r:null),null);
           };
-          const _at = d => _ddAt2(d) ?? _now;
 
-          // Capital investi sur la période = somme des inv mensuels entre cutoff et aujourd'hui
-          // Sources: _CM_PO.inv + STOCKS_MONTHLY.inv
           const _invInPeriod = days => {
             const t=new Date(); t.setDate(t.getDate()-days);
             const cutDs=t.toISOString().slice(0,10);
             const months=["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
             let total=0;
-            // Parcourir toutes les années disponibles
             for(const yr of Object.keys(_CM_PO)){
-              const d=_CM_PO[yr];
-              if(!d) continue;
+              const d=_CM_PO[yr]; if(!d) continue;
               d.m.forEach((m,i)=>{
                 const mDate=`${yr}-${String(months.indexOf(m)+1).padStart(2,"0")}-01`;
                 if(mDate>=cutDs && d.inv?.[i]!=null) total+=d.inv[i];
               });
             }
             for(const yr of Object.keys(STOCKS_MONTHLY)){
-              const d=STOCKS_MONTHLY[yr];
-              if(!d) continue;
+              const d=STOCKS_MONTHLY[yr]; if(!d) continue;
               d.m.forEach((m,i)=>{
                 const mDate=`${yr}-${String(months.indexOf(m)+1).padStart(2,"0")}-01`;
                 if(mDate>=cutDs && d.inv?.[i]!=null) total+=d.inv[i];
               });
             }
-            return total;
+            return total; // toujours en €
           };
 
-          // P&L = valeur_actuelle - valeur_début_période - capital_investi_période
-          const _pnl = days => {
-            const start = _at(days);
-            const inv   = _invInPeriod(days);
-            return Math.round(_now - start - inv);
-          };
-          const _pct = days => {
-            const start = _at(days);
-            const p = _pnl(days);
-            return start ? p/start : 0;
+          // P&L et % selon la devise
+          const _cell = days => {
+            const row = _ddRowAt(days);
+            if(!row) return {pnl:0, pct:0};
+            const startEUR = row[2];
+            const usdEurRef = row[5] || usdEurNow;
+            const invEUR = _invInPeriod(days);
+            if(eur){
+              const pnl = Math.round(_nowEUR - startEUR - invEUR);
+              return {pnl, pct: startEUR ? pnl/startEUR : 0};
+            } else {
+              // Convertir chaque valeur au taux de SA date
+              const startUSD = startEUR / usdEurRef;
+              const invUSD   = invEUR   / usdEurRef; // investissement converti au taux de référence
+              const pnl = Math.round(_nowUSD - startUSD - invUSD);
+              return {pnl, pct: startUSD ? pnl/startUSD : 0};
+            }
           };
 
           const cells = [
-            { label:"1J",  pnl:_pval(_pnl(1)),   pct:_pct(1)   },
-            { label:"1S",  pnl:_pval(_pnl(7)),   pct:_pct(7)   },
-            { label:"1M",  pnl:_pval(_pnl(30)),  pct:_pct(30)  },
-            { label:"6M",  pnl:_pval(_pnl(182)), pct:_pct(182) },
-            { label:"1A",  pnl:_pval(_pnl(365)), pct:_pct(365) },
+            { label:"1J",  ..._cell(1)   },
+            { label:"1S",  ..._cell(7)   },
+            { label:"1M",  ..._cell(30)  },
+            { label:"6M",  ..._cell(182) },
+            { label:"1A",  ..._cell(365) },
           ];
           return(
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border}}>
@@ -2334,11 +2382,30 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       {/* ── GDB.C + GDB.S encarts ── */}
       {(()=>{
         const _ov_src = EFF||CURRENT;
-        const _ov_gdbsAt = days => { const t=new Date(); t.setDate(t.getDate()-days); const ds=t.toISOString().slice(0,10); return GDBS.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null); };
+        const _ov_gdbs = liveGDBS || GDBS;
+        const usdEurNow2 = _ov_src.usdEur;
+        const _ov_gdbsAt = days => {
+          const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
+          const ds=t.toISOString().slice(0,10);
+          return _ov_gdbs.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
+        };
+        const _ov_ddAt = days => {
+          const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
+          const ds=t.toISOString().slice(0,10);
+          return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[5]?r:null),null);
+        };
         const _gcNow2 = calcGdbPrices(_ov_src).gdbC;
         const _gsNow2 = calcGdbPrices(_ov_src).gdbS;
-        const _gcPerf = d => { const r=_ov_gdbsAt(d); return r&&r[2]?parseFloat((_gcNow2/r[2]-1).toFixed(4)):null; };
-        const _gsPerf = d => { const r=_ov_gdbsAt(d); return r&&r[1]?parseFloat((_gsNow2/r[1]-1).toFixed(4)):null; };
+        const _gcPerf = d => {
+          const r=_ov_gdbsAt(d); if(!r||!r[2]) return null;
+          if(eur){ const dd=_ov_ddAt(d); const ref=dd?dd[5]:usdEurNow2; return parseFloat(((_gcNow2*usdEurNow2)/(r[2]*ref)-1).toFixed(4)); }
+          return parseFloat((_gcNow2/r[2]-1).toFixed(4));
+        };
+        const _gsPerf = d => {
+          const r=_ov_gdbsAt(d); if(!r||!r[1]) return null;
+          if(eur){ const dd=_ov_ddAt(d); const ref=dd?dd[5]:usdEurNow2; return parseFloat(((_gsNow2*usdEurNow2)/(r[1]*ref)-1).toFixed(4)); }
+          return parseFloat((_gsNow2/r[1]-1).toFixed(4));
+        };
         const gdb = [
           { label:"GDB.C", price:gcPrice, d:_gcPerf(1), w:_gcPerf(7), m:_gcPerf(30), color:C.orange },
           { label:"GDB.S", price:gsPrice, d:_gsPerf(1), w:_gsPerf(7), m:_gsPerf(30), color:C.blue },
@@ -3280,23 +3347,62 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur})
   );
 }
 
-function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC}){
+function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liveDD}){
   const [benchTF, setBenchTF] = useState("ALL");
   const src = EFF||CURRENT;
-  const gdbs2026 = GDBS.filter(r=>r[0]>='2026-01-01');
-  const gsToday  = gdbs2026[gdbs2026.length-1]?.[1] || src.gdbS;
+  const usdEurNow = src.usdEur;
+  const _GDBS = liveGDBS || GDBS;
+  const _DD   = liveDD   || DD;
+
+  // Prix actuels GDB.C et GDB.S
   const {gdbC: gcToday, gdbS: gsToday_calc} = calcGdbPrices(src);
-  // gsToday reste depuis GDBS pour les perfs historiques (base historique cohérente)
+  const gdbs2026 = _GDBS.filter(r=>r[0]>='2026-01-01');
+  const gsToday  = gdbs2026[gdbs2026.length-1]?.[1] || src.gdbS;
 
-  const gsPriceAt = d => { for(let i=gdbs2026.length-1;i>=0;i--) if(gdbs2026[i][0]<=d) return gdbs2026[i][1]; return gdbs2026[0]?.[1]||src.gdbS; };
-  const gcPriceAt = d => { for(let i=gdbs2026.length-1;i>=0;i--) if(gdbs2026[i][0]<=d) return gdbs2026[i][2]; return gdbs2026[0]?.[2]||src.gdbC; };
+  // Prix à une date donnée depuis GDBS
+  const gsPriceAt = d => { for(let i=_GDBS.length-1;i>=0;i--) if(_GDBS[i][0]<=d) return _GDBS[i][1]; return _GDBS[0]?.[1]||src.gdbS; };
+  const gcPriceAt = d => { for(let i=_GDBS.length-1;i>=0;i--) if(_GDBS[i][0]<=d) return _GDBS[i][2]; return _GDBS[0]?.[2]||src.gdbC; };
 
-  const d1='2026-05-01', d7='2026-04-25', d30='2026-04-02', dytd='2026-01-01';
-  const gsPerf = tf => { const r=gsPriceAt(tf); return r?gsToday/r-1:null; };
-  const gcPerf = tf => { const r=gcPriceAt(tf); return r?gcToday/r-1:null; };
-  const gcPerfAllTime = gcToday/10-1;
-  const gsYTD = gsPerf(dytd);  // perf depuis création (jan 2026)
-  const gsPerfAllTime = gsYTD; // 1Y et ALL = YTD (fonds créé jan 2026)
+  // Taux USD/EUR à une date donnée depuis DD (col 5 = usdEur)
+  const usdEurAt = d => {
+    const row = _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=d&&r[5]?r:null),null);
+    return row ? row[5] : usdEurNow;
+  };
+
+  // Dates dynamiques depuis makeTFCuts
+  const TF = makeTFCuts();
+  const d1   = TF["1W"];  // ~7j
+  const d7   = TF["1M"];  // ~30j (on réutilise les cuts existants)
+  const d30  = TF["1M"];
+  const dytd = TF["YTD"];
+
+  // Perf corrigée du taux si mode €
+  const gsPerf = d => {
+    const ref = gsPriceAt(d); if(!ref) return null;
+    if(eur){ const usdRef=usdEurAt(d); return (gsToday*usdEurNow)/(ref*usdRef)-1; }
+    return gsToday/ref-1;
+  };
+  const gcPerf = d => {
+    const ref = gcPriceAt(d); if(!ref) return null;
+    if(eur){ const usdRef=usdEurAt(d); return (gcToday*usdEurNow)/(ref*usdRef)-1; }
+    return gcToday/ref-1;
+  };
+  // Depuis création GDB.C : 10€ = 10.88$ au 25 mars 2020
+  const GC_CREATION_USD = 10.88;
+  const GC_CREATION_DATE = "2020-03-25";
+  // Depuis création GDB.S : 10€ = 11.67$ au 19 août 2025
+  const GS_CREATION_USD = 11.67;
+  const GS_CREATION_DATE = "2025-08-19";
+
+  const gcPerfAllTime = eur
+    ? (gcToday * usdEurNow) / (GC_CREATION_USD * usdEurAt(GC_CREATION_DATE)) - 1
+    : gcToday / GC_CREATION_USD - 1;
+
+  const gsPerfAllTime = eur
+    ? (gsToday * usdEurNow) / (GS_CREATION_USD * usdEurAt(GS_CREATION_DATE)) - 1
+    : gsToday / GS_CREATION_USD - 1;
+
+  const gsYTD = gsPerf(dytd);
 
   const {gdbS: gcS_calc, gdbC: gcC_calc, gdbSfondsUSD} = calcGdbPrices(src);
   const gcQty   = GDB_C_NB_PARTS;
@@ -3329,16 +3435,28 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC}){
       return keys.length ? m[keys[0]] : null;
     };
 
-    const pGC = ()=>{ const s=fwd(gcMap2,cut); return s&&gcLast ? gcLast/s-1 : null; };
+    // Taux de change au cut (premier point DD >= cut)
+    const usdEurCut = (()=>{
+      const row = _DD.reduceRight((a,r)=>a!=null?a:(r[0]<=cut&&r[5]?r:null),null);
+      return row ? row[5] : usdEurNow;
+    })();
+
+    const fxPerf = (now, start) => {
+      if(!start || !now) return null;
+      if(eur) return (now*usdEurNow)/(start*usdEurCut)-1;
+      return now/start-1;
+    };
+
+    const pGC = ()=>{ const s=fwd(gcMap2,cut); return fxPerf(gcLast,s); };
     const pGS = ()=>{
       const ytdStart = gsMap3['2026-01-01']||GS_BASE;
       const s = cut<'2026-01-01' ? ytdStart : fwd(gsMap3,cut);
-      return s&&gsLast ? gsLast/s-1 : null;
+      return fxPerf(gsLast,s);
     };
     const pDB = col=>{
-      const colMap = {}; DB.forEach(r=>{ if(r[col]!=null) colMap[r[0]]=r[col]; });
-      const s=fwd(colMap,cut), e=dbLast?.[col];
-      return s&&e ? e/s-1 : null;
+      const colMap = {}; _benchData.forEach(r=>{ if(r[col]!=null) colMap[r[0]]=r[col]; });
+      const s=fwd(colMap,cut), e=colMap[Object.keys(colMap).filter(d=>d<=(_benchData[_benchData.length-1]?.[0]||'9')).sort().at(-1)];
+      return fxPerf(e,s);
     };
 
     return [
@@ -3610,7 +3728,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
     if(form.ticker==="NOUVEAU"){
       const yahooSym = (form.yahooSymbol||"").trim() || resolvedTicker;
       YF_MAP[resolvedTicker] = yahooSym;
-      if(form.newIcon) TICKER_ICONS[resolvedTicker] = form.newIcon;
+      if(form.newIcon) CUSTOM_ICONS[resolvedTicker] = form.newIcon;
     }
     const trade={...form, ticker:resolvedTicker, qty:parseFloat(form.qty),
       price:priceUSD, priceRaw:parseFloat(form.price), currency:form.currency,
@@ -4298,8 +4416,8 @@ function SnapshotModal({onSave, onClose, EFF}){
 /* ═══════════════════════════════════════════════════════════
    ROOT APP
 ═══════════════════════════════════════════════════════════ */
-const TABS=["Home","Portfolio","Stats","GDB","Buy & Sell","Data"];
-const ICONS=["◎","◑","▲","◈","⇅","⬡"];
+const TABS=["Home","Portfolio","Stats","GDB","Data"];
+const ICONS=["◎","◑","▲","◈","⬡"];
 
 /* ── Global API keys (from Power Query in Excel) ── */
 
@@ -4334,6 +4452,7 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_stocks",    label:"Stocks (positions)"},
     {key:"gdb_bank",      label:"Banque (cash matelas)"},
     {key:"gdb_yfmap",     label:"YF_MAP (tickers Yahoo)"},
+    {key:"gdb_icons",     label:"Icônes personnalisées"},
     {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
   ];
 
@@ -4777,7 +4896,31 @@ function App(){
   const[showTrade,setShowTrade]=useState(false);
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
-  const[live,setLive]=useState(()=>({...CURRENT}));
+  const[live,setLive]=useState(()=>{
+    // Si DD contient des snapshots plus récents que le build (CURRENT.date),
+    // appliquer les valeurs du dernier snapshot pour afficher les données à jour
+    const lastDD = DD.length > 0 ? DD[DD.length-1] : null;
+    const lastGDBS = GDBS.length > 0 ? GDBS[GDBS.length-1] : null;
+    if(lastDD && lastDD[0] > CURRENT.date){
+      // [date, cryptoEUR, totalEUR, btcLive, gdbS, usdEur]
+      const usdEur  = lastDD[5] || CURRENT.usdEur;
+      const eurUsd  = 1/usdEur;
+      const btcPrice = lastDD[3] || CURRENT.btcPrice;
+      const gdbS    = lastGDBS ? lastGDBS[1] : (lastDD[4] || CURRENT.gdbS);
+      const gdbC    = lastGDBS ? lastGDBS[2] : CURRENT.gdbC;
+      const totalEUR = lastDD[2] || CURRENT.totalEUR;
+      const totalUSD = Math.round(totalEUR * eurUsd);
+      return {
+        ...CURRENT,
+        date: lastDD[0],
+        usdEur, eurUsd, btcPrice,
+        gdbS, gdbC,
+        totalEUR, totalUSD,
+        _fromSnapshot: lastDD[0],
+      };
+    }
+    return {...CURRENT};
+  });
   const[refreshing,setRefreshing]=useState(false);
   const[refreshedAt,setRefreshedAt]=useState(null);
   const[refreshErr,setRefreshErr]=useState(null);
@@ -4796,11 +4939,18 @@ function App(){
   const[chosenSource,setChosenSource]=useState("local"); // "local" | "cloudflare"
   // localData initialisé avec liveDD (peut inclure des snapshots précédents)
   const[localData,setLocalData]=useState(()=>{
-    const _dd = DD; // liveDD = DD au démarrage
-    const lastDate = _dd.length>0 ? _dd[_dd.length-1][0] : CURRENT.date;
+    const _dd = DD;
+    const lastRow = _dd.length>0 ? _dd[_dd.length-1] : null;
+    const lastDate = lastRow ? lastRow[0] : CURRENT.date;
+    const totalEUR = lastRow && lastRow[0] > CURRENT.date ? lastRow[2] : CURRENT.totalEUR;
+    const totalUSD = lastRow && lastRow[0] > CURRENT.date ? Math.round(totalEUR / (lastRow[5]||CURRENT.usdEur)) : CURRENT.totalUSD;
     const lastGDBS = GDBS.length>0 ? GDBS[GDBS.length-1] : null;
-    return {totalUSD:CURRENT.totalUSD, totalEUR:CURRENT.totalEUR,
-      date:lastDate, gdbS:lastGDBS?.[1]||CURRENT.gdbS, gdbC:lastGDBS?.[2]||CURRENT.gdbC};
+    return {
+      totalUSD, totalEUR,
+      date: lastDate,
+      gdbS: lastGDBS?.[1] || CURRENT.gdbS,
+      gdbC: lastGDBS?.[2] || CURRENT.gdbC,
+    };
   });
   // Apply theme to global C on every render
   C = THEMES[themeName]||THEMES.dark;
@@ -4960,6 +5110,7 @@ function App(){
       if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
       if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
+      if(kv.gdb_icons&&typeof kv.gdb_icons==="object") Object.assign(CUSTOM_ICONS,kv.gdb_icons);
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;
@@ -5424,6 +5575,7 @@ function App(){
           gdb_bank:      (EFF||CURRENT).bank      || CURRENT.bank,
           // YF_MAP (tickers refresh)
           gdb_yfmap: YF_MAP,
+          gdb_icons: CUSTOM_ICONS,
         };
         const res = await fetch(CF_WORKER_URL+"/write-bases", {
           method:"POST",
@@ -5681,11 +5833,11 @@ function App(){
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
-        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC}/>}
-        {tab===5 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
+        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC} liveDD={liveDD}/>}
+        {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench}/> }
-        {tab===4 && <PageTrades txns={txns} onAdd={addTxn} onDel={delTxn} hidden={hidden} EFF={EFF} onTradeApplied={applyTradeToEFF} showAdd={showTrade} setShowAdd={setShowTrade} eur={eur}/>}
+        {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>
         {TABS.map((lb,i)=>(
@@ -5695,6 +5847,7 @@ function App(){
           </button>
         ))}
       </div>
+      {/* Buy & Sell accessible via snapshot uniquement */}
       {/* VibeCoded signature */}
       <div style={{
         position:"fixed",bottom:4,left:"50%",transform:"translateX(-50%)",

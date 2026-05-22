@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.43";
+const APP_VERSION = "v21.45";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1279,7 +1279,8 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const priceDisp = cvPrice(price);
   const pnl1d     = (price != null && prevClose != null) ? cvPrice(price - prevClose) : null;
   const pct1d     = (price != null && prevClose != null && prevClose !== 0) ? (price - prevClose)/prevClose : null;
-  const cur       = eur ? "€" : (isUSD ? "$" : currency);
+  const CURRENCY_SYM = { USD:"$", EUR:"€", GBP:"£", GBp:"£", JPY:"¥", CAD:"CA$", AUD:"A$" };
+  const cur       = eur ? "€" : (CURRENCY_SYM[currency] || currency);
   const fmtAmt    = v => v == null ? "—" : (v>=0?"+":"")+cur+(Math.abs(v)>=100 ? Math.round(Math.abs(v)).toLocaleString("fr-FR") : Math.abs(v).toFixed(2));
   const fmtPct    = v => v == null ? "—" : (v>=0?"+":"")+(Math.abs(v)*100).toFixed(2)+"%";
   const fmtPriceV = v => v == null ? "—" : cur+(v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2));
@@ -1494,6 +1495,43 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               </div>
             )}
           </div>
+
+          {/* ── Actualités ── */}
+          {data?.news && data.news.length > 0 && (
+            <div style={{marginTop:16}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.gray,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>
+                Actualités
+              </div>
+              {data.news.map((n,i)=>{
+                const ago = n.time ? (()=>{
+                  const diff = (Date.now() - n.time) / 60000;
+                  if(diff < 60)   return Math.round(diff)+"min";
+                  if(diff < 1440) return Math.round(diff/60)+"h";
+                  return Math.round(diff/1440)+"j";
+                })() : null;
+                return (
+                  <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{
+                    display:"flex", gap:10, padding:"10px 0",
+                    borderBottom: i < data.news.length-1 ? `1px solid ${C.border}` : "none",
+                    textDecoration:"none",
+                  }}>
+                    {n.thumbnail && (
+                      <img src={n.thumbnail} alt="" style={{width:56,height:42,borderRadius:6,objectFit:"cover",flexShrink:0}}/>
+                    )}
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:C.text,lineHeight:1.35,marginBottom:4,
+                        display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>
+                        {n.title}
+                      </div>
+                      <div style={{fontSize:10,color:C.gray}}>
+                        {n.publisher}{ago && <span style={{marginLeft:6,color:C.text3}}>{ago}</span>}
+                      </div>
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

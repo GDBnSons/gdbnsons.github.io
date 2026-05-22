@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.40";
+const APP_VERSION = "v21.41";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1222,19 +1222,26 @@ const TF_CONFIG = [
   { label:"1J",  interval:"1h",   range:"5d"   },
   { label:"1S",  interval:"1d",   range:"1mo"  },
   { label:"1M",  interval:"1d",   range:"3mo"  },
+  { label:"1A",  interval:"1wk",  range:"1y"   },
+  { label:"5A",  interval:"1mo",  range:"5y"   },
+  { label:"ALL", interval:"3mo",  range:"max"  },
 ];
 
 function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
-  const [tf, setTf]       = useState(3);       // default 1S
-  const [data, setData]   = useState(null);
+  // Résoudre le symbole Yahoo via YF_MAP
+  const yfSym = YF_MAP[ticker] || ticker;
+
+  const [tf, setTf]         = useState(3);
+  const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr]     = useState(null);
+  const [err, setErr]       = useState(null);
+  const [showCity, setShowCity] = useState(false);
 
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
     const { interval, range } = TF_CONFIG[tfIdx];
     try {
-      const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(ticker)
+      const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
         + "&interval=" + interval + "&range=" + range;
       const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
       const d = await r.json();
@@ -1249,8 +1256,15 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
 
   useEffect(() => { fetchChart(tf); }, [ticker, tf]);
 
+  // Drapeaux pays (emoji)
+  const FLAG = {
+    US:"🇺🇸", GB:"🇬🇧", FR:"🇫🇷", IT:"🇮🇹", DE:"🇩🇪",
+    NL:"🇳🇱", BE:"🇧🇪", CA:"🇨🇦", AU:"🇦🇺", HK:"🇭🇰",
+    CN:"🇨🇳", JP:"🇯🇵", FX:"💱", CRYPTO:"₿",
+  };
+
   const fmtMktCap = v => {
-    if(!v) return "—";
+    if(!v) return null;
     if(v >= 1e12) return (v/1e12).toFixed(2)+"T";
     if(v >= 1e9)  return (v/1e9).toFixed(1)+"B";
     if(v >= 1e6)  return (v/1e6).toFixed(0)+"M";
@@ -1261,99 +1275,152 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const prevClose = data?.prevClose;
   const currency  = data?.currency || "USD";
   const isUSD     = currency === "USD";
-  // Conversion vers monnaie observée
-  const cvPrice = v => v == null ? null : (eur ? v * usdEur : (isUSD ? v : v));
-  const priceDisp  = cvPrice(price);
-  const pnl1d      = (price != null && prevClose != null) ? cvPrice(price - prevClose) : null;
-  const pct1d      = (price != null && prevClose != null && prevClose !== 0) ? (price - prevClose)/prevClose : null;
-  const cur        = eur ? "€" : (isUSD ? "$" : currency);
-  const fmtP       = v => v == null ? "—" : (v>=0?"+":"")+cur+(Math.abs(v)>=100?Math.round(Math.abs(v)).toLocaleString("fr-FR"):Math.abs(v).toFixed(2));
-  const fmtPct     = v => v == null ? "—" : (v>=0?"+":"")+( Math.abs(v)*100).toFixed(2)+"%";
+  const cvPrice   = v => v == null ? null : eur ? v * usdEur : (isUSD ? v : v);
+  const priceDisp = cvPrice(price);
+  const pnl1d     = (price != null && prevClose != null) ? cvPrice(price - prevClose) : null;
+  const pct1d     = (price != null && prevClose != null && prevClose !== 0) ? (price - prevClose)/prevClose : null;
+  const cur       = eur ? "€" : (isUSD ? "$" : currency);
+  const fmtAmt    = v => v == null ? "—" : (v>=0?"+":"")+cur+(Math.abs(v)>=100 ? Math.round(Math.abs(v)).toLocaleString("fr-FR") : Math.abs(v).toFixed(2));
+  const fmtPct    = v => v == null ? "—" : (v>=0?"+":"")+(Math.abs(v)*100).toFixed(2)+"%";
+  const fmtPriceV = v => v == null ? "—" : cur+(v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2));
 
-  // Chart SVG — courbe simple
+  // Chart
   const candles = data?.candles || [];
   const closes  = candles.map(c=>c.c).filter(v=>v!=null);
-  const W=320, H=120, PAD=6;
+  const W=320, H=110, PAD=6;
   const minV = Math.min(...closes), maxV = Math.max(...closes);
-  const range2 = maxV - minV || 1;
-  const toY = v => PAD + (1-(v-minV)/range2)*(H-PAD*2);
-  const toX = (i,n) => PAD + (i/(n-1||1))*(W-PAD*2);
+  const rng  = maxV - minV || 1;
+  const toY  = v => PAD + (1-(v-minV)/rng)*(H-PAD*2);
+  const toX  = (i,n) => PAD + (i/(n-1||1))*(W-PAD*2);
   const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
   const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
   const lineColor = isUp ? C.green : C.red;
 
-  // Formater l'axe de temps
   const fmtTs = ts => {
     const d = new Date(ts);
-    const tfL = TF_CONFIG[tf].label;
-    if(["1h","4h"].includes(tfL)) return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
-    return d.getDate()+"/"+(d.getMonth()+1);
+    const lbl = TF_CONFIG[tf].label;
+    if(lbl==="1h")  return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
+    if(lbl==="4h")  return d.getDate()+"/"+(d.getMonth()+1)+" "+d.getHours()+"h";
+    if(["1J","1S"].includes(lbl)) return d.getDate()+"/"+(d.getMonth()+1);
+    return (d.getMonth()+1)+"/"+d.getFullYear().toString().slice(2);
   };
-
-  // Quelques labels X (5 max)
-  const xLabels = closes.length > 1
+  const xIdxs = closes.length > 1
     ? [0, Math.floor(closes.length/4), Math.floor(closes.length/2), Math.floor(3*closes.length/4), closes.length-1]
         .filter((v,i,a)=>a.indexOf(v)===i)
-        .map(i=>({ i, x: toX(i, closes.length), label: fmtTs(candles[i]?.t) }))
     : [];
+
+  const cc   = data?.exchangeCC || "US";
+  const flag = FLAG[cc] || "🏳️";
+  const city = data?.exchangeCity || data?.exchange || "";
+  const mktCap = fmtMktCap(data?.marketCap);
+  const quoteType = data?.quoteType || "";
+  const sector    = data?.sector || "";
+
+  // Timeframes en 2 rangées (5 + 3)
+  const TF_ROW1 = TF_CONFIG.slice(0,5);
+  const TF_ROW2 = TF_CONFIG.slice(5);
 
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end",
+      background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{
         width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
-        padding:"0 0 32px 0", maxHeight:"85vh", overflowY:"auto",
+        paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
       }}>
         {/* Handle */}
-        <div style={{display:"flex",justifyContent:"center",padding:"10px 0 4px"}}>
+        <div style={{display:"flex",justifyContent:"center",padding:"10px 0 6px"}}>
           <div style={{width:36,height:4,borderRadius:2,background:C.border}}/>
         </div>
 
-        {/* Header */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 18px 12px"}}>
-          <div>
-            <div style={{fontSize:16,fontWeight:800,color:C.text}}>{ticker}</div>
-            {data?.name && <div style={{fontSize:11,color:C.gray,marginTop:2}}>{data.name}</div>}
+        {/* Header — ticker + nom + flag */}
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",padding:"4px 18px 10px"}}>
+          <div style={{flex:1,minWidth:0}}>
+            {/* Ticker grand + nom YF petit */}
+            <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>{ticker}</span>
+              {data?.name && <span style={{fontSize:12,color:C.gray,fontWeight:400}}>{data.name}</span>}
+            </div>
+            {/* Type + secteur */}
+            <div style={{display:"flex",gap:6,marginTop:5,flexWrap:"wrap"}}>
+              {quoteType && (
+                <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:5,background:C.bg2,color:C.teal,border:`1px solid ${C.teal}44`}}>
+                  {quoteType}
+                </span>
+              )}
+              {sector && (
+                <span style={{fontSize:9,fontWeight:600,padding:"2px 7px",borderRadius:5,background:C.bg2,color:C.gray,border:`1px solid ${C.border}`}}>
+                  {sector}
+                </span>
+              )}
+            </div>
           </div>
-          <button onClick={onClose} style={{background:"transparent",border:"none",color:C.gray,fontSize:22,cursor:"pointer",padding:"4px 8px"}}>✕</button>
+          {/* Drapeau + bouton fermer */}
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <div style={{position:"relative"}}>
+              <button onClick={e=>{e.stopPropagation();setShowCity(!showCity);}} style={{
+                background:"transparent",border:"none",fontSize:22,cursor:"pointer",padding:"2px 4px",lineHeight:1,
+              }}>{flag}</button>
+              {showCity && (
+                <div style={{
+                  position:"absolute",right:0,top:"110%",background:C.bg2,border:`1px solid ${C.border}`,
+                  borderRadius:8,padding:"5px 10px",whiteSpace:"nowrap",zIndex:10,
+                  fontSize:10,color:C.text2,fontWeight:600,
+                }}>
+                  {city || "—"}
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} style={{background:"transparent",border:"none",color:C.gray,fontSize:20,cursor:"pointer",padding:"2px 6px"}}>✕</button>
+          </div>
         </div>
 
         <div style={{padding:"0 16px"}}>
           {/* Prix live + P&L 1d */}
           {!loading && !err && price != null && (
-            <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:14}}>
-              <span style={{fontSize:26,fontWeight:900,color:C.text}}>
-                {cur}{priceDisp>=100?Math.round(priceDisp).toLocaleString("fr-FR"):priceDisp?.toFixed(2)}
+            <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:28,fontWeight:900,color:C.text,letterSpacing:-1}}>
+                {fmtPriceV(priceDisp)}
               </span>
-              <span style={{fontSize:13,fontWeight:700,color:pnl1d>=0?C.green:C.red}}>
-                {fmtP(pnl1d)}
-              </span>
-              <span style={{fontSize:12,fontWeight:700,padding:"3px 8px",borderRadius:6,
-                background:pct1d>=0?C.green+"22":C.red+"22",color:pct1d>=0?C.green:C.red}}>
-                {fmtPct(pct1d)}
-              </span>
+              {pnl1d != null && (
+                <span style={{fontSize:13,fontWeight:700,color:pnl1d>=0?C.green:C.red}}>
+                  {fmtAmt(pnl1d)}
+                </span>
+              )}
+              {pct1d != null && (
+                <span style={{fontSize:12,fontWeight:700,padding:"3px 8px",borderRadius:6,
+                  background:pct1d>=0?C.green+"22":C.red+"22",color:pct1d>=0?C.green:C.red}}>
+                  {fmtPct(pct1d)}
+                </span>
+              )}
             </div>
           )}
 
           {/* Market Cap */}
-          {data?.marketCap && (
-            <div style={{fontSize:10,color:C.gray,marginBottom:14}}>
-              Market Cap <b style={{color:C.text2}}>{fmtMktCap(data.marketCap)}</b>
-              {data.exchange && <span style={{marginLeft:10}}>Bourse <b style={{color:C.text2}}>{data.exchange}</b></span>}
+          {(mktCap || data?.exchange) && (
+            <div style={{fontSize:10,color:C.gray,marginBottom:12,display:"flex",gap:14}}>
+              {mktCap && <span>Market Cap <b style={{color:C.text2}}>{mktCap}</b></span>}
+              {data?.exchange && <span>Bourse <b style={{color:C.text2}}>{data.exchange}</b></span>}
             </div>
           )}
 
-          {/* Timeframe selector */}
-          <div style={{display:"flex",gap:4,marginBottom:12,background:C.bg1,borderRadius:10,padding:3}}>
-            {TF_CONFIG.map((t,i)=>(
-              <button key={i} onClick={()=>setTf(i)} style={{
-                flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
-                border:"none",cursor:"pointer",
-                background:tf===i?C.blue:"transparent",
-                color:tf===i?"#fff":C.gray,
-              }}>{t.label}</button>
+          {/* Timeframes — 2 rangées */}
+          <div style={{marginBottom:12}}>
+            {[TF_ROW1, TF_ROW2].map((row, ri)=>(
+              <div key={ri} style={{display:"flex",gap:4,background:C.bg1,borderRadius:10,padding:3,marginBottom:ri===0?4:0}}>
+                {row.map((t,i)=>{
+                  const idx = ri*5+i;
+                  return (
+                    <button key={idx} onClick={()=>setTf(idx)} style={{
+                      flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
+                      border:"none",cursor:"pointer",
+                      background:tf===idx?C.blue:"transparent",
+                      color:tf===idx?"#fff":C.gray,
+                    }}>{t.label}</button>
+                  );
+                })}
+              </div>
             ))}
           </div>
 
@@ -1366,37 +1433,30 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             )}
             {err && (
               <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.red,fontSize:11,textAlign:"center",padding:"0 16px"}}>
-                {err}
+                Données indisponibles
               </div>
             )}
             {!loading && !err && closes.length > 1 && (
-              <svg width="100%" viewBox={"0 0 "+W+" "+(H+16)} style={{display:"block",overflow:"visible"}}>
-                {/* Zone sous la courbe */}
+              <svg width="100%" viewBox={"0 0 "+W+" "+(H+18)} style={{display:"block",overflow:"visible"}}>
                 <defs>
-                  <linearGradient id={"tcg_"+ticker} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={lineColor} stopOpacity="0.25"/>
+                  <linearGradient id={"tcg_"+ticker.replace(/[^a-z0-9]/gi,"_")} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
                     <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
                   </linearGradient>
                 </defs>
                 <polygon
                   points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)}
-                  fill={"url(#tcg_"+ticker+")"}
+                  fill={"url(#tcg_"+ticker.replace(/[^a-z0-9]/gi,"_")+")"}
                 />
-                {/* Courbe */}
-                <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round"/>
-                {/* Labels X */}
-                {xLabels.map(({x,label},i)=>(
-                  <text key={i} x={x} y={H+14} textAnchor="middle" fill={C.text3} fontSize={7}>{label}</text>
+                <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+                {xIdxs.map((ci,i)=>(
+                  <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
+                    {fmtTs(candles[ci]?.t)}
+                  </text>
                 ))}
-                {/* Dernier prix label */}
                 {closes.length>0&&(()=>{
-                  const lastY = toY(closes[closes.length-1]);
-                  const lastX = toX(closes.length-1, closes.length);
-                  return (
-                    <g>
-                      <circle cx={lastX} cy={lastY} r={3} fill={lineColor}/>
-                    </g>
-                  );
+                  const lx=toX(closes.length-1,closes.length), ly=toY(closes[closes.length-1]);
+                  return <circle cx={lx} cy={ly} r={3} fill={lineColor}/>;
                 })()}
               </svg>
             )}
@@ -1411,6 +1471,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
     </div>
   );
 }
+
 
 /* ═══════════════════════════════════════════════════════════
    PORTFOLIO SECTION ROW — cliquable, expand avec ligne détail

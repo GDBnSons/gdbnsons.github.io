@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.45";
+const APP_VERSION = "v21.47";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1236,6 +1236,9 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr]       = useState(null);
   const [showCity, setShowCity] = useState(false);
+  const [dragY, setDragY]   = useState(0);
+  const touchStartY = useRef(null);
+  const sheetRef    = useRef(null);
 
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
@@ -1255,6 +1258,23 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   };
 
   useEffect(() => { fetchChart(tf); }, [ticker, tf]);
+
+  // Tri news par pertinence avec le ticker
+  const scoreNews = (newsArr) => {
+    if(!newsArr || !newsArr.length) return [];
+    const tkLow   = ticker.toLowerCase();
+    const nameLow = (data?.name || "").toLowerCase().split(" ").filter(w=>w.length>3);
+    return [...newsArr].sort((a,b)=>{
+      const score = n => {
+        const t = (n.title||"").toLowerCase();
+        let s = 0;
+        if(t.includes(tkLow)) s += 10;
+        nameLow.forEach(w => { if(t.includes(w)) s += 3; });
+        return s;
+      };
+      return score(b) - score(a);
+    });
+  };
 
   // Drapeaux pays (emoji)
   const FLAG = {
@@ -1321,18 +1341,45 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const TF_ROW1 = TF_CONFIG.slice(0,5);
   const TF_ROW2 = TF_CONFIG.slice(5);
 
+  // Swipe-down-to-close handlers (sur le handle uniquement)
+  const onHandleTouchStart = e => {
+    touchStartY.current = e.touches[0].clientY;
+    setDragY(0);
+  };
+  const onHandleTouchMove = e => {
+    const dy = e.touches[0].clientY - (touchStartY.current || 0);
+    if(dy > 0) { e.preventDefault(); setDragY(dy); }
+  };
+  const onHandleTouchEnd = () => {
+    if(dragY > 80) { onClose(); }
+    setDragY(0);
+    touchStartY.current = null;
+  };
+
+  const sortedNews = scoreNews(data?.news);
+
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:"rgba(0,0,0,0.75)", display:"flex", alignItems:"flex-end",
+      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/400)})`,
+      display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{
-        width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
-        paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
-      }}>
-        {/* Handle */}
-        <div style={{display:"flex",justifyContent:"center",padding:"10px 0 6px"}}>
-          <div style={{width:36,height:4,borderRadius:2,background:C.border}}/>
+      <div
+        ref={sheetRef}
+        onClick={e=>e.stopPropagation()}
+        style={{
+          width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
+          paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
+          transform:`translateY(${dragY}px)`,
+          transition: dragY===0 ? "transform 0.3s ease" : "none",
+        }}>
+        {/* Handle — zone de swipe */}
+        <div
+          onTouchStart={onHandleTouchStart}
+          onTouchMove={onHandleTouchMove}
+          onTouchEnd={onHandleTouchEnd}
+          style={{display:"flex",justifyContent:"center",padding:"14px 0 8px",cursor:"grab"}}>
+          <div style={{width:36,height:4,borderRadius:2,background:dragY>40?C.red:C.border,transition:"background 0.2s"}}/>
         </div>
 
         {/* Header — ticker + nom + flag */}
@@ -1412,25 +1459,42 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             </div>
           )}
 
-          {/* Bourse + Market Cap */}
-          {(mktCap || data?.exchange) && (
-            <div style={{fontSize:12,color:C.gray,marginBottom:12,display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Cap. boursière + Secteur — style Yahoo Finance */}
+          {(data?.marketCap || data?.sector || data?.exchange) && (
+            <div style={{marginBottom:14,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
               {data?.exchange && (
-                <span>Bourse <b style={{color:C.text2,fontSize:13}}>{data.exchange}</b></span>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"8px 12px",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12,color:C.gray}}>Bourse</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text2}}>{data.exchange}</span>
+                </div>
               )}
-              {mktCap && (()=>{
-                // Market Cap dans la devise du ticker (convertie si eur mode)
-                const mcRaw = data?.marketCap;
-                const mcDisp = mcRaw ? (eur ? mcRaw * usdEur : mcRaw) : null;
+              {data?.marketCap && (()=>{
+                const mcRaw = data.marketCap;
+                const mcDisp = eur ? mcRaw * usdEur : mcRaw;
                 const fmtMC = v => {
-                  if(!v) return null;
-                  if(v>=1e12) return cur+(v/1e12).toFixed(2)+"T";
-                  if(v>=1e9)  return cur+(v/1e9).toFixed(1)+"B";
-                  if(v>=1e6)  return cur+(v/1e6).toFixed(0)+"M";
-                  return cur+v.toLocaleString("fr-FR");
+                  if(!v) return "—";
+                  // Format à la française : 1,569 Bil. / 12,3 Mrd.
+                  if(v >= 1e12) return (v/1e12).toLocaleString("fr-FR",{minimumFractionDigits:3,maximumFractionDigits:3})+" Bil.";
+                  if(v >= 1e9)  return (v/1e9).toLocaleString("fr-FR",{minimumFractionDigits:3,maximumFractionDigits:3})+" Mrd.";
+                  if(v >= 1e6)  return (v/1e6).toLocaleString("fr-FR",{minimumFractionDigits:1,maximumFractionDigits:1})+" M";
+                  return v.toLocaleString("fr-FR");
                 };
-                return <span>Cap <b style={{color:C.text2,fontSize:13}}>{fmtMC(mcDisp)}</b></span>;
+                return (
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                    padding:"8px 12px",borderBottom:data?.sector?`1px solid ${C.border}`:"none"}}>
+                    <span style={{fontSize:12,color:C.gray}}>Cap. boursière</span>
+                    <span style={{fontSize:12,fontWeight:700,color:C.text}}>{fmtMC(mcDisp)}</span>
+                  </div>
+                );
               })()}
+              {data?.sector && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"8px 12px"}}>
+                  <span style={{fontSize:12,color:C.gray}}>Secteur d'activité</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text,textAlign:"right",maxWidth:"55%"}}>{data.sector}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1497,12 +1561,12 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           </div>
 
           {/* ── Actualités ── */}
-          {data?.news && data.news.length > 0 && (
+          {sortedNews.length > 0 && (
             <div style={{marginTop:16}}>
               <div style={{fontSize:10,fontWeight:700,color:C.gray,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>
                 Actualités
               </div>
-              {data.news.map((n,i)=>{
+              {sortedNews.map((n,i)=>{
                 const ago = n.time ? (()=>{
                   const diff = (Date.now() - n.time) / 60000;
                   if(diff < 60)   return Math.round(diff)+"min";
@@ -1512,7 +1576,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 return (
                   <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{
                     display:"flex", gap:10, padding:"10px 0",
-                    borderBottom: i < data.news.length-1 ? `1px solid ${C.border}` : "none",
+                    borderBottom: i < sortedNews.length-1 ? `1px solid ${C.border}` : "none",
                     textDecoration:"none",
                   }}>
                     {n.thumbnail && (

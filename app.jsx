@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.41";
+const APP_VERSION = "v21.43";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1340,21 +1340,35 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             {/* Ticker grand + nom YF petit */}
             <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
               <span style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>{ticker}</span>
-              {data?.name && <span style={{fontSize:12,color:C.gray,fontWeight:400}}>{data.name}</span>}
+              {data?.name
+                ? <span style={{fontSize:11,color:C.gray,fontWeight:400,flexShrink:1,minWidth:0}}>{data.name}</span>
+                : loading && <span style={{fontSize:11,color:C.border}}>…</span>
+              }
             </div>
-            {/* Type + secteur */}
-            <div style={{display:"flex",gap:6,marginTop:5,flexWrap:"wrap"}}>
-              {quoteType && (
-                <span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:5,background:C.bg2,color:C.teal,border:`1px solid ${C.teal}44`}}>
-                  {quoteType}
-                </span>
-              )}
-              {sector && (
-                <span style={{fontSize:9,fontWeight:600,padding:"2px 7px",borderRadius:5,background:C.bg2,color:C.gray,border:`1px solid ${C.border}`}}>
-                  {sector}
-                </span>
-              )}
-            </div>
+            {/* Badges type + secteur — couleur par quoteType */}
+            {(quoteType||sector) && (
+              <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
+                {quoteType && (()=>{
+                  const QT_COLOR = {
+                    EQUITY:"#10B981", ETF:"#1E40AF", MUTUALFUND:"#8B5CF6",
+                    CRYPTOCURRENCY:"#F7931A", INDEX:"#6B7280", CURRENCY:"#EAB308",
+                  };
+                  const qc = QT_COLOR[quoteType] || C.teal;
+                  return (
+                    <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:5,
+                      background:qc+"22",color:qc,border:`1px solid ${qc}55`}}>
+                      {quoteType}
+                    </span>
+                  );
+                })()}
+                {sector && (
+                  <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
+                    background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
+                    {sector}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           {/* Drapeau + bouton fermer */}
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
@@ -1397,11 +1411,25 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             </div>
           )}
 
-          {/* Market Cap */}
+          {/* Bourse + Market Cap */}
           {(mktCap || data?.exchange) && (
-            <div style={{fontSize:10,color:C.gray,marginBottom:12,display:"flex",gap:14}}>
-              {mktCap && <span>Market Cap <b style={{color:C.text2}}>{mktCap}</b></span>}
-              {data?.exchange && <span>Bourse <b style={{color:C.text2}}>{data.exchange}</b></span>}
+            <div style={{fontSize:12,color:C.gray,marginBottom:12,display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+              {data?.exchange && (
+                <span>Bourse <b style={{color:C.text2,fontSize:13}}>{data.exchange}</b></span>
+              )}
+              {mktCap && (()=>{
+                // Market Cap dans la devise du ticker (convertie si eur mode)
+                const mcRaw = data?.marketCap;
+                const mcDisp = mcRaw ? (eur ? mcRaw * usdEur : mcRaw) : null;
+                const fmtMC = v => {
+                  if(!v) return null;
+                  if(v>=1e12) return cur+(v/1e12).toFixed(2)+"T";
+                  if(v>=1e9)  return cur+(v/1e9).toFixed(1)+"B";
+                  if(v>=1e6)  return cur+(v/1e6).toFixed(0)+"M";
+                  return cur+v.toLocaleString("fr-FR");
+                };
+                return <span>Cap <b style={{color:C.text2,fontSize:13}}>{fmtMC(mcDisp)}</b></span>;
+              })()}
             </div>
           )}
 

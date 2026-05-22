@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.27";
+const APP_VERSION = "v21.28";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2774,37 +2774,51 @@ const STOCKS_MONTHLY={"2026":{"bom":[97876,123000,128917,123762,134887,null,null
 const TOTAL_MONTHLY={"2026":{"bom":[258208,273324,261257,270793,297793,null,null,null,null,null,null,null],"eom":[273324,261257,270793,297793,304581,null,null,null,null,null,null,null],"pct":[0.059,-0.044,0.037,0.1,0.023,null,null,null,null,null,null,null],"pnl":[-7187,-28818,6286,27000,6788,null,null,null,null,null,null,null],"inv":[22304,16750,3250,0,0,null,null,null,null,null,null,null],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":4069}};
 const SEAS_CRYPTO={"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"pct":[0.076,0.039,0.114,0.024,-0.101,-0.118,0.159,0.0,0.037,0.151,0.125,-0.036]};
 
-function PageStats({chartData, hidden=false, EFF}){
+function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
   const[yr,setYr]=useState("2026");
   const[cat,setCat]=useState("total"); // crypto | stocks | total
   const[view,setView]=useState("bars"); // bars | table
 
+  // ── Taux USD/EUR historique par date (lit liveDD ou DD global) ────────────
+  const _DD_ST = liveDD || DD;
+  // Retourne le taux usdEur <= dateStr, ou taux actuel par défaut
+  const usdEurAtDate = dateStr => {
+    const row = _DD_ST.reduceRight((a,r)=>a!=null?a:(r[0]<=dateStr&&r[5]?r:null),null);
+    return row ? row[5] : (src?.usdEur || 0.86);
+  };
+  // Taux BOM = 1er du mois (YYYY-MM-01)
+  const bomRate = (year, mi) => {
+    const pad = m => String(m+1).padStart(2,"0");
+    return usdEurAtDate(`${year}-${pad(mi)}-01`);
+  };
+  // Taux EOM = dernier jour du mois (approx fin du mois)
+  const eomRate = (year, mi) => {
+    const pad = m => String(m+1).padStart(2,"0");
+    const lastDay = new Date(parseInt(year), mi+1, 0).getDate();
+    return usdEurAtDate(`${year}-${pad(mi)}-${lastDay}`);
+  };
+  // Convertit un montant USD selon mode eur/$ et taux spécifique
+  const cvt = (usd, rate) => usd == null ? null : eur ? Math.round(usd * rate) : usd;
+  const cur = eur ? "€" : "$";
+
   // ── Fusionne les données historiques avec les snapshots récents ────────────
-  // Prend les snapshots du chartData pour compléter les données manquantes
   const getMonthlyData = (category, year) => {
     const base = category==="crypto" ? CRYPTO_MONTHLY[year]
                 : category==="stocks" ? STOCKS_MONTHLY[year]
                 : TOTAL_MONTHLY[year];
     if(!base) return null;
 
-    // Enrichir avec les snapshots (chartData) pour les mois récents
-    const snaps = chartData.filter(r=>r.d&&r.d.startsWith(year)).reduce((acc,r)=>{
-      const m = parseInt(r.d.slice(5,7))-1;
-      if(!acc[m]) acc[m] = r;
-      else if(r.d > acc[m].d) acc[m] = r;
-      return acc;
-    },{});
-
     // Override avec les données live (EFF) pour le mois courant
     const result = {...base};
     if(category==="crypto" && EFF){
       const now = new Date(); const mi = now.getMonth();
       if(year==="2026"&&mi<12){
-        const liveVal = Math.round(EFF.crypto.total * EFF.usdEur);
-        result.eom = [...result.eom]; result.eom[mi] = liveVal;
+        // EOM live en USD (les données statiques sont en USD)
+        const liveValUSD = EFF.crypto.total;
+        result.eom = [...result.eom]; result.eom[mi] = Math.round(liveValUSD);
         const bom = result.bom[mi]||0;
-        result.pnl = [...result.pnl]; result.pnl[mi] = bom?liveVal-bom:null;
-        result.pct = [...result.pct]; result.pct[mi] = bom?(liveVal-bom)/bom:null;
+        result.pnl = [...result.pnl]; result.pnl[mi] = bom?Math.round(liveValUSD)-bom:null;
+        result.pct = [...result.pct]; result.pct[mi] = bom?(Math.round(liveValUSD)-bom)/bom:null;
       }
     }
     return result;
@@ -2819,15 +2833,28 @@ function PageStats({chartData, hidden=false, EFF}){
   const catLabel = cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total";
   const catColor = cat==="crypto"?C.btc:cat==="stocks"?C.blue:C.green;
 
-  // Calcul résumé annuel
-  // % toujours recalculés = P&L / BOM
-  const realPct  = (data?.bom||[]).map((bom,i)=>{
+  // ── Calcul résumé annuel — % invariant (ratio), montants convertis ─────────
+  // Les données statiques BOM/EOM/PNL sont en USD → convertir avec taux du mois
+  const realPct = (data?.bom||[]).map((bom,i)=>{
     const pnl = data.pnl?.[i];
     return (pnl!=null && bom!=null && bom!==0) ? pnl/bom : null;
   });
-  const validPnl = data?.pnl?.filter(v=>v!=null)??[];
+
+  // Tableaux convertis (en € ou en $ selon mode)
+  const cvtBOM = i => { const v=data?.bom?.[i]; if(v==null) return null; return cvt(v, bomRate(safeYr,i)); };
+  const cvtEOM = i => { const v=data?.eom?.[i]; if(v==null) return null; return cvt(v, eomRate(safeYr,i)); };
+  const cvtPNL = i => {
+    // P&L FX-aware : EOM(€) - BOM(€) - inv(€)  /  ou EOM($) - BOM($) - inv($)
+    const bom=data?.bom?.[i], eom=data?.eom?.[i], inv=data?.inv?.[i]??0;
+    if(bom==null||eom==null) return data?.pnl?.[i]!=null ? cvt(data.pnl[i], eomRate(safeYr,i)) : null;
+    if(!eur) return eom - bom - inv;
+    return Math.round(eom*eomRate(safeYr,i)) - Math.round(bom*bomRate(safeYr,i)) - Math.round(inv*bomRate(safeYr,i));
+  };
+  const cvtINV = i => { const v=data?.inv?.[i]; if(!v) return null; return cvt(v, bomRate(safeYr,i)); };
+
+  const validPnlC = data?.m?.map((_,i)=>cvtPNL(i)).filter(v=>v!=null)??[];
   const validPct = realPct.filter(v=>v!=null);
-  const ttlPnl = validPnl.reduce((s,v)=>s+v,0);
+  const ttlPnl = validPnlC.reduce((s,v)=>s+v,0);
   const avgPct = validPct.length?validPct.reduce((s,v)=>s+v,0)/validPct.length:0;
   const bestI  = realPct.reduce((bi,v,i)=>{if(v==null)return bi; return bi===-1||v>realPct[bi]?i:bi;}, -1);
   const worstI = realPct.reduce((wi,v,i)=>{if(v==null)return wi; return wi===-1||v<realPct[wi]?i:wi;}, -1);
@@ -2863,7 +2890,7 @@ function PageStats({chartData, hidden=false, EFF}){
       {data&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
           {[
-            ["Total P&L","€"+(ttlPnl>=0?"+":"")+Math.round(ttlPnl).toLocaleString("fr-FR"),ttlPnl>=0?C.green:C.red],
+            ["Total P&L",cur+(ttlPnl>=0?"+":"")+Math.round(ttlPnl).toLocaleString("fr-FR"),ttlPnl>=0?C.green:C.red],
             ["Moy./mois",fmtP(avgPct),avgPct>=0?C.green:C.red],
             ["Meilleur",bestI>=0?data.m[bestI]+" "+fmtP(realPct[bestI]):"—",C.green],
             ["Pire",worstI>=0?data.m[worstI]+" "+fmtP(realPct[worstI]):"—",C.red],
@@ -2879,9 +2906,9 @@ function PageStats({chartData, hidden=false, EFF}){
       {/* ── Graphique barres mensuelles ── */}
       {data&&(()=>{
         const vals = realPct;
-        const pnls = data.pnl;
+        // P&L converti pour les labels des barres
+        const pnlsC = data.m.map((_,i)=>cvtPNL(i));
         const mx = Math.max(...vals.filter(v=>v!=null).map(Math.abs), .01);
-        // SVG dimensions — barres bidirectionnelles autour d'une ligne centrale
         const W=320, HTOP=52, HBOT=52, HLAB=14, HPNL=10, MIDLINE=HTOP;
         const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
         const n12=data.m.length, barW=Math.floor((W-16)/n12)-2, gap=2;
@@ -2889,13 +2916,12 @@ function PageStats({chartData, hidden=false, EFF}){
         return(
           <div style={{...crd(),marginBottom:14}}>
             <div style={{fontSize:10,color:C.gray,marginBottom:8,fontWeight:700}}>
-              Performance mensuelle {safeYr} — {cat==="crypto"?"Crypto €":cat==="stocks"?"Actions €":"Total €"}
+              Performance mensuelle {safeYr} — {cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total"} {eur?"€":"$"}
             </div>
             <svg width="100%" viewBox={`0 0 ${W} ${TOTAL_H}`} style={{overflow:"visible",display:"block"}}>
-              {/* Ligne de base */}
               <line x1={4} y1={MIDLINE} x2={W-4} y2={MIDLINE} stroke={C.border} strokeWidth={0.8}/>
               {data.m.map((m,i)=>{
-                const v=vals[i], pnl=pnls[i];
+                const v=vals[i], pnl=pnlsC[i];
                 const cx=bx(i)+barW/2;
                 if(v==null) return(
                   <g key={i}>
@@ -2912,22 +2938,18 @@ function PageStats({chartData, hidden=false, EFF}){
                 const pnlY=isPos?MIDLINE-hpx-11:MIDLINE+hpx+18;
                 return(
                   <g key={i}>
-                    {/* Barre */}
                     <rect x={bx(i)} y={barY} width={barW} height={barH}
                       fill={col} opacity={0.85} rx={2}/>
-                    {/* % label */}
                     <text x={cx} y={lblY} textAnchor="middle"
                       fill={col} fontSize={6.5} fontWeight="800">
                       {fmtP(v,0)}
                     </text>
-                    {/* P&L label */}
                     {pnl!=null&&(
                       <text x={cx} y={pnlY} textAnchor="middle"
                         fill={C.text3} fontSize={5.5}>
                         {pnl>=0?"+":""}{Math.round(pnl/1000)}k
                       </text>
                     )}
-                    {/* Mois label */}
                     <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle"
                       fill={i===bestI?C.green:i===worstI?C.red:C.text3}
                       fontSize={6.5} fontWeight={i===bestI||i===worstI?"800":"400"}>
@@ -2949,46 +2971,47 @@ function PageStats({chartData, hidden=false, EFF}){
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
               <thead>
                 <tr>
-                  {["Mois","BOM","EOM","Investi","P&L €","%"].map(h=>(
+                  {["Mois","BOM","EOM","Investi",`P&L ${cur}`,"%"].map(h=>(
                     <th key={h} style={{padding:"4px 6px",color:C.gray,fontWeight:600,textAlign:h==="Mois"?"left":"right",borderBottom:`1px solid ${C.border}`,fontSize:9}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {data.m.map((m,i)=>{
-                  const eom=data.eom[i], bom=data.bom[i], pnl=data.pnl[i];
-                  // % toujours recalculé = P&L / BOM
-                  const pct = (pnl!=null && bom!=null && bom!==0) ? pnl/bom : null;
-                  const iv = data.inv ? data.inv[i] : null;
-                  if(eom==null&&bom==null) return null;
+                  const eomRaw=data.eom[i], bomRaw=data.bom[i];
+                  const eomC = cvtEOM(i), bomC = cvtBOM(i), pnlC = cvtPNL(i), ivC = cvtINV(i);
+                  // % toujours = P&L_USD / BOM_USD (ratio invariant)
+                  const pct = realPct[i];
+                  if(eomRaw==null&&bomRaw==null) return null;
                   return(
                     <tr key={i} style={{borderBottom:`1px solid ${C.border}22`}}>
                       <td style={{padding:"5px 6px",color:C.text2,fontWeight:600}}>{m}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:C.gray}}>{bom!=null?msk("€"+Math.round(bom).toLocaleString("fr-FR"),hidden):"—"}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{eom!=null?msk("€"+Math.round(eom).toLocaleString("fr-FR"),hidden):"—"}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:iv?C.teal:C.text3,fontWeight:iv?700:400}}>{iv?msk((iv>0?"+":"")+Math.round(iv).toLocaleString("fr-FR")+"€",hidden):"—"}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:bclr(pnl)}}>{pnl!=null?msk((pnl>=0?"+":"")+Math.round(pnl).toLocaleString("fr-FR"),hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:C.gray}}>{bomC!=null?msk(cur+Math.round(bomC).toLocaleString("fr-FR"),hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{eomC!=null?msk(cur+Math.round(eomC).toLocaleString("fr-FR"),hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:ivC?C.teal:C.text3,fontWeight:ivC?700:400}}>{ivC?msk((ivC>0?"+":"")+Math.round(ivC).toLocaleString("fr-FR")+cur,hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:bclr(pnlC)}}>{pnlC!=null?msk((pnlC>=0?"+":"")+Math.round(pnlC).toLocaleString("fr-FR"),hidden):"—"}</td>
                       <td style={{padding:"5px 6px",textAlign:"right",color:bclr(pct)}}>{pct!=null?fmtP(pct):"—"}</td>
                     </tr>
                   );
                 })}
                 <tr style={{borderTop:`1px solid ${C.border}`,fontWeight:800}}>
                   {(()=>{
-                    // BOM = premier mois non-null
-                    const ttlBOM = data.bom?.find(v=>v!=null) ?? null;
-                    // EOM = dernier mois non-null
-                    const ttlEOM = data.eom ? [...data.eom].reverse().find(v=>v!=null) ?? null : null;
-                    // Somme investis
-                    const ttlInv2 = (data.inv||[]).filter(v=>v!=null).reduce((s,v)=>s+v,0);
-                    // P&L = EOM - BOM - investis
-                    const ttlPnlY = (ttlEOM!=null && ttlBOM!=null) ? ttlEOM - ttlBOM - ttlInv2 : ttlPnl;
-                    // % = P&L / BOM
+                    // BOM = premier mois converti
+                    const firstI = data.bom?.findIndex(v=>v!=null) ?? -1;
+                    const ttlBOM = firstI>=0 ? cvtBOM(firstI) : null;
+                    // EOM = dernier mois converti
+                    const lastI = [...(data.eom||[])].map((v,i)=>v!=null?i:-1).filter(i=>i>=0).pop() ?? -1;
+                    const ttlEOM = lastI>=0 ? cvtEOM(lastI) : null;
+                    // Somme investis convertis
+                    const ttlInv2 = data.m.reduce((s,_,i)=>{const v=cvtINV(i); return v?s+v:s;},0);
+                    // P&L total converti = somme des P&L mensuels FX-aware
+                    const ttlPnlY = ttlPnl;
                     const ttlPctY = ttlBOM ? ttlPnlY / ttlBOM : 0;
                     return(<>
                       <td style={{padding:"5px 6px",color:C.text,fontSize:9}}>TOTAL</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:C.gray,fontSize:9}}>{ttlBOM!=null?msk("€"+Math.round(ttlBOM).toLocaleString("fr-FR"),hidden):"—"}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:C.text,fontSize:9}}>{ttlEOM!=null?msk("€"+Math.round(ttlEOM).toLocaleString("fr-FR"),hidden):"—"}</td>
-                      <td style={{padding:"5px 6px",textAlign:"right",color:ttlInv2?C.teal:C.text3,fontSize:9}}>{ttlInv2?msk((ttlInv2>0?"+":"")+Math.round(ttlInv2).toLocaleString("fr-FR")+"€",hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:C.gray,fontSize:9}}>{ttlBOM!=null?msk(cur+Math.round(ttlBOM).toLocaleString("fr-FR"),hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:C.text,fontSize:9}}>{ttlEOM!=null?msk(cur+Math.round(ttlEOM).toLocaleString("fr-FR"),hidden):"—"}</td>
+                      <td style={{padding:"5px 6px",textAlign:"right",color:ttlInv2?C.teal:C.text3,fontSize:9}}>{ttlInv2?msk((ttlInv2>0?"+":"")+Math.round(ttlInv2).toLocaleString("fr-FR")+cur,hidden):"—"}</td>
                       <td style={{padding:"5px 6px",textAlign:"right",color:bclr(ttlPnlY),fontSize:9}}>{msk((ttlPnlY>=0?"+":"")+Math.round(ttlPnlY).toLocaleString("fr-FR"),hidden)}</td>
                       <td style={{padding:"5px 6px",textAlign:"right",color:bclr(ttlPctY),fontSize:9,fontWeight:800}}>{fmtP(ttlPctY)}</td>
                     </>);
@@ -5832,7 +5855,7 @@ function App(){
       <div style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
-        {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur}/>}
+        {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC} liveDD={liveDD}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveGSB={liveGSB}

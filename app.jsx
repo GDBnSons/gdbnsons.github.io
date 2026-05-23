@@ -353,14 +353,15 @@ async function fetchYahoo(symbol){
   return null;
 }
 
-/* Fetch BTC price and EUR/USD rate from CoinGecko */
+/* Fetch BTC + ETH price and EUR/USD rate from CoinGecko */
 async function fetchCoinGecko(){
-  const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,eur";
+  const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,eur";
   const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
   const data = await res.json();
   return {
     btcUSD: data?.bitcoin?.usd ?? null,
     btcEUR: data?.bitcoin?.eur ?? null,
+    ethUSD: data?.ethereum?.usd ?? null,
     eurUSD: data?.bitcoin?.usd && data?.bitcoin?.eur
       ? data.bitcoin.usd / data.bitcoin.eur : null,
   };
@@ -567,6 +568,7 @@ async function fetchAllPrices(){
   try {
     const cg = await fetchCoinGecko();
     if(cg.btcUSD) results.BTC = cg.btcUSD;
+    if(cg.ethUSD) results.ETH = cg.ethUSD;
     if(cg.eurUSD) results.EURUSD = cg.eurUSD;
   } catch(e) { results.errors.push("BTC/EUR"); }
 
@@ -673,6 +675,7 @@ function applyPrices(prices, usdEur, effSrc){
     usdEur: rate, eurUsd,
     totalUSD, totalEUR,
     btcPrice: btcLive,
+    _ethLive: prices.ETH || src._ethLive || null,  // conservé pour le snapshot
     gdbC, gdbS,
     crypto: {...src.crypto, total: cryptoTotal, items: cryptoItems},
     stocks: {...src.stocks, total: stocksTotal, items: stocksItems},
@@ -682,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.50";
+const APP_VERSION = "v21.54";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1253,6 +1256,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
     setLoading(true); setErr(null);
     const { interval, range } = TF_CONFIG[tfIdx];
     try {
+      // Le worker /yahoo-chart retourne déjà marketCap, sector, industry
       const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
         + "&interval=" + interval + "&range=" + range;
       const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
@@ -1352,7 +1356,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
 
   const sortedNews = scoreNews(data?.news);
 
-  // ── Swipe-to-close : tout le sheet, mais seulement si scrollTop==0 ─────────
+  // ── Swipe-to-close : en haut du scroll OU geste suffisant n'importe où ──────
   const onSheetTouchStart = e => {
     touchStartY.current = e.touches[0].clientY;
     setDragY(0);
@@ -1360,17 +1364,18 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const onSheetTouchMove = e => {
     const sheet = sheetRef.current;
     const dy = e.touches[0].clientY - (touchStartY.current || 0);
-    // Activer le swipe-to-close uniquement si on est tout en haut du scroll
-    if(dy > 0 && sheet && sheet.scrollTop === 0) {
+    const atTop = sheet && sheet.scrollTop <= 2;
+    // Swipe-to-close si on est tout en haut, ou si geste > 60px n'importe où
+    if(dy > 0 && (atTop || dy > 60)) {
       e.preventDefault();
-      // Résistance progressive : plus difficile à tirer au début, plus facile après 60px
-      const resistance = dy < 60 ? dy * 0.4 : 24 + (dy - 60) * 0.85;
+      // Résistance légère : quasi 1:1 pour un geste naturel
+      const resistance = dy * 0.75;
       setDragY(resistance);
     }
   };
   const onSheetTouchEnd = () => {
-    // Seuil de fermeture à 80px de drag résistant (~120px de geste réel)
-    if(dragY > 80) { onClose(); }
+    // Seuil abaissé à 50px résistants (~67px de geste réel)
+    if(dragY > 50) { onClose(); }
     else { setDragY(0); }
     touchStartY.current = null;
   };
@@ -1517,9 +1522,16 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               })()}
               {data?.sector && (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                  padding:"8px 12px"}}>
-                  <span style={{fontSize:12,color:C.gray}}>Secteur d'activité</span>
+                  padding:"8px 12px",borderBottom:data?.industry?`1px solid ${C.border}`:"none"}}>
+                  <span style={{fontSize:12,color:C.gray}}>Secteur</span>
                   <span style={{fontSize:12,fontWeight:700,color:C.text,textAlign:"right",maxWidth:"55%"}}>{data.sector}</span>
+                </div>
+              )}
+              {data?.industry && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"8px 12px"}}>
+                  <span style={{fontSize:12,color:C.gray}}>Industrie</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text2,textAlign:"right",maxWidth:"55%"}}>{data.industry}</span>
                 </div>
               )}
             </div>
@@ -4711,7 +4723,9 @@ function SnapshotModal({onSave, onClose, EFF}){
     // Stocks prices
     const sp500  = s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88;
     const nasdaq = s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88; // proxy
-    const msci   = 195.27; // not refreshed
+    const msci   = s.stocks.items.find(x=>x.t==="URTH")?.live || 199.92;
+    // ETH : priorité au prix live fetchés, stockés dans EFF comme résultat du dernier refresh
+    const ethPrice = src._ethLive || src._lastETH || null;
 
     // % allocations
     const pctCrypto  = totalEUR > 0 ? cryptoEUR / totalEUR : 0;
@@ -4743,7 +4757,7 @@ function SnapshotModal({onSave, onClose, EFF}){
       cours_gdbs_usd: gdbsUSD,
       var_gdbs:     0,
       // Col S-Y (cryptos individuelles)
-      eth:  2319.69,
+      eth:  ethPrice,
       pct_eth: 0,
       sol:  86.15,
       doge: 0.098196,
@@ -4835,6 +4849,7 @@ function SnapshotModal({onSave, onClose, EFF}){
         },
         gdbC: src.gdbC || CURRENT.gdbC,
         gdbS: src.gdbS || CURRENT.gdbS,
+        _ethLive: src._ethLive || null,  // prix ETH live du dernier refresh
       },
     };
     onSave(snap);
@@ -5454,7 +5469,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
 }
 
 
-function App(){
+export default function App(){
   const[tab,setTab]=useState(0);
   const[chartData,setChartData]=useState(CHART_MONTHLY);
   // Séries temporelles en state pour pouvoir les muter après snapshot/refresh
@@ -6055,26 +6070,27 @@ function App(){
     log.push("✓ TOTAL_MONTHLY : mis à jour (€"+totalLiveEUR+")");
 
     // ── 9. BENCH_IDX (indices de référence BTC/ETH/SP500/NASDAQ/MSCI) ──────
-    // Récupérer les valeurs depuis le snapshot (issues du dernier refresh)
-    const benchBTC   = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || btcLive || null;
-    const benchETH   = null;  // non stocké dans snap — inchangé
-    const benchSP    = null;
-    const benchNQ    = null;
-    const benchMSCI  = null;
+    // Toutes les valeurs sont disponibles dans le snap (issues du dernier refresh)
+    const benchBTC  = snap._portfolio?.items?.find(x=>x.t==="BTC")?.live || btcLive || null;
+    const benchETH  = snap._portfolio?._ethLive || snap.eth || null;
+    const benchSP   = snap.sp500 || snap._portfolio?.items && src.stocks?.items?.find(x=>x.t==="QQQ")?.live || null;
+    const benchNQ   = snap.nq   || benchSP || null;  // QQQ = proxy NASDAQ aussi
+    const benchMSCI = snap.msci || src.stocks?.items?.find(x=>x.t==="URTH")?.live || null;
     // On upsert seulement si on a au moins BTC (qui vient du snapshot)
     let newBench = [..._BENCH];
     if(benchBTC){
-      // Garder les valeurs existantes pour ETH/SP/NQ/MSCI si pas disponibles
+      // Garder les valeurs existantes pour les colonnes qu'on n'a pas
       const existing = _BENCH.find(r=>r[0]===today);
       newBench = upsert(newBench, [
         today,
         benchBTC,
-        existing?.[2] || null,   // ETH
-        existing?.[3] || null,   // SP500
-        existing?.[4] || null,   // NASDAQ
-        existing?.[5] || null,   // MSCI
+        benchETH  || existing?.[2] || null,   // ETH
+        benchSP   || existing?.[3] || null,   // SP500
+        benchNQ   || existing?.[4] || null,   // NASDAQ
+        benchMSCI || existing?.[5] || null,   // MSCI
       ]);
-      log.push("✓ BENCH_IDX : BTC mis à jour ("+today+", $"+benchBTC+")");
+      const ethLog = benchETH ? `, ETH=$${Math.round(benchETH)}` : "";
+      log.push("✓ BENCH_IDX : BTC mis à jour ("+today+", $"+benchBTC+")"+ethLog);
     }
 
     // ── 10. Portfolio / Crypto / Stocks dans CURRENT (via snap) ───────────
@@ -6633,6 +6649,3 @@ function App(){
     </div>
   );
 }
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(React.createElement(App));

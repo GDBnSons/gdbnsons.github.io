@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.54";
+const APP_VERSION = "v21.55";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3316,46 +3316,58 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
                 : TOTAL_MONTHLY[year];
     if(!base) return null;
     const result = {...base};
-    if(category==="crypto"){
-      const nowNC   = new Date(Date.now() + 11*60*60*1000);
-      const curYear = String(nowNC.getFullYear());
-      const curMI   = nowNC.getMonth();
-      const curYYMM = `${curYear}-${String(curMI+1).padStart(2,"0")}`;
-      if(year === curYear && curMI < 12){
-        // Priorité 1 : valeur live EFF
+    // ── Fonction commune : applique la valeur live EOM pour le mois courant ──
+    const _applyLiveEOM = (eomVal) => {
+      const MONTHS_FR_LOCAL = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
+      const nowNC2  = new Date(Date.now() + 11*60*60*1000);
+      const curMI2  = nowNC2.getMonth();
+      const curMonLabel = MONTHS_FR_LOCAL[curMI2];
+      const existingM   = result.m || [];
+      const monthExists = existingM.includes(curMonLabel);
+      if(!monthExists && eomVal){
+        const prevEOM = [...(result.eom||[])].filter(v=>v!=null).slice(-1)[0] || eomVal;
+        const inv     = result.inv?.[curMI2] || 0;
+        const pnl     = Math.round(eomVal - prevEOM - inv);
+        const pct     = prevEOM ? pnl / prevEOM : 0;
+        result.m   = [...existingM]; result.m[curMI2]   = curMonLabel;
+        result.bom = [...(result.bom||[])]; result.bom[curMI2] = prevEOM;
+        result.eom = [...(result.eom||[])]; result.eom[curMI2] = eomVal;
+        result.pnl = [...(result.pnl||[])]; result.pnl[curMI2] = pnl;
+        result.pct = [...(result.pct||[])]; result.pct[curMI2] = pct;
+        result.inv = [...(result.inv||[])]; result.inv[curMI2] = inv;
+      } else if(monthExists && eomVal){
+        result.eom = [...result.eom]; result.eom[curMI2] = eomVal;
+        const bom = result.bom[curMI2] || 0;
+        const inv = result.inv?.[curMI2] || 0;
+        result.pnl = [...result.pnl]; result.pnl[curMI2] = bom ? eomVal - bom - inv : null;
+        result.pct = [...result.pct]; result.pct[curMI2] = bom ? (eomVal - bom - inv)/bom : null;
+      }
+    };
+
+    const nowNC   = new Date(Date.now() + 11*60*60*1000);
+    const curYear = String(nowNC.getFullYear());
+    const curMI   = nowNC.getMonth();
+    const curYYMM = `${curYear}-${String(curMI+1).padStart(2,"0")}`;
+
+    if(year === curYear && curMI < 12){
+      if(category==="crypto"){
+        // Valeur live = total crypto en € (wallet crypto)
         const liveEUR = EFF ? Math.round(EFF.crypto.total * (src?.usdEur || 0.86)) : null;
-        // Priorité 2 : valeur la plus récente dans DD col[1] pour ce mois
         const ddRows  = _DD_ST.filter(r=>r[0]&&r[0].startsWith(curYYMM)&&r[1]!=null);
         const ddEUR   = ddRows.length ? ddRows[ddRows.length-1][1] : null;
-        const eomVal  = liveEUR || ddEUR;
-
-        // Vérifie si le mois courant est déjà dans la base
-        const MONTHS_FR_LOCAL = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
-        const curMonLabel = MONTHS_FR_LOCAL[curMI];
-        const existingM   = result.m || [];
-        const monthExists = existingM.includes(curMonLabel);
-
-        if(!monthExists && eomVal){
-          // Nouveau mois : figer EOM du mois précédent, créer ligne mois courant
-          // BOM = dernier EOM non-null de la base
-          const prevEOM = [...(result.eom||[])].filter(v=>v!=null).slice(-1)[0] || eomVal;
-          const inv     = result.inv?.[curMI] || 0;
-          const pnl     = Math.round(eomVal - prevEOM - inv);
-          const pct     = prevEOM ? pnl / prevEOM : 0;
-          result.m   = [...existingM]; result.m[curMI]   = curMonLabel;
-          result.bom = [...(result.bom||[])]; result.bom[curMI] = prevEOM;
-          result.eom = [...(result.eom||[])]; result.eom[curMI] = eomVal;
-          result.pnl = [...(result.pnl||[])]; result.pnl[curMI] = pnl;
-          result.pct = [...(result.pct||[])]; result.pct[curMI] = pct;
-          result.inv = [...(result.inv||[])]; result.inv[curMI] = inv;
-        } else if(monthExists && eomVal){
-          // Mois existant : mise à jour EOM live
-          result.eom = [...result.eom]; result.eom[curMI] = eomVal;
-          const bom = result.bom[curMI] || 0;
-          const inv = result.inv?.[curMI] || 0;
-          result.pnl = [...result.pnl]; result.pnl[curMI] = bom ? eomVal - bom - inv : null;
-          result.pct = [...result.pct]; result.pct[curMI] = bom ? (eomVal - bom - inv)/bom : null;
-        }
+        _applyLiveEOM(liveEUR || ddEUR);
+      }
+      if(category==="stocks"){
+        // GDB.S = tous les items stocks sauf KUCOIN (qui appartient au fonds crypto GDB.C)
+        // Inclut : actions, ETF, Cash plateforme (EURO/USD/STRC), Or
+        // Exclut : KUCOIN (cash crypto), Cash Matelas (matelas, hors fonds)
+        const usdEur  = src?.usdEur || 0.86;
+        const liveEUR = EFF ? Math.round(
+          EFF.stocks.items
+            .filter(x => x.t !== "KUCOIN" && x.cat !== "Cash Matelas")
+            .reduce((s, x) => s + (x.val || 0), 0) * usdEur
+        ) : null;
+        _applyLiveEOM(liveEUR);
       }
     }
     return result;

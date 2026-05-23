@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.57";
+const APP_VERSION = "v21.58";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1519,7 +1519,12 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* Debug info — visible si marketCap manquant */}
           {data && !data.marketCap && !data.sector && (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
-              <b>Debug:</b> marketCap={String(data.marketCap)} sector="{data.sector}" name="{data.name}" quoteType="{data.quoteType}"
+              <b>Debug:</b> marketCap={String(data.marketCap)} sector="{data.sector}" quoteType="{data.quoteType}"
+              {data._fmpDebug && (
+                <div style={{marginTop:4}}>
+                  FMP status={String(data._fmpDebug.status)} error="{data._fmpDebug.error}" hasKey={String(data._fmpDebug.hasKey)}
+                </div>
+              )}
             </div>
           )}
 

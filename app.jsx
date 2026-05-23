@@ -5469,7 +5469,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
 }
 
 
-export default function App(){
+function App(){
   const[tab,setTab]=useState(0);
   const[chartData,setChartData]=useState(CHART_MONTHLY);
   // Séries temporelles en state pour pouvoir les muter après snapshot/refresh
@@ -6649,6 +6649,7 @@ export default function App(){
     </div>
   );
 }
+
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(App));

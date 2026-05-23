@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.56";
+const APP_VERSION = "v21.57";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1418,6 +1418,13 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 : loading && <span style={{fontSize:11,color:C.border}}>…</span>
               }
             </div>
+            {/* CIK + ISIN en micro-texte sous le nom */}
+            {(data?.cik || data?.isin) && (
+              <div style={{display:"flex",gap:10,marginTop:2}}>
+                {data.cik  && <span style={{fontSize:9,color:C.text3,fontFamily:"monospace"}}>CIK {data.cik}</span>}
+                {data.isin && <span style={{fontSize:9,color:C.text3,fontFamily:"monospace"}}>{data.isin}</span>}
+              </div>
+            )}
             {/* Badges type + secteur — couleur par quoteType */}
             {(quoteType||sector) && (
               <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
@@ -1452,10 +1459,35 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               {showCity && (
                 <div style={{
                   position:"absolute",right:0,top:"110%",background:C.bg2,border:`1px solid ${C.border}`,
-                  borderRadius:8,padding:"5px 10px",whiteSpace:"nowrap",zIndex:10,
-                  fontSize:10,color:C.text2,fontWeight:600,
+                  borderRadius:10,padding:"10px 14px",whiteSpace:"nowrap",zIndex:10,
+                  minWidth:160,boxShadow:"0 4px 20px #0006",
                 }}>
-                  {city || "—"}
+                  {/* Ville / bourse */}
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:4}}>{city || "—"}</div>
+                  {/* Statut marché + heures */}
+                  {data?.marketHours && (
+                    <>
+                      {data.marketHours.isOpen != null && (
+                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
+                          <div style={{width:7,height:7,borderRadius:"50%",
+                            background:data.marketHours.isOpen ? "#10B981" : "#EF4444",
+                            boxShadow:data.marketHours.isOpen?"0 0 4px #10B981":"none"}}/>
+                          <span style={{fontSize:10,fontWeight:600,
+                            color:data.marketHours.isOpen?C.green:C.red}}>
+                            {data.marketHours.isOpen ? "Marché ouvert" : "Marché fermé"}
+                          </span>
+                        </div>
+                      )}
+                      {(data.marketHours.open||data.marketHours.close) && (
+                        <div style={{fontSize:10,color:C.text2}}>
+                          {data.marketHours.open} – {data.marketHours.close}
+                          {data.marketHours.timezone && (
+                            <span style={{color:C.text3,marginLeft:4}}>({data.marketHours.timezone})</span>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>

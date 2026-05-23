@@ -682,7 +682,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.48";
+const APP_VERSION = "v21.50";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1350,45 +1350,56 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const TF_ROW1 = TF_CONFIG.slice(0,5);
   const TF_ROW2 = TF_CONFIG.slice(5);
 
-  // Swipe-down-to-close handlers (sur le handle uniquement)
-  const onHandleTouchStart = e => {
+  const sortedNews = scoreNews(data?.news);
+
+  // ── Swipe-to-close : tout le sheet, mais seulement si scrollTop==0 ─────────
+  const onSheetTouchStart = e => {
     touchStartY.current = e.touches[0].clientY;
     setDragY(0);
   };
-  const onHandleTouchMove = e => {
+  const onSheetTouchMove = e => {
+    const sheet = sheetRef.current;
     const dy = e.touches[0].clientY - (touchStartY.current || 0);
-    if(dy > 0) { e.preventDefault(); setDragY(dy); }
+    // Activer le swipe-to-close uniquement si on est tout en haut du scroll
+    if(dy > 0 && sheet && sheet.scrollTop === 0) {
+      e.preventDefault();
+      // Résistance progressive : plus difficile à tirer au début, plus facile après 60px
+      const resistance = dy < 60 ? dy * 0.4 : 24 + (dy - 60) * 0.85;
+      setDragY(resistance);
+    }
   };
-  const onHandleTouchEnd = () => {
+  const onSheetTouchEnd = () => {
+    // Seuil de fermeture à 80px de drag résistant (~120px de geste réel)
     if(dragY > 80) { onClose(); }
-    setDragY(0);
+    else { setDragY(0); }
     touchStartY.current = null;
   };
-
-  const sortedNews = scoreNews(data?.news);
 
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/400)})`,
+      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/300)})`,
       display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
       <div
         ref={sheetRef}
         onClick={e=>e.stopPropagation()}
+        onTouchStart={onSheetTouchStart}
+        onTouchMove={onSheetTouchMove}
+        onTouchEnd={onSheetTouchEnd}
         style={{
           width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
           paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
           transform:`translateY(${dragY}px)`,
-          transition: dragY===0 ? "transform 0.3s ease" : "none",
+          transition: dragY===0 ? "transform 0.25s cubic-bezier(0.32,0.72,0,1)" : "none",
+          WebkitOverflowScrolling: "touch",
         }}>
-        {/* Handle — zone de swipe */}
-        <div
-          onTouchStart={onHandleTouchStart}
-          onTouchMove={onHandleTouchMove}
-          onTouchEnd={onHandleTouchEnd}
-          style={{display:"flex",justifyContent:"center",padding:"14px 0 8px",cursor:"grab"}}>
-          <div style={{width:36,height:4,borderRadius:2,background:dragY>40?C.red:C.border,transition:"background 0.2s"}}/>
+        {/* Handle visuel — indication de swipe */}
+        <div style={{display:"flex",justifyContent:"center",padding:"14px 0 8px"}}>
+          <div style={{width:36,height:4,borderRadius:2,
+            background:dragY>50?C.red:C.border,
+            transform:`scaleX(${1 + dragY/200})`,
+            transition:"background 0.15s, transform 0.1s"}}/>
         </div>
 
         {/* Header — ticker + nom + flag */}
@@ -1544,9 +1555,14 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               <div style={{padding:"12px 16px",background:C.red+"11",borderRadius:8,border:`1px solid ${C.red}44`,marginBottom:4}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:4}}>⚠ Erreur de chargement</div>
                 <div style={{fontSize:10,color:C.red+"cc",wordBreak:"break-all"}}>{err}</div>
-                <button onClick={()=>fetchChart(tf)} style={{marginTop:8,fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer"}}>
-                  Réessayer
-                </button>
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={()=>fetchChart(tf)} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer"}}>
+                    Réessayer
+                  </button>
+                  <button onClick={()=>navigator.clipboard.writeText(err).catch(()=>{})} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.gray,cursor:"pointer"}}>
+                    📋 Copier
+                  </button>
+                </div>
               </div>
             )}
             {!loading && !err && closes.length > 1 && (()=>{
@@ -1865,11 +1881,11 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
 
   /* ── Cutoff dynamique ── */
   const cutoff = days => {
-    const d = new Date();
-    d.setDate(d.getDate() - days);
+    const d = new Date(Date.now() + NC_OFFSET_MS);
+    d.setUTCDate(d.getUTCDate() - days);
     return d.toISOString().slice(0,10);
   };
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayNC();
   const tfCut = { "1W":cutoff(7), "1M":cutoff(31), "MTD":today.slice(0,7)+"-01", "YTD":today.slice(0,4)+"-01-01", "1Y":cutoff(365), "2Y":cutoff(730), "ALL":"2020-01-01" };
   const cut = tfCut[tf] || "2020-01-01";
 
@@ -5530,7 +5546,7 @@ function App(){
       const prices = await fetchAllPrices();
       const liveEurUsd = prices.EURUSD || (1/CURRENT.usdEur);
       const liveUsdEur = 1 / liveEurUsd;
-      const todayStr = new Date().toISOString().slice(0,10);
+      const todayStr = todayNC();
 
       // Utiliser setLive(prev=>) pour avoir l'état live courant (post-trades)
       setLive(prev=>{
@@ -6074,7 +6090,10 @@ function App(){
     const result = updateBasesFromSnapshot(snap, EFF||CURRENT, {liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench});
 
     // Sauvegarder dans chartData (snapshots journaliers)
-    const next=[...chartData.filter(r=>r.d!==snap.d),snap]
+    // Dédoublonne : supprime toute entrée à la même date ET entrées à J-1 si snap.d = todayNC()
+    const snapDateNC = snap.d;
+    const prevDayUTC = new Date(new Date(snapDateNC).getTime() - 24*60*60*1000).toISOString().slice(0,10);
+    const next=[...chartData.filter(r=>r.d!==snapDateNC && r.d!==prevDayUTC),snap]
       .sort((a,b)=>a.d.localeCompare(b.d));
     setChartData(next);
 

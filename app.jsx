@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.55";
+const APP_VERSION = "v21.56";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1494,13 +1494,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* Cap. boursière + Secteur — style Yahoo Finance */}
           {(data?.marketCap || data?.sector || data?.exchange) && (
             <div style={{marginBottom:14,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
-              {data?.exchange && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                  padding:"8px 12px",borderBottom:`1px solid ${C.border}`}}>
-                  <span style={{fontSize:12,color:C.gray}}>Bourse</span>
-                  <span style={{fontSize:12,fontWeight:700,color:C.text2}}>{data.exchange}</span>
-                </div>
-              )}
+
               {data?.marketCap && (()=>{
                 const mcRaw = data.marketCap;
                 const mcDisp = eur ? mcRaw * usdEur : mcRaw;

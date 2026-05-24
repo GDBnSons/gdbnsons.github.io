@@ -1244,6 +1244,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const sheetRef    = useRef(null);
   const [crosshair, setCrosshair] = useState(null); // {i, x, y, price, ts}
   const svgRef = useRef(null);
+  const [holdingsOpen, setHoldingsOpen] = useState(false);
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -1275,14 +1276,37 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   // Tri news par pertinence avec le ticker
   const scoreNews = (newsArr) => {
     if(!newsArr || !newsArr.length) return [];
-    const tkLow   = ticker.toLowerCase();
-    const nameLow = (data?.name || "").toLowerCase().split(" ").filter(w=>w.length>3);
+    const tkLow    = ticker.toLowerCase();
+    const nameLow  = (data?.name || "").toLowerCase().split(" ").filter(w=>w.length>3);
+    // Secteur / industrie → mots-clés de 4+ chars
+    const secWords = (data?.sector   || "").toLowerCase().split(/[\s/&,]+/).filter(w=>w.length>3);
+    const indWords = (data?.industry || "").toLowerCase().split(/[\s/&,]+/).filter(w=>w.length>3);
+    // Top holdings ETF : liste ordonnée, pondération décroissante (rang 0 = poids max)
+    const holdings = (data?.topHoldings || []);
+    const holdN    = holdings.length;
     return [...newsArr].sort((a,b)=>{
-      const score = n => {
+      const score = (n, idx) => {
         const t = (n.title||"").toLowerCase();
         let s = 0;
+        // Ticker exact : +10
         if(t.includes(tkLow)) s += 10;
+        // Mots du nom de la société : +3 chacun
         nameLow.forEach(w => { if(t.includes(w)) s += 3; });
+        // Secteur : +2 par mot-clé trouvé
+        secWords.forEach(w => { if(t.includes(w)) s += 2; });
+        // Industrie : +1.5 par mot-clé trouvé
+        indWords.forEach(w => { if(t.includes(w)) s += 1.5; });
+        // ETF top holdings : pondération décroissante par rang
+        // holding[0] → +4, holding[1] → +3.6, …, holding[N-1] → poids minimal ~1
+        if(holdN > 0){
+          holdings.forEach((h, ri) => {
+            const hLow = (h.name||h.symbol||"").toLowerCase();
+            if(hLow.length > 2 && t.includes(hLow)){
+              const weight = holdN === 1 ? 4 : 4 * (1 - ri / holdN * 0.75);
+              s += weight;
+            }
+          });
+        }
         return s;
       };
       return score(b) - score(a);
@@ -1604,54 +1628,76 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* ── Blocs ETF : catégorie + top holdings ── */}
           {quoteType === "ETF" && (() => {
             const etfDbg = data?._yahooDebug || data?._etfDebug || {};
-            const hasErr = !data?.etfCategory && !data?.topHoldings;
+            const hasHoldings = data?.topHoldings && data.topHoldings.length > 0;
             return (
               <>
-                {/* Cadre top holdings */}
+                {/* Cadre top holdings — accordéon */}
                 <div style={{marginBottom:14}}>
-                  <div style={{fontSize:9,color:C.text3,fontWeight:500,
-                    textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>
-                    Top Holdings
-                  </div>
-                  {data?.topHoldings && data.topHoldings.length > 0
-                    ? <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
-                        {data.topHoldings.map((h, i) => {
-                          const isLast = i === data.topHoldings.length - 1;
-                          const maxPct = data.topHoldings[0]?.pct || 1;
-                          const barW = h.pct ? Math.min((h.pct / maxPct) * 100, 100) : 0;
-                          return (
-                            <div key={i} style={{
-                              display:"flex",alignItems:"center",gap:6,padding:"5px 10px",
-                              borderBottom:isLast?"none":`1px solid ${C.border}`,
-                              background:i%2===0?"transparent":C.bg1+"44",
-                            }}>
-                              <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0,textAlign:"right"}}>{i+1}</span>
-                              <div style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                <span style={{fontSize:11,fontWeight:600,color:C.text}}>{h.name}</span>
-                              </div>
-                              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                                <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
-                                  <div style={{width:`${barW}%`,height:"100%",background:C.teal,borderRadius:2}}/>
+                  <button
+                    onClick={() => setHoldingsOpen(o => !o)}
+                    style={{
+                      display:"flex",alignItems:"center",justifyContent:"space-between",
+                      width:"100%",background:"transparent",border:"none",cursor:"pointer",
+                      padding:"0 0 6px 0",textAlign:"left",
+                    }}
+                  >
+                    <span style={{fontSize:9,color:C.text3,fontWeight:700,
+                      textTransform:"uppercase",letterSpacing:0.5}}>
+                      Top Holdings
+                      {hasHoldings && (
+                        <span style={{marginLeft:6,fontSize:9,color:C.text3,fontWeight:400}}>
+                          ({data.topHoldings.length})
+                        </span>
+                      )}
+                    </span>
+                    <span style={{
+                      fontSize:10,color:holdingsOpen ? C.teal : C.text3,
+                      display:"inline-block",
+                      transform: holdingsOpen ? "rotate(90deg)" : "rotate(0deg)",
+                      transition:"transform .2s",
+                    }}>▶</span>
+                  </button>
+
+                  {holdingsOpen && (
+                    hasHoldings
+                      ? <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+                          {data.topHoldings.map((h, i) => {
+                            const isLast = i === data.topHoldings.length - 1;
+                            const maxPct = data.topHoldings[0]?.pct || 1;
+                            const barW = h.pct ? Math.min((h.pct / maxPct) * 100, 100) : 0;
+                            return (
+                              <div key={i} style={{
+                                display:"flex",alignItems:"center",gap:6,padding:"5px 10px",
+                                borderBottom:isLast?"none":`1px solid ${C.border}`,
+                                background:i%2===0?"transparent":C.bg1+"44",
+                              }}>
+                                <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+                                <div style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                  <span style={{fontSize:11,fontWeight:600,color:C.text}}>{h.name}</span>
                                 </div>
-                                <span style={{fontSize:10,fontWeight:700,color:C.teal,minWidth:36,textAlign:"right"}}>
-                                  {h.pct != null ? h.pct.toFixed(1)+"%" : "—"}
-                                </span>
+                                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                  <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
+                                    <div style={{width:`${barW}%`,height:"100%",background:C.teal,borderRadius:2}}/>
+                                  </div>
+                                  <span style={{fontSize:10,fontWeight:700,color:C.teal,minWidth:36,textAlign:"right"}}>
+                                    {h.pct != null ? h.pct.toFixed(1)+"%" : "—"}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    : <div style={{
-                        borderRadius:10,padding:"10px 14px",
-                        background:C.orange+"11",border:`1px solid ${C.orange+"44"}`,
-                        fontSize:8,color:C.orange,fontFamily:"monospace",
-                      }}>
-                        step:{etfDbg.step} qsStatus:{etfDbg.qsStatus} crumb:{etfDbg.crumb}
-                        {" "}holdings:{etfDbg.holdingsCount} qsLen:{etfDbg.qsLen}
-                        {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,80)}</span>}
-                        {etfDbg.error && <span> err:{etfDbg.error.slice(0,80)}</span>}
-                      </div>
-                  }
+                            );
+                          })}
+                        </div>
+                      : <div style={{
+                          borderRadius:10,padding:"10px 14px",
+                          background:C.orange+"11",border:`1px solid ${C.orange+"44"}`,
+                          fontSize:8,color:C.orange,fontFamily:"monospace",
+                        }}>
+                          step:{etfDbg.step} qsStatus:{etfDbg.qsStatus} crumb:{etfDbg.crumb}
+                          {" "}holdings:{etfDbg.holdingsCount} qsLen:{etfDbg.qsLen}
+                          {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,80)}</span>}
+                          {etfDbg.error && <span> err:{etfDbg.error.slice(0,80)}</span>}
+                        </div>
+                  )}
                 </div>
               </>
             );

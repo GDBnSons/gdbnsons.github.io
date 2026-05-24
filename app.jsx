@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.68";
+const APP_VERSION = "v21.69";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1465,40 +1465,41 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* Drapeau + bouton fermer */}
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <div style={{position:"relative"}}>
-              <button onClick={e=>{e.stopPropagation();setShowCity(!showCity);}} style={{
-                background:"transparent",border:"none",fontSize:22,cursor:"pointer",padding:"2px 4px",lineHeight:1,
-              }}>{flag}</button>
+              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                <button onClick={e=>{e.stopPropagation();setShowCity(!showCity);}} style={{
+                  background:"transparent",border:"none",fontSize:22,cursor:"pointer",padding:"2px 4px",lineHeight:1,
+                }}>{flag}</button>
+                {/* Soleil si REGULAR, lune sinon */}
+                {data?.marketState && (
+                  <span style={{fontSize:12,lineHeight:1}} title={data.marketState}>
+                    {data.marketState === "REGULAR" ? "☀️" : "🌙"}
+                  </span>
+                )}
+              </div>
               {showCity && (
                 <div style={{
                   position:"absolute",right:0,top:"110%",background:C.bg2,border:`1px solid ${C.border}`,
                   borderRadius:10,padding:"10px 14px",whiteSpace:"nowrap",zIndex:10,
-                  minWidth:160,boxShadow:"0 4px 20px #0006",
+                  minWidth:170,boxShadow:"0 4px 20px #0006",
                 }}>
-                  {/* Ville / bourse */}
-                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:4}}>{city || "—"}</div>
-                  {/* Statut marché + heures */}
-                  {data?.marketHours && (
-                    <>
-                      {data.marketHours.isOpen != null && (
-                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
-                          <div style={{width:7,height:7,borderRadius:"50%",
-                            background:data.marketHours.isOpen ? "#10B981" : "#EF4444",
-                            boxShadow:data.marketHours.isOpen?"0 0 4px #10B981":"none"}}/>
-                          <span style={{fontSize:10,fontWeight:600,
-                            color:data.marketHours.isOpen?C.green:C.red}}>
-                            {data.marketHours.isOpen ? "Marché ouvert" : "Marché fermé"}
-                          </span>
-                        </div>
-                      )}
-                      {(data.marketHours.open||data.marketHours.close) && (
-                        <div style={{fontSize:10,color:C.text2}}>
-                          {data.marketHours.open} – {data.marketHours.close}
-                          {data.marketHours.timezone && (
-                            <span style={{color:C.text3,marginLeft:4}}>({data.marketHours.timezone})</span>
-                          )}
-                        </div>
-                      )}
-                    </>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>{city || "—"}</div>
+                  {data?.marketState && (() => {
+                    const isOpen = data.marketState === "REGULAR";
+                    const stateLabel = {
+                      REGULAR:"Marché ouvert", PRE:"Pré-marché", POST:"Après clôture",
+                      PREPRE:"Pré-ouverture", POSTPOST:"Après clôture", CLOSED:"Fermé"
+                    }[data.marketState] || data.marketState;
+                    return (
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                        <span style={{fontSize:14}}>{isOpen ? "☀️" : "🌙"}</span>
+                        <span style={{fontSize:10,fontWeight:600,color:isOpen?C.green:C.text3}}>
+                          {stateLabel}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {data?.exchangeTz && (
+                    <div style={{fontSize:9,color:C.text3,marginTop:2}}>{data.exchangeTz}</div>
                   )}
                 </div>
               )}
@@ -1568,48 +1569,36 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               return v.toLocaleString("fr-FR");
             };
             const dbg = data._yahooDebug || data._fmpDebug || {};
+            // 3 cases sur 1 ligne — Var. du jour supprimée
             const cases = [
-              { label:"Cap. boursière", value: fmtMC(data.marketCap),  color:C.text,
-                err: !data.marketCap  ? (dbg.fields?.marketCap  || "null") : null },
-              { label:"Vol. moyen",     value: fmtVol(data.volAvg),    color:C.text2,
-                err: !data.volAvg     ? (dbg.fields?.volAvg      || "null") : null },
+              { label:"Cap. boursière", value: fmtMC(data.marketCap), color:C.text,
+                err: !data.marketCap ? (dbg.marketCap || "null") : null },
+              { label:"Vol. moyen",     value: fmtVol(data.volAvg),   color:C.text2,
+                err: !data.volAvg    ? (dbg.volAvg    || "null") : null },
               { label:"Dernier div.",
                 value: (eur?"€":"$") + (data.lastDiv != null ? Number(data.lastDiv).toFixed(2) : "0.00"),
                 color: data.lastDiv > 0 ? C.green : C.text3,
-                sub: data.lastDivDate || null,
-                err: null },
-              { label:"Var. du jour",
-                value: data.change1d != null
-                  ? (data.change1d >= 0 ? "+" : "") + (eur
-                      ? "€" + (data.change1d * (src?.usdEur||0.86)).toFixed(2)
-                      : "$" + data.change1d.toFixed(2))
-                  : null,
-                color: data.change1d != null ? (data.change1d >= 0 ? C.green : C.red) : C.text3,
-                sub: data.changePct1d != null
-                  ? (data.changePct1d >= 0 ? "+" : "") + data.changePct1d.toFixed(2) + "%"
-                  : null,
-                err: data.change1d == null ? (dbg.qsStatus ? "qs:" + dbg.qsStatus : "null") : null },
+                sub: data.lastDivDate || null, err: null },
             ];
             return (
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:14}}>
                 {cases.map((item, i) => (
                   <div key={i} style={{
                     background: item.err ? C.orange+"11" : C.bg1,
                     border:`1px solid ${item.err ? C.orange+"44" : C.border}`,
-                    borderRadius:10, padding:"10px 12px",
+                    borderRadius:10, padding:"8px 10px",
                     display:"flex",flexDirection:"column",gap:2,
                   }}>
-                    <span style={{fontSize:9,color:C.text3,fontWeight:500,textTransform:"uppercase",letterSpacing:0.5}}>
+                    <span style={{fontSize:8,color:C.text3,fontWeight:500,textTransform:"uppercase",letterSpacing:0.4}}>
                       {item.label}
                     </span>
                     {item.value
                       ? <>
-                          <span style={{fontSize:13,fontWeight:700,color:item.color}}>{item.value}</span>
-                          {item.sub && <span style={{fontSize:9,color:C.text3}}>{item.sub}</span>}
+                          <span style={{fontSize:12,fontWeight:700,color:item.color}}>{item.value}</span>
+                          {item.sub && <span style={{fontSize:8,color:C.text3}}>{item.sub}</span>}
                         </>
-                      : <span style={{fontSize:8,color:C.orange,fontFamily:"monospace",marginTop:2}}>
-                          {dbg.status ? `FMP ${dbg.status} · ${item.err}` : "En attente…"}
-                          {dbg.error && <span style={{display:"block"}}>{dbg.error.slice(0,60)}</span>}
+                      : <span style={{fontSize:7,color:C.orange,fontFamily:"monospace",marginTop:2}}>
+                          {dbg.qsStatus ? "qs:" + dbg.qsStatus + " · " + (item.err||"") : "En attente…"}
                         </span>
                     }
                   </div>

@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.60";
+const APP_VERSION = "v21.61";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1549,9 +1549,9 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           )}
 
           {/* ── Cases de données fondamentales sous le prix ── */}
-          {(data?.marketCap || data?.volAvg || data?.lastDiv || data?.ipoDate) && (() => {
+          {data && (() => {
             const fmtMC = v => {
-              if(!v) return "—";
+              if(!v) return null;
               const vv = eur ? v * usdEur : v;
               const sym = eur ? "€" : "$";
               if(vv >= 1e12) return sym + (vv/1e12).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " Bil.";
@@ -1560,34 +1560,47 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               return sym + vv.toLocaleString("fr-FR");
             };
             const fmtVol = v => {
-              if(!v) return "—";
+              if(!v) return null;
               if(v >= 1e6) return (v/1e6).toLocaleString("fr-FR",{minimumFractionDigits:1,maximumFractionDigits:1}) + "M";
               if(v >= 1e3) return (v/1e3).toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0}) + "k";
               return v.toLocaleString("fr-FR");
             };
-            const items = [
-              data?.marketCap  && { label:"Cap. boursière", value: fmtMC(data.marketCap), color: C.text },
-              data?.volAvg     && { label:"Vol. moyen",     value: fmtVol(data.volAvg),   color: C.text2 },
-              data?.lastDiv    && { label:"Dernier div.",   value: (eur?"€":"$") + Number(data.lastDiv).toFixed(4), color: C.green,
-                                   sub: data?.lastDivDate || null },
-              data?.ipoDate    && { label:"Date IPO",       value: data.ipoDate,           color: C.text2 },
-            ].filter(Boolean);
+            const dbg = data._fmpDebug || {};
+            const cases = [
+              { label:"Cap. boursière", value: fmtMC(data.marketCap),  color:C.text,
+                err: !data.marketCap  ? (dbg.fields?.marketCap  || "null") : null },
+              { label:"Vol. moyen",     value: fmtVol(data.volAvg),    color:C.text2,
+                err: !data.volAvg     ? (dbg.fields?.volAvg      || "null") : null },
+              { label:"Dernier div.",
+                value: data.lastDiv ? (eur?"€":"$") + Number(data.lastDiv).toFixed(4) : null,
+                color:C.green, sub: data.lastDivDate || null,
+                err: !data.lastDiv    ? (dbg.fields?.lastDiv     || "null") : null },
+              { label:"Date IPO",       value: data.ipoDate || null,   color:C.text2,
+                err: !data.ipoDate    ? (dbg.fields?.ipoDate     || "null") : null },
+            ];
             return (
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:14}}>
-                {items.map((item, i) => (
+                {cases.map((item, i) => (
                   <div key={i} style={{
-                    background:C.bg1,border:`1px solid ${C.border}`,borderRadius:10,
-                    padding:"10px 12px",display:"flex",flexDirection:"column",gap:2,
+                    background: item.err ? C.orange+"11" : C.bg1,
+                    border:`1px solid ${item.err ? C.orange+"44" : C.border}`,
+                    borderRadius:10, padding:"10px 12px",
+                    display:"flex",flexDirection:"column",gap:2,
                   }}>
                     <span style={{fontSize:9,color:C.text3,fontWeight:500,textTransform:"uppercase",letterSpacing:0.5}}>
                       {item.label}
                     </span>
-                    <span style={{fontSize:13,fontWeight:700,color:item.color}}>
-                      {item.value}
-                    </span>
-                    {item.sub && (
-                      <span style={{fontSize:9,color:C.text3}}>{item.sub}</span>
-                    )}
+                    {item.value
+                      ? <>
+                          <span style={{fontSize:13,fontWeight:700,color:item.color}}>{item.value}</span>
+                          {item.sub && <span style={{fontSize:9,color:C.text3}}>{item.sub}</span>}
+                        </>
+                      : <span style={{fontSize:8,color:C.orange,fontFamily:"monospace",marginTop:2}}>
+                          {dbg.status ? `FMP ${dbg.status} · ${item.err}` : "En attente…"}
+                          {dbg.error && <>{"
+"}{dbg.error.slice(0,60)}</>}
+                        </span>
+                    }
                   </div>
                 ))}
               </div>

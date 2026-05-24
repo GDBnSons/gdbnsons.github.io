@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.63";
+const APP_VERSION = "v21.64";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1447,12 +1447,18 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                     </span>
                   );
                 })()}
-                {sector && (
-                  <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
-                    background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
-                    {sector}
-                  </span>
-                )}
+                {(()=>{
+                  // Pour les ETF : préférer etfCategory (Yahoo) sur sector (FMP = "Financial Services")
+                  const displaySector = (quoteType==="ETF" && data?.etfCategory)
+                    ? data.etfCategory
+                    : sector;
+                  return displaySector ? (
+                    <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
+                      background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
+                      {displaySector}
+                    </span>
+                  ) : null;
+                })()}
                 {data?.industry && (
                   <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
                     background:C.gold+"18",color:C.gold,border:`1px solid ${C.gold}44`}}>
@@ -1572,9 +1578,10 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               { label:"Vol. moyen",     value: fmtVol(data.volAvg),    color:C.text2,
                 err: !data.volAvg     ? (dbg.fields?.volAvg      || "null") : null },
               { label:"Dernier div.",
-                value: data.lastDiv ? (eur?"€":"$") + Number(data.lastDiv).toFixed(4) : null,
-                color:C.green, sub: data.lastDivDate || null,
-                err: !data.lastDiv    ? (dbg.fields?.lastDiv     || "null") : null },
+                value: data.lastDiv != null ? (eur?"€":"$") + Number(data.lastDiv).toFixed(2) : null,
+                color: data.lastDiv > 0 ? C.green : C.text3,
+                sub: data.lastDivDate || null,
+                err: data.lastDiv == null ? (dbg.fields?.lastDiv || "null") : null },
               { label:"Date IPO",       value: data.ipoDate || null,   color:C.text2,
                 err: !data.ipoDate    ? (dbg.fields?.ipoDate     || "null") : null },
             ];
@@ -1605,6 +1612,51 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               </div>
             );
           })()}
+
+          {/* Top 10 Holdings — ETF uniquement */}
+          {quoteType === "ETF" && data?.topHoldings && data.topHoldings.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.text3,letterSpacing:1,
+                textTransform:"uppercase",marginBottom:8}}>Top Holdings</div>
+              <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+                {data.topHoldings.map((h, i) => {
+                  const isLast = i === data.topHoldings.length - 1;
+                  const barW = h.pct ? Math.min(h.pct * 5, 100) : 0;
+                  return (
+                    <div key={i} style={{
+                      display:"flex",alignItems:"center",gap:8,padding:"7px 12px",
+                      borderBottom:isLast?"none":`1px solid ${C.border}`,
+                      background:i%2===0?"transparent":C.bg1+"66",
+                    }}>
+                      {/* Rang */}
+                      <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0}}>{i+1}</span>
+                      {/* Nom */}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:600,color:C.text,
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {h.name}
+                        </div>
+                        {h.symbol && h.symbol !== h.name && (
+                          <div style={{fontSize:9,color:C.text3}}>{h.symbol}</div>
+                        )}
+                      </div>
+                      {/* Barre + % */}
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                        <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
+                          <div style={{width:`${barW}%`,height:"100%",
+                            background:C.teal,borderRadius:2}}/>
+                        </div>
+                        <span style={{fontSize:10,fontWeight:700,color:C.teal,
+                          minWidth:32,textAlign:"right"}}>
+                          {h.pct != null ? h.pct.toFixed(1)+"%" : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Timeframes — 2 rangées */}
           <div style={{marginBottom:12}}>
@@ -3270,7 +3322,10 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
               section={sec}
               open={openSec===sec.key}
               onToggle={()=>setOpenSec(openSec===sec.key?null:sec.key)}
-              onTickerClick={t=>setTickerModal(t)}
+              onTickerClick={t=>{
+                const NO_MODAL=["BCI","Bourso","DeBlock","KUCOIN","EURO","USD"];
+                if(!NO_MODAL.includes(t)) setTickerModal(t);
+              }}
               hidden={hidden}
               eur={eur}
               usdEur={_src.usdEur||0.852}

@@ -691,7 +691,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.82";
+const APP_VERSION = "v21.84";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -759,6 +759,11 @@ async function cfPing(){
 /* Cache local (localStorage) */
 function lsRead(){ try{ const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsWrite(obj){ try{ localStorage.setItem(LS_KEY,JSON.stringify(obj)); }catch{} }
+
+/* Cache local pour ICON_DB — clé séparée pour éviter les conflits de taille */
+const LS_ICONS_KEY = "gdb_sons_icons_v1";
+function lsReadIcons(){ try{ const v=localStorage.getItem(LS_ICONS_KEY); return v?JSON.parse(v):null; }catch{ return null; } }
+function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify(db)); }catch{} }
 
 /* API publique : load / save — transparent Gist + localStorage */
 const SK={chart:"chart",txns:"txns"};
@@ -1980,8 +1985,9 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
               <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
                 {/* Icon — TickerIcon si ticker connu, sinon fallback BankLogo/emoji */}
                 {(()=>{
-                  // Logos SVG custom uniquement pour les comptes bancaires sans ticker boursier
-                  const SVG_ONLY = ["BCI","Bourso","DeBlock","KUCOIN"];
+                  // Logos SVG custom uniquement pour KUCOIN (pas de ticker boursier, logo SVG maison)
+                  // BCI, Bourso, DeBlock → TickerIcon avec leur logo .fmp depuis BANK_LOGOS
+                  const SVG_ONLY = ["KUCOIN"];
                   const Logo = item.iconComponent && SVG_ONLY.includes(item.ticker)
                     ? BankLogo[item.iconComponent] : null;
                   if(Logo) return(
@@ -1989,7 +1995,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                       <Logo/>
                     </div>
                   );
-                  // Tous les autres tickers (y compris IBKR, USD, EURO, STRC…) → TickerIcon
+                  // Tous les autres tickers (y compris IBKR, USD, EURO, STRC, BCI, Bourso, DeBlock…) → TickerIcon
                   if(item.ticker && !SVG_ONLY.includes(item.ticker)){
                     return(
                       <TickerIcon
@@ -2673,23 +2679,55 @@ function getBestIcon(ticker){
   if(base)      return { type:"emoji", value: base };
   return null;
 }
-// Écrit dans ICON_DB, resync CUSTOM_ICONS
+// Écrit dans ICON_DB, resync CUSTOM_ICONS, persiste en localStorage
 function setIconDb(ticker, patch){
   ICON_DB[ticker] = { ...(ICON_DB[ticker]||{}), ...patch };
   syncCustomIcons();
+  lsWriteIcons(serializeIconDb()); // persistance locale immédiate
 }
 // Sérialise ICON_DB pour KV (clé gdb_icons)
 function serializeIconDb(){ return JSON.parse(JSON.stringify(ICON_DB)); }
 // Désérialise depuis KV et resync
+// Désérialise depuis KV et resync + persiste en localStorage
 function loadIconDb(raw){
   if(!raw || typeof raw !== "object") return;
   // Support ancien format { ticker: "emoji" } → migration vers nouveau format
   Object.entries(raw).forEach(([t, v]) => {
     if(typeof v === "string") ICON_DB[t] = { user: v, fmp: null };
-    else if(typeof v === "object") ICON_DB[t] = { user: v.user||null, fmp: v.fmp||null };
+    else if(typeof v === "object" && v !== null) ICON_DB[t] = { user: v.user||null, fmp: v.fmp||null };
+  });
+  syncCustomIcons();
+  lsWriteIcons(serializeIconDb()); // persister immédiatement en localStorage
+}
+// URLs logos officiels des comptes bancaires (stockés en .fmp dans ICON_DB)
+const BANK_LOGOS = {
+  Bourso:  "https://www.boursorama.com/content/branding/square-bourso-arrow-200x200.png",
+  DeBlock: "https://play-lh.googleusercontent.com/Tu3s0i6GtutjWCrAYY7HPIwanBnScOccRdYNaDmjebSyBAC2WCmjwdfBva6bp9JGig",
+  BCI:     "https://play-lh.googleusercontent.com/ivyTl0CBXQQ8OzSJKt2kPBQtXxoQG-BqZ9_Pyr_TDQMfEsMjuKMqz2ax5AK_9j2gXoc",
+};
+
+// Injecte les logos banque dans ICON_DB (.fmp) sans écraser le choix utilisateur (.user)
+function seedBankLogos(){
+  Object.entries(BANK_LOGOS).forEach(([t, url]) => {
+    if(!ICON_DB[t]) ICON_DB[t] = { user: null, fmp: null };
+    ICON_DB[t].fmp = url; // toujours mettre à jour le fmp (URL officielle fixe)
+    // .user non touché : respecte le choix de l'utilisateur
   });
   syncCustomIcons();
 }
+
+// Charge ICON_DB depuis localStorage au démarrage (avant KV, instantané)
+function initIconDbFromLS(){
+  const raw = lsReadIcons();
+  if(raw && typeof raw === "object" && Object.keys(raw).length > 0){
+    loadIconDb(raw);
+  }
+  // Toujours injecter les logos banque (URL fixe, même si localStorage vide)
+  seedBankLogos();
+  lsWriteIcons(serializeIconDb());
+}
+// Appel immédiat au chargement du module (avant React)
+initIconDbFromLS();
 
 /* ─── TICKER ICON COMPONENT ─────────────────────────────────────────────────
    Affiche la meilleure icône disponible pour un ticker.
@@ -2783,19 +2821,19 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVer
             {/* Icône personnalisée */}
             <div style={{marginBottom:12}}>
               <div style={{fontSize:10,color:C.gray,marginBottom:5,fontWeight:700}}>Icône personnalisée (emoji)</div>
-              <div style={{display:"flex",gap:8}}>
+              <div style={{display:"flex",gap:6}}>
                 <input
                   value={userInput}
                   onChange={e=>setUserInput(e.target.value)}
-                  placeholder="🟩 ou texte"
-                  style={{flex:1,background:C.bg1,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:16,outline:"none"}}
+                  placeholder="🟩"
+                  style={{flex:1,background:C.bg1,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 8px",color:C.text,fontSize:18,outline:"none",minWidth:0}}
                 />
                 <button
                   onClick={()=>{ if(userInput.trim()) saveIcon({user:userInput.trim()}); }}
                   disabled={!userInput.trim()||saving}
-                  style={{padding:"7px 12px",borderRadius:8,background:C.btc,border:"none",cursor:"pointer",fontSize:12,fontWeight:800,color:"#000",opacity:userInput.trim()?1:0.4}}
+                  style={{padding:"6px 8px",borderRadius:8,background:C.btc,border:"none",cursor:"pointer",fontSize:10,fontWeight:800,color:"#000",opacity:userInput.trim()?1:0.4,flexShrink:0,whiteSpace:"nowrap"}}
                 >
-                  {saving?"…":"OK"}
+                  {saving?"…":"✓"}
                 </button>
               </div>
             </div>
@@ -6165,7 +6203,15 @@ function App(){
       if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
       if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
-      if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){ loadIconDb(kv.gdb_icons); bumpIconDb(); }
+      if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
+        // Merger : KV écrase les entrées existantes (KV = vérité cloud)
+        // mais on conserve les entrées localStorage qui ne seraient pas dans KV
+        const merged = { ...serializeIconDb(), ...kv.gdb_icons };
+        loadIconDb(merged); // charge + persiste en localStorage
+        seedBankLogos();    // réinjecter les URLs banque (toujours fixes)
+        lsWriteIcons(serializeIconDb());
+        bumpIconDb();
+      }
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;

@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.59";
+const APP_VERSION = "v21.60";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1431,8 +1431,8 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 {data.isin && <span style={{fontSize:9,color:C.text3,fontFamily:"monospace"}}>{data.isin}</span>}
               </div>
             )}
-            {/* Badges type + secteur — couleur par quoteType */}
-            {(quoteType||sector) && (
+            {/* Badges : type d'actif (vert) + secteur (bleu) + industrie (jaune) */}
+            {(quoteType || sector || data?.industry) && (
               <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
                 {quoteType && (()=>{
                   const QT_COLOR = {
@@ -1451,6 +1451,12 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                   <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
                     background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
                     {sector}
+                  </span>
+                )}
+                {data?.industry && (
+                  <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
+                    background:C.gold+"18",color:C.gold,border:`1px solid ${C.gold}44`}}>
+                    {data.industry}
                   </span>
                 )}
               </div>
@@ -1525,70 +1531,68 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* Debug info — visible si marketCap manquant */}
           {data && !data.marketCap && !data.sector && (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
-              <b>Debug:</b> marketCap={String(data.marketCap)} sector="{data.sector}" quoteType="{data.quoteType}"
+              <b>Debug FMP:</b>
               {data._fmpDebug && (
-                <div style={{marginTop:4}}>
-                  FMP status={String(data._fmpDebug.status)} error="{data._fmpDebug.error}" hasKey={String(data._fmpDebug.hasKey)}
-                </div>
+                <>
+                  <div>status={String(data._fmpDebug.status)} hasKey={String(data._fmpDebug.hasKey)}</div>
+                  {data._fmpDebug.error && <div>error: {data._fmpDebug.error}</div>}
+                  {data._fmpDebug.fields && (
+                    <div style={{marginTop:3}}>
+                      {Object.entries(data._fmpDebug.fields).map(([k,v])=>(
+                        <span key={k} style={{marginRight:6,color:v==="ok"?C.green:C.red}}>{k}:{v}</span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
 
-          {/* Cap. boursière + Secteur — style Yahoo Finance */}
-          {(data?.marketCap || data?.sector || data?.exchange) && (
-            <div style={{marginBottom:14,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
-
-              {data?.marketCap && (()=>{
-                const mcRaw = data.marketCap;
-                const mcDisp = eur ? mcRaw * usdEur : mcRaw;
-                const fmtMC = v => {
-                  if(!v) return "—";
-                  // Format à la française : 1,569 Bil. / 12,3 Mrd.
-                  if(v >= 1e12) return (v/1e12).toLocaleString("fr-FR",{minimumFractionDigits:3,maximumFractionDigits:3})+" Bil.";
-                  if(v >= 1e9)  return (v/1e9).toLocaleString("fr-FR",{minimumFractionDigits:3,maximumFractionDigits:3})+" Mrd.";
-                  if(v >= 1e6)  return (v/1e6).toLocaleString("fr-FR",{minimumFractionDigits:1,maximumFractionDigits:1})+" M";
-                  return v.toLocaleString("fr-FR");
-                };
-                return (
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                    padding:"8px 12px",borderBottom:data?.sector?`1px solid ${C.border}`:"none"}}>
-                    <span style={{fontSize:12,color:C.gray}}>Cap. boursière</span>
-                    <span style={{fontSize:12,fontWeight:700,color:C.text}}>{fmtMC(mcDisp)}</span>
+          {/* ── Cases de données fondamentales sous le prix ── */}
+          {(data?.marketCap || data?.volAvg || data?.lastDiv || data?.ipoDate) && (() => {
+            const fmtMC = v => {
+              if(!v) return "—";
+              const vv = eur ? v * usdEur : v;
+              const sym = eur ? "€" : "$";
+              if(vv >= 1e12) return sym + (vv/1e12).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " Bil.";
+              if(vv >= 1e9)  return sym + (vv/1e9).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " Mrd.";
+              if(vv >= 1e6)  return sym + (vv/1e6).toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0}) + " M";
+              return sym + vv.toLocaleString("fr-FR");
+            };
+            const fmtVol = v => {
+              if(!v) return "—";
+              if(v >= 1e6) return (v/1e6).toLocaleString("fr-FR",{minimumFractionDigits:1,maximumFractionDigits:1}) + "M";
+              if(v >= 1e3) return (v/1e3).toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0}) + "k";
+              return v.toLocaleString("fr-FR");
+            };
+            const items = [
+              data?.marketCap  && { label:"Cap. boursière", value: fmtMC(data.marketCap), color: C.text },
+              data?.volAvg     && { label:"Vol. moyen",     value: fmtVol(data.volAvg),   color: C.text2 },
+              data?.lastDiv    && { label:"Dernier div.",   value: (eur?"€":"$") + Number(data.lastDiv).toFixed(4), color: C.green,
+                                   sub: data?.lastDivDate || null },
+              data?.ipoDate    && { label:"Date IPO",       value: data.ipoDate,           color: C.text2 },
+            ].filter(Boolean);
+            return (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:14}}>
+                {items.map((item, i) => (
+                  <div key={i} style={{
+                    background:C.bg1,border:`1px solid ${C.border}`,borderRadius:10,
+                    padding:"10px 12px",display:"flex",flexDirection:"column",gap:2,
+                  }}>
+                    <span style={{fontSize:9,color:C.text3,fontWeight:500,textTransform:"uppercase",letterSpacing:0.5}}>
+                      {item.label}
+                    </span>
+                    <span style={{fontSize:13,fontWeight:700,color:item.color}}>
+                      {item.value}
+                    </span>
+                    {item.sub && (
+                      <span style={{fontSize:9,color:C.text3}}>{item.sub}</span>
+                    )}
                   </div>
-                );
-              })()}
-              {data?.sector && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                  padding:"8px 12px",borderBottom:data?.industry?`1px solid ${C.border}`:"none"}}>
-                  <span style={{fontSize:12,color:C.gray}}>Secteur</span>
-                  <span style={{fontSize:12,fontWeight:700,color:C.text,textAlign:"right",maxWidth:"55%"}}>{data.sector}</span>
-                </div>
-              )}
-              {data?.industry && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                  padding:"8px 12px",borderBottom:data?.marketCap?`1px solid ${C.border}`:"none"}}>
-                  <span style={{fontSize:12,color:C.gray}}>Industrie</span>
-                  <span style={{fontSize:12,fontWeight:700,color:C.text2,textAlign:"right",maxWidth:"55%"}}>{data.industry}</span>
-                </div>
-              )}
-              {data?.marketCap && (()=>{
-                const mc = eur ? data.marketCap*(src?.usdEur||0.86) : data.marketCap;
-                const fmtMC = v => {
-                  if(!v) return "—";
-                  if(v>=1e12) return (v/1e12).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})+" Bil.";
-                  if(v>=1e9)  return (v/1e9).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})+" Mrd.";
-                  if(v>=1e6)  return (v/1e6).toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0})+" M";
-                  return v.toLocaleString("fr-FR");
-                };
-                return (
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px"}}>
-                    <span style={{fontSize:12,color:C.gray}}>Cap. boursière</span>
-                    <span style={{fontSize:12,fontWeight:700,color:C.text}}>{(eur?"€":"$")+fmtMC(mc)}</span>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Timeframes — 2 rangées */}
           <div style={{marginBottom:12}}>

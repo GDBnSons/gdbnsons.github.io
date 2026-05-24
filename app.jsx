@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.72";
+const APP_VERSION = "v21.73";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1621,9 +1621,9 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                           const barW = h.pct ? Math.min((h.pct / maxPct) * 100, 100) : 0;
                           return (
                             <div key={i} style={{
-                              display:"flex",alignItems:"center",gap:8,padding:"7px 12px",
+                              display:"flex",alignItems:"center",gap:6,padding:"5px 10px",
                               borderBottom:isLast?"none":`1px solid ${C.border}`,
-                              background:i%2===0?"transparent":C.bg1+"66",
+                              background:i%2===0?"transparent":C.bg1+"44",
                             }}>
                               <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0,textAlign:"right"}}>{i+1}</span>
                               <div style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1914,69 +1914,71 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
             const isLast=i===items.length-1;
             const pnlPct=item.pct??(item.pnl&&item.investi?item.pnl/item.investi:null);
             return(
-              <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
+              <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
                 {/* Icon */}
                 {(()=>{
                   const Logo=item.iconComponent?BankLogo[item.iconComponent]:null;
                   return(
-                    <div style={{width:38,height:38,borderRadius:9,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>
+                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
                       {Logo?<Logo/>:(item.icon||item.ticker?.slice(0,4))}
                     </div>
                   );
                 })()}
 
-                {/* Main info */}
-                <div style={{flex:1}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{item.label||item.ticker}</div>
-                      {item.detail&&<div style={{fontSize:10,color:C.gray,marginTop:1}}>{item.detail}</div>}
+                {/* Main info — nouvelle disposition compacte */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    {/* Gauche : ticker/label + live */}
+                    <div style={{minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:C.text}}>{item.label||item.ticker}</span>
+                        {item.live!=null&&item.live!==false&&(
+                          <span style={{fontSize:11,fontWeight:700,color:color}}>
+                            {fmtLive(item.live)}
+                          </span>
+                        )}
+                      </div>
+                      {/* Qty + PA sur la même ligne */}
+                      {(item.qty!=null||item.pa!=null)&&(
+                        <div style={{display:"flex",gap:8,marginTop:2}}>
+                          {item.qty!=null&&(
+                            <span style={{fontSize:10,color:C.gray}}>
+                              <b style={{color:C.text3}}>{item.qty}</b> parts
+                            </span>
+                          )}
+                          {item.pa!=null&&item.pa!==false&&(
+                            <span style={{fontSize:10,color:C.gray}}>
+                              PA <b style={{color:C.text3}}>{fmtPA(item.pa)}</b>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div style={{textAlign:"right"}}>
+                    {/* Droite : valeur + P&L */}
+                    <div style={{textAlign:"right",flexShrink:0}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.text}}>
                         {hidden?"***":(item.valUSD===0?"$0":fmtV(item.valUSD))}
                       </div>
-                      {/* Ligne secondaire € */}
-                      {item.valEUR!=null && (
+                      {item.valEUR!=null&&(
                         <div style={{fontSize:10,color:C.gray}}>
                           {hidden?"***":(eur?"$"+fmtK(item.valUSD):"€"+(item.valEUR===0?"0":fmtK(item.valEUR)))}
                         </div>
                       )}
+                      {item.pnl!==undefined&&item.pnl!==null&&(
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4,marginTop:2}}>
+                          <span style={{fontSize:11,fontWeight:800,color:item.pnl>=0?C.green:C.red}}>
+                            {hidden?"***":fmtP2(item.pnl)}
+                          </span>
+                          {pnlPct!==null&&(
+                            <span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:5,
+                              background:item.pnl>=0?C.green+"22":C.red+"22",color:item.pnl>=0?C.green:C.red}}>
+                              {fmtP(pnlPct)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-
-                  {/* P&L row */}
-                  {item.pnl!==undefined&&item.pnl!==null&&(
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
-                      <div style={{display:"flex",gap:12}}>
-                        {item.pa!=null&&item.pa!==false&&(
-                          <span style={{fontSize:10,color:C.gray}}>
-                            PA <b style={{color:C.text2}}>{fmtPA(item.pa)}</b>
-                          </span>
-                        )}
-                        {item.live!=null&&item.live!==false&&(
-                          <span style={{fontSize:10,color:C.gray}}>
-                            Live <b style={{color}}>{fmtLive(item.live)}</b>
-                          </span>
-                        )}
-                        {item.qty!=null&&(
-                          <span style={{fontSize:10,color:C.gray}}>
-                            Qté <b style={{color:C.text2}}>{item.qty}</b>
-                          </span>
-                        )}
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:12,fontWeight:800,color:item.pnl>=0?C.green:C.red}}>
-                          {hidden?"***":fmtP2(item.pnl)}
-                        </span>
-                        {pnlPct!==null&&(
-                          <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:6,background:item.pnl>=0?C.green+"22":C.red+"22",color:item.pnl>=0?C.green:C.red}}>
-                            {fmtP(pnlPct)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -3361,18 +3363,42 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
                     }}>{fmtP(pnlPct)}</div>
                   </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border}}>
-                  {[
-                    {label:"Crypto",val:"$"+fmtK(CURRENT.crypto.total),c:C.btc},
-                    {label:"Actions",val:"$"+fmtK(CURRENT.stocks.total),c:C.blue},
-                    {label:"Banque",val:"€"+fmtK(CURRENT.bank.totalEUR),c:C.green},
-                  ].map((b,i)=>(
-                    <div key={i} style={{background:C.bg2,padding:"10px 12px",textAlign:"center"}}>
-                      <div style={{fontSize:9,color:C.gray,marginBottom:3}}>{b.label}</div>
-                      <div style={{fontSize:13,fontWeight:800,color:b.c}}>{b.val}</div>
+                {(()=>{
+                  // Totaux corrects selon définition :
+                  // Crypto  = crypto (BTC) + KuCoin
+                  // Actions = stocks (tout sauf KuCoin) : indices + picking + or + cash plateforme
+                  // Banque  = cash matelas (BCI+Bourso+DeBlock)
+                  const _p = EFF || CURRENT;
+                  const _uE = _p.usdEur || 0.86;
+                  const _eU = _p.eurUsd || 1.162;
+                  // Crypto : total crypto (BTC) + valeur KuCoin (dans stocks mais appartient à GDB.C)
+                  const _kuCoin = (_p.stocks?.items||[]).find(x=>x.t==="KUCOIN");
+                  const _cryptoUSD = (_p.crypto?.total||0) + (_kuCoin?.val||0);
+                  // Actions : total stocks - KuCoin
+                  const _stocksUSD = (_p.stocks?.total||0) - (_kuCoin?.val||0);
+                  // Banque : totalEUR du bank (toujours en €)
+                  const _bankEUR = _p.bank?.totalEUR || CURRENT.bank?.totalEUR || 0;
+
+                  const boxes = eur ? [
+                    {label:"Crypto",  val:"€"+fmtK(Math.round(_cryptoUSD*_uE)), c:C.btc},
+                    {label:"Actions", val:"€"+fmtK(Math.round(_stocksUSD*_uE)), c:C.blue},
+                    {label:"Banque",  val:"€"+fmtK(_bankEUR),                   c:C.green},
+                  ] : [
+                    {label:"Crypto",  val:"$"+fmtK(_cryptoUSD),                 c:C.btc},
+                    {label:"Actions", val:"$"+fmtK(_stocksUSD),                 c:C.blue},
+                    {label:"Banque",  val:"$"+fmtK(Math.round(_bankEUR*_eU)),   c:C.green},
+                  ];
+                  return (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border}}>
+                      {boxes.map((b,i)=>(
+                        <div key={i} style={{background:C.bg2,padding:"10px 12px",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:C.gray,marginBottom:3}}>{b.label}</div>
+                          <div style={{fontSize:13,fontWeight:800,color:b.c}}>{hidden?"***":b.val}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
               </div>
             );
           })()}

@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.67";
+const APP_VERSION = "v21.68";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1424,13 +1424,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 : loading && <span style={{fontSize:11,color:C.border}}>…</span>
               }
             </div>
-            {/* CIK + ISIN en micro-texte sous le nom */}
-            {(data?.cik || data?.isin) && (
-              <div style={{display:"flex",gap:10,marginTop:2}}>
-                {data.cik  && <span style={{fontSize:9,color:C.text3,fontFamily:"monospace"}}>CIK {data.cik}</span>}
-                {data.isin && <span style={{fontSize:9,color:C.text3,fontFamily:"monospace"}}>{data.isin}</span>}
-              </div>
-            )}
+
             {/* Badges : type d'actif (vert) + secteur (bleu) + industrie (jaune) */}
             {(quoteType || sector || data?.industry) && (
               <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
@@ -1547,7 +1541,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                     {d.qsErr && <div>qsErr:{d.qsErr}</div>}
                     {d.error && <div>error:{d.error}</div>}
                     <div style={{marginTop:3}}>
-                      {["marketCap","volAvg","sector","industry","divRate","divDate","etfCategory","holdingsCount","ipoDate","logo","cik"]
+                      {["marketCap","volAvg","sector","industry","divRate","divDate","etfCategory","holdingsCount","change","logo"]
                         .map(k=><span key={k} style={{marginRight:5,color:d[k]&&d[k]!=="null"&&d[k]!=="not_in_yahoo"?C.green:C.text3}}>{k}:{d[k]||"?"}</span>)}
                     </div>
                   </>
@@ -1584,8 +1578,17 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 color: data.lastDiv > 0 ? C.green : C.text3,
                 sub: data.lastDivDate || null,
                 err: null },
-              { label:"Date IPO",       value: data.ipoDate || null,   color:C.text2,
-                err: !data.ipoDate    ? (dbg.fields?.ipoDate     || "null") : null },
+              { label:"Var. du jour",
+                value: data.change1d != null
+                  ? (data.change1d >= 0 ? "+" : "") + (eur
+                      ? "€" + (data.change1d * (src?.usdEur||0.86)).toFixed(2)
+                      : "$" + data.change1d.toFixed(2))
+                  : null,
+                color: data.change1d != null ? (data.change1d >= 0 ? C.green : C.red) : C.text3,
+                sub: data.changePct1d != null
+                  ? (data.changePct1d >= 0 ? "+" : "") + data.changePct1d.toFixed(2) + "%"
+                  : null,
+                err: data.change1d == null ? (dbg.qsStatus ? "qs:" + dbg.qsStatus : "null") : null },
             ];
             return (
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:14}}>

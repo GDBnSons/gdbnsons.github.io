@@ -3358,7 +3358,7 @@ function DonutControlled({data,size=160,ri=30,label,sub,sel,onSel}){
   );
 }
 
-function PageAllocation({hidden, EFF, eur=false, setEur}){
+function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIconDb}){
   const[mode,setMode]=useState("detail");
   const[selSlice,setSelSlice]=useState(null);
   const[openSec,setOpenSec]=useState(null);
@@ -6895,7 +6895,7 @@ function App(){
       )}
       <div style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
-        {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
+        {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC} liveDD={liveDD}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}

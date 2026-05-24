@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.64";
+const APP_VERSION = "v21.65";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1578,10 +1578,10 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               { label:"Vol. moyen",     value: fmtVol(data.volAvg),    color:C.text2,
                 err: !data.volAvg     ? (dbg.fields?.volAvg      || "null") : null },
               { label:"Dernier div.",
-                value: data.lastDiv != null ? (eur?"€":"$") + Number(data.lastDiv).toFixed(2) : null,
+                value: (eur?"€":"$") + (data.lastDiv != null ? Number(data.lastDiv).toFixed(2) : "0.00"),
                 color: data.lastDiv > 0 ? C.green : C.text3,
                 sub: data.lastDivDate || null,
-                err: data.lastDiv == null ? (dbg.fields?.lastDiv || "null") : null },
+                err: null },
               { label:"Date IPO",       value: data.ipoDate || null,   color:C.text2,
                 err: !data.ipoDate    ? (dbg.fields?.ipoDate     || "null") : null },
             ];
@@ -1613,50 +1613,88 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
             );
           })()}
 
-          {/* Top 10 Holdings — ETF uniquement */}
-          {quoteType === "ETF" && data?.topHoldings && data.topHoldings.length > 0 && (
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.text3,letterSpacing:1,
-                textTransform:"uppercase",marginBottom:8}}>Top Holdings</div>
-              <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
-                {data.topHoldings.map((h, i) => {
-                  const isLast = i === data.topHoldings.length - 1;
-                  const barW = h.pct ? Math.min(h.pct * 5, 100) : 0;
-                  return (
-                    <div key={i} style={{
-                      display:"flex",alignItems:"center",gap:8,padding:"7px 12px",
-                      borderBottom:isLast?"none":`1px solid ${C.border}`,
-                      background:i%2===0?"transparent":C.bg1+"66",
-                    }}>
-                      {/* Rang */}
-                      <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0}}>{i+1}</span>
-                      {/* Nom */}
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:11,fontWeight:600,color:C.text,
-                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          {h.name}
-                        </div>
-                        {h.symbol && h.symbol !== h.name && (
-                          <div style={{fontSize:9,color:C.text3}}>{h.symbol}</div>
-                        )}
+          {/* ── Blocs ETF : catégorie + top holdings ── */}
+          {quoteType === "ETF" && (() => {
+            const etfDbg = data?._etfDebug || {};
+            const hasErr = !data?.etfCategory && !data?.topHoldings;
+            return (
+              <>
+                {/* Cadre catégorie ETF */}
+                <div style={{
+                  marginBottom:8,borderRadius:10,padding:"10px 14px",
+                  background: data?.etfCategory ? C.bg1 : C.orange+"11",
+                  border:`1px solid ${data?.etfCategory ? C.border : C.orange+"44"}`,
+                }}>
+                  <div style={{fontSize:9,color:C.text3,fontWeight:500,
+                    textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>
+                    Catégorie ETF
+                  </div>
+                  {data?.etfCategory
+                    ? <span style={{fontSize:13,fontWeight:700,color:C.teal}}>{data.etfCategory}</span>
+                    : <div style={{fontSize:8,color:C.orange,fontFamily:"monospace"}}>
+                        step:{etfDbg.step} status:{etfDbg.status} crumb:{etfDbg.crumb}
+                        {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,60)}</span>}
+                        {etfDbg.error && <span> err:{etfDbg.error.slice(0,60)}</span>}
+                        {" "}hasResult:{String(etfDbg.hasResult)} rawLen:{etfDbg.rawLen}
                       </div>
-                      {/* Barre + % */}
-                      <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                        <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
-                          <div style={{width:`${barW}%`,height:"100%",
-                            background:C.teal,borderRadius:2}}/>
-                        </div>
-                        <span style={{fontSize:10,fontWeight:700,color:C.teal,
-                          minWidth:32,textAlign:"right"}}>
-                          {h.pct != null ? h.pct.toFixed(1)+"%" : "—"}
-                        </span>
+                  }
+                </div>
+
+                {/* Cadre top holdings */}
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:9,color:C.text3,fontWeight:500,
+                    textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>
+                    Top Holdings
+                  </div>
+                  {data?.topHoldings && data.topHoldings.length > 0
+                    ? <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+                        {data.topHoldings.map((h, i) => {
+                          const isLast = i === data.topHoldings.length - 1;
+                          const maxPct = data.topHoldings[0]?.pct || 1;
+                          const barW = h.pct ? Math.min((h.pct / maxPct) * 100, 100) : 0;
+                          return (
+                            <div key={i} style={{
+                              display:"flex",alignItems:"center",gap:8,padding:"7px 12px",
+                              borderBottom:isLast?"none":`1px solid ${C.border}`,
+                              background:i%2===0?"transparent":C.bg1+"66",
+                            }}>
+                              <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0,textAlign:"right"}}>{i+1}</span>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:11,fontWeight:600,color:C.text,
+                                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                  {h.name}
+                                </div>
+                                {h.symbol && h.symbol !== h.name && (
+                                  <div style={{fontSize:9,color:C.text3}}>{h.symbol}</div>
+                                )}
+                              </div>
+                              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                                <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
+                                  <div style={{width:`${barW}%`,height:"100%",background:C.teal,borderRadius:2}}/>
+                                </div>
+                                <span style={{fontSize:10,fontWeight:700,color:C.teal,minWidth:36,textAlign:"right"}}>
+                                  {h.pct != null ? h.pct.toFixed(1)+"%" : "—"}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                    : <div style={{
+                        borderRadius:10,padding:"10px 14px",
+                        background:C.orange+"11",border:`1px solid ${C.orange+"44"}`,
+                        fontSize:8,color:C.orange,fontFamily:"monospace",
+                      }}>
+                        step:{etfDbg.step} status:{etfDbg.status} crumb:{etfDbg.crumb}
+                        {" "}holdingsCount:{etfDbg.holdingsCount} rawLen:{etfDbg.rawLen}
+                        {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,80)}</span>}
+                        {etfDbg.error && <span> err:{etfDbg.error.slice(0,80)}</span>}
+                      </div>
+                  }
+                </div>
+              </>
+            );
+          })()}
 
           {/* Timeframes — 2 rangées */}
           <div style={{marginBottom:12}}>

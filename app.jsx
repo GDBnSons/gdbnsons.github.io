@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.71";
+const APP_VERSION = "v21.72";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1441,18 +1441,12 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                     </span>
                   );
                 })()}
-                {(()=>{
-                  // Pour les ETF : préférer etfCategory (Yahoo) sur sector (FMP = "Financial Services")
-                  const displaySector = (quoteType==="ETF" && data?.etfCategory)
-                    ? data.etfCategory
-                    : sector;
-                  return displaySector ? (
-                    <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
-                      background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
-                      {displaySector}
-                    </span>
-                  ) : null;
-                })()}
+                {sector && (
+                  <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
+                    background:C.teal+"18",color:C.teal,border:`1px solid ${C.teal}44`}}>
+                    {sector}
+                  </span>
+                )}
                 {data?.industry && (
                   <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
                     background:C.gold+"18",color:C.gold,border:`1px solid ${C.gold}44`}}>

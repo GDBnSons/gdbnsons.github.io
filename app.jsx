@@ -691,7 +691,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.81";
+const APP_VERSION = "v21.82";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1904,7 +1904,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
 /* ═══════════════════════════════════════════════════════════
    PORTFOLIO SECTION ROW — cliquable, expand avec ligne détail
 ═══════════════════════════════════════════════════════════ */
-function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.852, eurUsd=1.173, onTickerClick}){
+function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.852, eurUsd=1.173, onTickerClick, iconDbVersion=0, onIconSaved}){
   const {n, icon, color, totalUSD, totalEUR, pct, items} = section;
   const totalPnl = items.reduce((s,x)=>s+(x.pnl||0), 0);
 
@@ -1980,19 +1980,24 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
               <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
                 {/* Icon — TickerIcon si ticker connu, sinon fallback BankLogo/emoji */}
                 {(()=>{
-                  const Logo=item.iconComponent?BankLogo[item.iconComponent]:null;
+                  // Logos SVG custom uniquement pour les comptes bancaires sans ticker boursier
+                  const SVG_ONLY = ["BCI","Bourso","DeBlock","KUCOIN"];
+                  const Logo = item.iconComponent && SVG_ONLY.includes(item.ticker)
+                    ? BankLogo[item.iconComponent] : null;
                   if(Logo) return(
                     <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
                       <Logo/>
                     </div>
                   );
-                  if(item.ticker && !["BCI","Bourso","DeBlock","KUCOIN","EURO","USD"].includes(item.ticker)){
+                  // Tous les autres tickers (y compris IBKR, USD, EURO, STRC…) → TickerIcon
+                  if(item.ticker && !SVG_ONLY.includes(item.ticker)){
                     return(
                       <TickerIcon
                         ticker={item.ticker}
                         size={32}
                         color={color+"22"}
-                        onIconSaved={()=>{/* force re-render via state parent si nécessaire */}}
+                        iconDbVersion={iconDbVersion}
+                        onIconSaved={onIconSaved}
                       />
                     );
                   }
@@ -2638,6 +2643,8 @@ const TICKER_ICONS_BASE = {
   ANET:  "🌐",
   HUT:   "⛏️",
   "2CRSI": "🖥️",
+  USD:   "💵",
+  EURO:  "💶",
 };
 // Proxy qui fusionne les icônes custom (CUSTOM_ICONS écrase TICKER_ICONS_BASE)
 const TICKER_ICONS = new Proxy({}, {
@@ -2689,7 +2696,7 @@ function loadIconDb(raw){
    En cliquant dessus : mini-modal inline pour choisir entre user/fmp/base.
    Le clic sur le reste de la ligne déclenche le TickerModal habituel.
 ─────────────────────────────────────────────────────────────────────────── */
-function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved }){
+function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVersion=0 }){
   const [open, setOpen] = useState(false);
   const [userInput, setUserInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2729,8 +2736,6 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved }){
           ? <img src={best.value} alt={ticker} style={{width:"80%",height:"80%",objectFit:"contain",borderRadius:4}} onError={e=>e.target.style.display="none"}/>
           : (best?.value || ticker.slice(0,3))
         }
-        {/* Petit badge édition */}
-        <div style={{position:"absolute",bottom:-3,right:-3,width:12,height:12,borderRadius:"50%",background:C.btc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#000"}}>✎</div>
       </div>
 
       {/* Mini-modal de sélection d'icône */}
@@ -2912,7 +2917,6 @@ function buildSections(L){
       pct: pct(pickingUSD),
       items: src.stocks.items.filter(x=>x.cat==="Picking").map(x=>({
         ticker: x.t, icon: TICKER_ICONS[x.t]||"🎯",
-        iconComponent: x.t==="IBKR"?"IBKR":null,
         label: x.t,
         detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
@@ -3031,7 +3035,7 @@ function buildSections(L){
 /* ═══════════════════════════════════════════════════════════
    PAGE OVERVIEW
 ═══════════════════════════════════════════════════════════ */
-function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,chosenSource}){
+function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,chosenSource,iconDbVersion=0,bumpIconDb}){
   const _DD_PO=liveDD||DD;
   const _CM_PO=liveCM||CRYPTO_MONTHLY;
   const [chartTF, setChartTF] = useState("YTD");
@@ -3577,6 +3581,8 @@ function PageAllocation({hidden, EFF, eur=false, setEur}){
               eur={eur}
               usdEur={_src.usdEur||0.852}
               eurUsd={_src.eurUsd||1.173}
+              iconDbVersion={iconDbVersion}
+              onIconSaved={bumpIconDb}
             />
           ))}
 
@@ -5926,6 +5932,9 @@ function App(){
   const[liveCM,setLiveCM]=useState(CRYPTO_MONTHLY);
   const[liveSM,setLiveSM]=useState(STOCKS_MONTHLY);
   const[liveTM,setLiveTM]=useState(TOTAL_MONTHLY);
+  // Version counter pour forcer re-render après sync ICON_DB (variable module non-reactive)
+  const[iconDbVersion,setIconDbVersion]=useState(0);
+  const bumpIconDb = () => setIconDbVersion(v=>v+1);
   const[txns,setTxns]=useState(SEED_TXNS);
   const[ready,setReady]=useState(false);
   const[showSnap,setShowSnap]=useState(false);
@@ -6156,7 +6165,7 @@ function App(){
       if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
       if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
-      if(kv.gdb_icons&&typeof kv.gdb_icons==="object") loadIconDb(kv.gdb_icons);
+      if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){ loadIconDb(kv.gdb_icons); bumpIconDb(); }
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;
@@ -6885,7 +6894,7 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC} liveDD={liveDD}/>}

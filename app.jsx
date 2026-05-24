@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.66";
+const APP_VERSION = "v21.67";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1537,20 +1537,22 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {/* Debug info — visible si marketCap manquant */}
           {data && !data.marketCap && !data.sector && (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
-              <b>Debug FMP:</b>
-              {data._fmpDebug && (
-                <>
-                  <div>status={String(data._fmpDebug.status)} hasKey={String(data._fmpDebug.hasKey)}</div>
-                  {data._fmpDebug.error && <div>error: {data._fmpDebug.error}</div>}
-                  {data._fmpDebug.fields && (
+              <b>Debug Yahoo:</b>
+              {(data._yahooDebug || data._fmpDebug) && (() => {
+                const d = data._yahooDebug || data._fmpDebug;
+                return (
+                  <>
+                    <div>step:{d.step} fcStatus:{d.fcStatus} crumb:{d.crumb}</div>
+                    <div>qsStatus:{d.qsStatus} qsLen:{d.qsLen} hasResult:{String(d.hasResult)}</div>
+                    {d.qsErr && <div>qsErr:{d.qsErr}</div>}
+                    {d.error && <div>error:{d.error}</div>}
                     <div style={{marginTop:3}}>
-                      {Object.entries(data._fmpDebug.fields).map(([k,v])=>(
-                        <span key={k} style={{marginRight:6,color:v==="ok"?C.green:C.red}}>{k}:{v}</span>
-                      ))}
+                      {["marketCap","volAvg","sector","industry","divRate","divDate","etfCategory","holdingsCount","ipoDate","logo","cik"]
+                        .map(k=><span key={k} style={{marginRight:5,color:d[k]&&d[k]!=="null"&&d[k]!=="not_in_yahoo"?C.green:C.text3}}>{k}:{d[k]||"?"}</span>)}
                     </div>
-                  )}
-                </>
-              )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -1571,7 +1573,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               if(v >= 1e3) return (v/1e3).toLocaleString("fr-FR",{minimumFractionDigits:0,maximumFractionDigits:0}) + "k";
               return v.toLocaleString("fr-FR");
             };
-            const dbg = data._fmpDebug || {};
+            const dbg = data._yahooDebug || data._fmpDebug || {};
             const cases = [
               { label:"Cap. boursière", value: fmtMC(data.marketCap),  color:C.text,
                 err: !data.marketCap  ? (dbg.fields?.marketCap  || "null") : null },
@@ -1615,31 +1617,10 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
 
           {/* ── Blocs ETF : catégorie + top holdings ── */}
           {quoteType === "ETF" && (() => {
-            const etfDbg = data?._etfDebug || {};
+            const etfDbg = data?._yahooDebug || data?._etfDebug || {};
             const hasErr = !data?.etfCategory && !data?.topHoldings;
             return (
               <>
-                {/* Cadre catégorie ETF */}
-                <div style={{
-                  marginBottom:8,borderRadius:10,padding:"10px 14px",
-                  background: data?.etfCategory ? C.bg1 : C.orange+"11",
-                  border:`1px solid ${data?.etfCategory ? C.border : C.orange+"44"}`,
-                }}>
-                  <div style={{fontSize:9,color:C.text3,fontWeight:500,
-                    textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>
-                    Catégorie ETF
-                  </div>
-                  {data?.etfCategory
-                    ? <span style={{fontSize:13,fontWeight:700,color:C.teal}}>{data.etfCategory}</span>
-                    : <div style={{fontSize:8,color:C.orange,fontFamily:"monospace"}}>
-                        step:{etfDbg.step} status:{etfDbg.status} crumb:{etfDbg.crumb}
-                        {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,60)}</span>}
-                        {etfDbg.error && <span> err:{etfDbg.error.slice(0,60)}</span>}
-                        {" "}hasResult:{String(etfDbg.hasResult)} rawLen:{etfDbg.rawLen}
-                      </div>
-                  }
-                </div>
-
                 {/* Cadre top holdings */}
                 <div style={{marginBottom:14}}>
                   <div style={{fontSize:9,color:C.text3,fontWeight:500,
@@ -1659,14 +1640,8 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                               background:i%2===0?"transparent":C.bg1+"66",
                             }}>
                               <span style={{fontSize:9,color:C.text3,width:14,flexShrink:0,textAlign:"right"}}>{i+1}</span>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:11,fontWeight:600,color:C.text,
-                                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                  {h.name}
-                                </div>
-                                {h.symbol && h.symbol !== h.name && (
-                                  <div style={{fontSize:9,color:C.text3}}>{h.symbol}</div>
-                                )}
+                              <div style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                <span style={{fontSize:11,fontWeight:600,color:C.text}}>{h.name}</span>
                               </div>
                               <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
                                 <div style={{width:50,height:3,background:C.border,borderRadius:2}}>
@@ -1685,8 +1660,8 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                         background:C.orange+"11",border:`1px solid ${C.orange+"44"}`,
                         fontSize:8,color:C.orange,fontFamily:"monospace",
                       }}>
-                        step:{etfDbg.step} status:{etfDbg.status} crumb:{etfDbg.crumb}
-                        {" "}holdingsCount:{etfDbg.holdingsCount} rawLen:{etfDbg.rawLen}
+                        step:{etfDbg.step} qsStatus:{etfDbg.qsStatus} crumb:{etfDbg.crumb}
+                        {" "}holdings:{etfDbg.holdingsCount} qsLen:{etfDbg.qsLen}
                         {etfDbg.yfErr && <span> yfErr:{etfDbg.yfErr.slice(0,80)}</span>}
                         {etfDbg.error && <span> err:{etfDbg.error.slice(0,80)}</span>}
                       </div>

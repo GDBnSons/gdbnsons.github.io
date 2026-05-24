@@ -300,8 +300,14 @@ let YF_MAP = {
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"GOLD.PA", IBKR:"IBKR", STRC:"STRC", ANET:"ANET", HUT:"HUT", URTH:"URTH",
 };
-// Icônes personnalisées pour les nouveaux tickers (mutable, sauvegardé dans gdb_icons)
-let CUSTOM_ICONS = {};
+// Base d'icônes persistante : { ticker: { user: string|null, fmp: url|null } }
+// - user : icône choisie par l'utilisateur (emoji ou texte)
+// - fmp  : URL logo officiel récupéré via FMP (stocké pour éviter les re-fetches)
+// Sauvegardé dans gdb_icons sur Cloudflare KV
+let ICON_DB = {};
+// Compatibilité : CUSTOM_ICONS = alias en lecture seule sur ICON_DB.user
+// (pour le Proxy TICKER_ICONS existant)
+let CUSTOM_ICONS = {}; // maintenu en sync avec ICON_DB via syncCustomIcons()
 // Tickers EU dont le prix est en € → à convertir en $ après fetch
 const EUR_YAHOO_TICKERS_SET = new Set(["AVIO","AI","GOLD"]);
 
@@ -685,7 +691,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.77";
+const APP_VERSION = "v21.81";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1263,6 +1269,17 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
       const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
       const d = await r.json();
       if(d.error) throw new Error(d.error);
+      // Stocker le logo FMP dans ICON_DB si pas encore présent
+      if(d.logoUrl && !ICON_DB[ticker]?.fmp){
+        setIconDb(ticker, { fmp: d.logoUrl });
+        // Sauvegarde silencieuse en KV
+        fetch(CF_WORKER_URL+"/write-bases", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+          body: JSON.stringify({ gdb_icons: serializeIconDb() }),
+          signal: AbortSignal.timeout(10000),
+        }).catch(()=>{});
+      }
       setData(d);
     } catch(e) {
       setErr(e.message);
@@ -1961,12 +1978,27 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
             const pnlPct=item.pct??(item.pnl&&item.investi?item.pnl/item.investi:null);
             return(
               <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
-                {/* Icon */}
+                {/* Icon — TickerIcon si ticker connu, sinon fallback BankLogo/emoji */}
                 {(()=>{
                   const Logo=item.iconComponent?BankLogo[item.iconComponent]:null;
+                  if(Logo) return(
+                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                      <Logo/>
+                    </div>
+                  );
+                  if(item.ticker && !["BCI","Bourso","DeBlock","KUCOIN","EURO","USD"].includes(item.ticker)){
+                    return(
+                      <TickerIcon
+                        ticker={item.ticker}
+                        size={32}
+                        color={color+"22"}
+                        onIconSaved={()=>{/* force re-render via state parent si nécessaire */}}
+                      />
+                    );
+                  }
                   return(
                     <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
-                      {Logo?<Logo/>:(item.icon||item.ticker?.slice(0,4))}
+                      {item.icon||item.ticker?.slice(0,4)}
                     </div>
                   );
                 })()}
@@ -2612,6 +2644,177 @@ const TICKER_ICONS = new Proxy({}, {
   get(_, key){ return CUSTOM_ICONS[key] || TICKER_ICONS_BASE[key]; },
   has(_, key){ return key in CUSTOM_ICONS || key in TICKER_ICONS_BASE; },
 });
+
+// ── Helpers ICON_DB ───────────────────────────────────────────────────────────
+// Synchronise CUSTOM_ICONS depuis ICON_DB (pour compatibilité Proxy ci-dessus)
+function syncCustomIcons(){
+  Object.keys(ICON_DB).forEach(t => {
+    if(ICON_DB[t]?.user) CUSTOM_ICONS[t] = ICON_DB[t].user;
+    else delete CUSTOM_ICONS[t];
+  });
+}
+// Retourne la meilleure icône disponible pour un ticker :
+//   1. icône user choisie (emoji/texte)
+//   2. URL logo FMP (à afficher comme <img>)
+//   3. icône base hardcodée
+//   4. null (fallback catégorie)
+function getBestIcon(ticker){
+  const db = ICON_DB[ticker];
+  if(db?.user)  return { type:"emoji", value: db.user };
+  if(db?.fmp)   return { type:"img",   value: db.fmp  };
+  const base = TICKER_ICONS_BASE[ticker];
+  if(base)      return { type:"emoji", value: base };
+  return null;
+}
+// Écrit dans ICON_DB, resync CUSTOM_ICONS
+function setIconDb(ticker, patch){
+  ICON_DB[ticker] = { ...(ICON_DB[ticker]||{}), ...patch };
+  syncCustomIcons();
+}
+// Sérialise ICON_DB pour KV (clé gdb_icons)
+function serializeIconDb(){ return JSON.parse(JSON.stringify(ICON_DB)); }
+// Désérialise depuis KV et resync
+function loadIconDb(raw){
+  if(!raw || typeof raw !== "object") return;
+  // Support ancien format { ticker: "emoji" } → migration vers nouveau format
+  Object.entries(raw).forEach(([t, v]) => {
+    if(typeof v === "string") ICON_DB[t] = { user: v, fmp: null };
+    else if(typeof v === "object") ICON_DB[t] = { user: v.user||null, fmp: v.fmp||null };
+  });
+  syncCustomIcons();
+}
+
+/* ─── TICKER ICON COMPONENT ─────────────────────────────────────────────────
+   Affiche la meilleure icône disponible pour un ticker.
+   En cliquant dessus : mini-modal inline pour choisir entre user/fmp/base.
+   Le clic sur le reste de la ligne déclenche le TickerModal habituel.
+─────────────────────────────────────────────────────────────────────────── */
+function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved }){
+  const [open, setOpen] = useState(false);
+  const [userInput, setUserInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const db = ICON_DB[ticker] || {};
+  const best = getBestIcon(ticker);
+
+  const saveIcon = async (patch) => {
+    setSaving(true);
+    setIconDb(ticker, patch);
+    try {
+      await fetch(CF_WORKER_URL+"/write-bases", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+        body: JSON.stringify({ gdb_icons: serializeIconDb() }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch(e){}
+    setSaving(false);
+    setOpen(false);
+    if(onIconSaved) onIconSaved(ticker);
+  };
+
+  return(
+    <>
+      {/* Zone icône — clic ouvre le mini-modal, ne propage pas vers le TickerModal */}
+      <div
+        onClick={e => { e.stopPropagation(); setUserInput(db.user||""); setOpen(true); }}
+        style={{
+          width:size, height:size, borderRadius:size*0.25, flexShrink:0,
+          background: color, display:"flex", alignItems:"center",
+          justifyContent:"center", fontSize:size*0.5, cursor:"pointer",
+          position:"relative",
+        }}
+        title="Changer l'icône"
+      >
+        {best?.type==="img"
+          ? <img src={best.value} alt={ticker} style={{width:"80%",height:"80%",objectFit:"contain",borderRadius:4}} onError={e=>e.target.style.display="none"}/>
+          : (best?.value || ticker.slice(0,3))
+        }
+        {/* Petit badge édition */}
+        <div style={{position:"absolute",bottom:-3,right:-3,width:12,height:12,borderRadius:"50%",background:C.btc,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#000"}}>✎</div>
+      </div>
+
+      {/* Mini-modal de sélection d'icône */}
+      {open && (
+        <div onClick={e=>e.stopPropagation()} style={{
+          position:"fixed",inset:0,zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",
+          background:"#00000088",
+        }}>
+          <div style={{background:C.bg2,borderRadius:16,padding:"20px 18px",width:280,border:`1px solid ${C.border}`,boxShadow:"0 8px 32px #0008"}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:14}}>
+              Icône — <span style={{color:C.btc,fontFamily:"monospace"}}>{ticker}</span>
+            </div>
+
+            {/* Option FMP officielle */}
+            {db.fmp && (
+              <button onClick={()=>saveIcon({user:null})} style={{
+                display:"flex",alignItems:"center",gap:10,width:"100%",background:!db.user?C.btc+"22":"transparent",
+                border:`1px solid ${!db.user?C.btc:C.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",marginBottom:8,
+              }}>
+                <img src={db.fmp} alt="" style={{width:28,height:28,objectFit:"contain",borderRadius:4,background:"#fff"}} onError={e=>e.target.style.display="none"}/>
+                <div style={{textAlign:"left"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>Logo officiel</div>
+                  <div style={{fontSize:9,color:C.gray}}>Source FMP</div>
+                </div>
+                {!db.user && <span style={{marginLeft:"auto",fontSize:11,color:C.btc}}>✓ actif</span>}
+              </button>
+            )}
+
+            {/* Icône base hardcodée */}
+            {TICKER_ICONS_BASE[ticker] && (
+              <button onClick={()=>saveIcon({user:TICKER_ICONS_BASE[ticker]})} style={{
+                display:"flex",alignItems:"center",gap:10,width:"100%",
+                background:db.user===TICKER_ICONS_BASE[ticker]?C.teal+"22":"transparent",
+                border:`1px solid ${db.user===TICKER_ICONS_BASE[ticker]?C.teal:C.border}`,
+                borderRadius:10,padding:"8px 10px",cursor:"pointer",marginBottom:8,
+              }}>
+                <span style={{fontSize:22}}>{TICKER_ICONS_BASE[ticker]}</span>
+                <div style={{textAlign:"left"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>Icône par défaut</div>
+                </div>
+                {db.user===TICKER_ICONS_BASE[ticker] && <span style={{marginLeft:"auto",fontSize:11,color:C.teal}}>✓ actif</span>}
+              </button>
+            )}
+
+            {/* Icône personnalisée */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,color:C.gray,marginBottom:5,fontWeight:700}}>Icône personnalisée (emoji)</div>
+              <div style={{display:"flex",gap:8}}>
+                <input
+                  value={userInput}
+                  onChange={e=>setUserInput(e.target.value)}
+                  placeholder="🟩 ou texte"
+                  style={{flex:1,background:C.bg1,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:16,outline:"none"}}
+                />
+                <button
+                  onClick={()=>{ if(userInput.trim()) saveIcon({user:userInput.trim()}); }}
+                  disabled={!userInput.trim()||saving}
+                  style={{padding:"7px 12px",borderRadius:8,background:C.btc,border:"none",cursor:"pointer",fontSize:12,fontWeight:800,color:"#000",opacity:userInput.trim()?1:0.4}}
+                >
+                  {saving?"…":"OK"}
+                </button>
+              </div>
+            </div>
+
+            {/* Réinitialiser */}
+            {(db.user||db.fmp) && (
+              <button onClick={()=>saveIcon({user:null,fmp:null})} style={{
+                display:"block",width:"100%",background:"transparent",border:`1px solid ${C.red}44`,
+                borderRadius:8,padding:"6px",cursor:"pointer",fontSize:10,color:C.red,marginBottom:10,
+              }}>
+                ↺ Réinitialiser (catégorie par défaut)
+              </button>
+            )}
+
+            <button onClick={()=>setOpen(false)} style={{
+              display:"block",width:"100%",background:C.bg3,border:"none",borderRadius:8,
+              padding:"8px",cursor:"pointer",fontSize:11,color:C.text,fontWeight:700,
+            }}>Fermer</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 /* ─── PORTFOLIO — nouvelle structure unifiée ─────────────────────────
    Remplace la distinction crypto/stocks/bank par une seule collection
@@ -4525,7 +4728,16 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
     if(form.ticker==="NOUVEAU"){
       const yahooSym = (form.yahooSymbol||"").trim() || resolvedTicker;
       YF_MAP[resolvedTicker] = yahooSym;
-      if(form.newIcon) CUSTOM_ICONS[resolvedTicker] = form.newIcon;
+      if(form.newIcon) {
+        setIconDb(resolvedTicker, { user: form.newIcon });
+        // Sauvegarde immédiate en KV (sans attendre le snapshot)
+        fetch(CF_WORKER_URL+"/write-bases", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+          body: JSON.stringify({ gdb_icons: serializeIconDb(), gdb_yfmap: YF_MAP }),
+          signal: AbortSignal.timeout(10000),
+        }).catch(()=>{});
+      }
     }
     const trade={...form, ticker:resolvedTicker, qty:parseFloat(form.qty),
       price:priceUSD, priceRaw:parseFloat(form.price), currency:form.currency,
@@ -5572,10 +5784,10 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       }),
     },
     "CUSTOM_ICONS": {
-      label:"CUSTOM_ICONS — Icônes personnalisées",
-      desc:"Icônes custom stockées localement ("+(Object.keys(CUSTOM_ICONS).length)+" tickers)",
-      headers:["Ticker","Icône"],
-      rows: Object.entries(CUSTOM_ICONS).map(function(e){return[e[0], e[1]];}),
+      label:"ICON_DB — Base d'icônes (user + FMP)",
+      desc:"Icônes stockées en base ("+(Object.keys(ICON_DB).length)+" tickers)",
+      headers:["Ticker","Icône user","Logo FMP"],
+      rows: Object.entries(ICON_DB).map(function(e){return[e[0], e[1].user||"—", e[1].fmp?"✓ "+e[1].fmp.slice(0,40):"—"];}),
     },
   };
 
@@ -5598,7 +5810,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
     {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
     {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
-    {name:"CUSTOM_ICONS",count:Object.keys(CUSTOM_ICONS).length, last:"icones"},
+    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
   return(
@@ -5944,7 +6156,7 @@ function App(){
       if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
       if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
-      if(kv.gdb_icons&&typeof kv.gdb_icons==="object") Object.assign(CUSTOM_ICONS,kv.gdb_icons);
+      if(kv.gdb_icons&&typeof kv.gdb_icons==="object") loadIconDb(kv.gdb_icons);
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;
@@ -6349,10 +6561,10 @@ function App(){
     const result = updateBasesFromSnapshot(snap, EFF||CURRENT, {liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench});
 
     // Sauvegarder dans chartData (snapshots journaliers)
-    // Dédoublonne : supprime toute entrée à la même date ET entrées à J-1 si snap.d = todayNC()
-    const snapDateNC = snap.d;
-    const prevDayUTC = new Date(new Date(snapDateNC).getTime() - 24*60*60*1000).toISOString().slice(0,10);
-    const next=[...chartData.filter(r=>r.d!==snapDateNC && r.d!==prevDayUTC),snap]
+    // Règle : écrase si même date (snap.d), crée nouvelle ligne sinon
+    // snap.d est déjà en UTC+11 via todayNC() ou choisi manuellement par l'utilisateur
+    const snapDate = snap.d;
+    const next=[...chartData.filter(r=>r.d!==snapDate), snap]
       .sort((a,b)=>a.d.localeCompare(b.d));
     setChartData(next);
 
@@ -6413,7 +6625,7 @@ function App(){
           gdb_bank:      (EFF||CURRENT).bank      || CURRENT.bank,
           // YF_MAP (tickers refresh)
           gdb_yfmap: YF_MAP,
-          gdb_icons: CUSTOM_ICONS,
+          gdb_icons: serializeIconDb(),
         };
         const res = await fetch(CF_WORKER_URL+"/write-bases", {
           method:"POST",

@@ -685,7 +685,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.73";
+const APP_VERSION = "v21.75";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1959,11 +1959,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                       <div style={{fontSize:13,fontWeight:800,color:C.text}}>
                         {hidden?"***":(item.valUSD===0?"$0":fmtV(item.valUSD))}
                       </div>
-                      {item.valEUR!=null&&(
-                        <div style={{fontSize:10,color:C.gray}}>
-                          {hidden?"***":(eur?"$"+fmtK(item.valUSD):"€"+(item.valEUR===0?"0":fmtK(item.valEUR)))}
-                        </div>
-                      )}
+
                       {item.pnl!==undefined&&item.pnl!==null&&(
                         <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4,marginTop:2}}>
                           <span style={{fontSize:11,fontWeight:800,color:item.pnl>=0?C.green:C.red}}>
@@ -2968,30 +2964,6 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
         })()}
       </div>
 
-      {/* ── Taux EUR/USD ── */}
-      {(()=>{
-        const _src3 = EFF||CURRENT;
-        const eurUsdRate = _src3.eurUsd || (1/_src3.usdEur);
-        const usdEurRate = _src3.usdEur;
-        return(
-          <div style={{...crd(),display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",marginBottom:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <span style={{fontSize:13}}>🇪🇺</span>
-              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>EUR / USD</span>
-            </div>
-            <div style={{display:"flex",gap:16,alignItems:"center"}}>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.text}}>${eurUsdRate.toFixed(4)}</div>
-                <div style={{fontSize:9,color:C.gray}}>1€ = ${eurUsdRate.toFixed(4)}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.text}}>€{usdEurRate.toFixed(4)}</div>
-                <div style={{fontSize:9,color:C.gray}}>1$ = €{usdEurRate.toFixed(4)}</div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
       {/* ── GDB.C + GDB.S encarts ── */}
       {(()=>{
         const _ov_src = EFF||CURRENT;
@@ -3051,6 +3023,31 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
       <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC}/>
+
+      {/* ── Taux EUR/USD ── */}
+      {(()=>{
+        const _src3 = EFF||CURRENT;
+        const eurUsdRate = _src3.eurUsd || (1/_src3.usdEur);
+        const usdEurRate = _src3.usdEur;
+        return(
+          <div style={{...crd(),display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:13}}>🇪🇺</span>
+              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>EUR / USD</span>
+            </div>
+            <div style={{display:"flex",gap:16,alignItems:"center"}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>${eurUsdRate.toFixed(4)}</div>
+                <div style={{fontSize:9,color:C.gray}}>1€ = ${eurUsdRate.toFixed(4)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>€{usdEurRate.toFixed(4)}</div>
+                <div style={{fontSize:9,color:C.gray}}>1$ = €{usdEurRate.toFixed(4)}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Version discrète */}
       <div style={{
@@ -3798,7 +3795,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
    Benchmark dynamique sur la même période.
 ═══════════════════════════════════════════════════════════ */
 function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
-  const [tf, setTF]     = useState("ALL");
+  const [tf, setTF]     = useState("YTD");
   const [hover, setHover] = useState(null);
   const [full, setFull]   = useState(false);
   const svgRef = useRef(null);
@@ -4143,13 +4140,20 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liv
   const GS_CREATION_USD = 11.67;
   const GS_CREATION_DATE = "2025-08-19";
 
+  // ALL-TIME : prix de création = 10€ dans les deux cas
+  // En € : perf = (cours_actuel_$  * usdEur_actuel) / 10€ - 1
+  // En $ : perf = cours_actuel_$ / cours_création_$ - 1
+  // (usdEurAt(2020-03-25) peut ne pas être dans DD → on utilise le prix € création = 10€ fixe)
+  const GC_CREATION_EUR = 10.0;  // toujours 10€ à la création
+  const GS_CREATION_EUR = 10.0;
+
   const gcPerfAllTime = eur
-    ? (gcToday * usdEurNow) / (GC_CREATION_USD * usdEurAt(GC_CREATION_DATE)) - 1
-    : gcToday / GC_CREATION_USD - 1;
+    ? (gcToday * usdEurNow) / GC_CREATION_EUR - 1           // cours actuel en € / 10€
+    : gcToday / GC_CREATION_USD - 1;                         // cours actuel en $ / 10.88$
 
   const gsPerfAllTime = eur
-    ? (gsToday * usdEurNow) / (GS_CREATION_USD * usdEurAt(GS_CREATION_DATE)) - 1
-    : gsToday / GS_CREATION_USD - 1;
+    ? (gsToday * usdEurNow) / GS_CREATION_EUR - 1           // cours actuel en € / 10€
+    : gsToday / GS_CREATION_USD - 1;                         // cours actuel en $ / 11.67$
 
   const gsYTD = gsPerf(dytd);
 
@@ -4215,7 +4219,7 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liv
       {n:"S&P 500",v:pDB(3), ic:"🇺🇸",color:"#6B7280"},
       {n:"Nasdaq", v:pDB(4), ic:"🖥",  color:"#10B981"},
       {n:"ETH",    v:pDB(5), ic:"🔵", color:"#1E40AF"},
-      {n:"MSCI",   v:pDB(6), ic:"🌍", color:"#EC4899"},
+      {n:"MSCI",   v:pDB(5), ic:"🌍", color:"#EC4899"},
     ];
   })();
 
@@ -6513,7 +6517,12 @@ function App(){
 
   return(
     <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:78,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
-      <div style={{padding:"10px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{
+        padding:"10px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        position:"sticky",top:0,zIndex:100,
+        background:C.bg,borderBottom:`1px solid ${C.border}`,
+        backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",
+      }}>
         {/* Gauche : ⟳ 📸 💵 */}
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <button onClick={handleRefresh} disabled={refreshing} style={{

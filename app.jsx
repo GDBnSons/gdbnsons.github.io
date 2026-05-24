@@ -1597,8 +1597,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                         </>
                       : <span style={{fontSize:8,color:C.orange,fontFamily:"monospace",marginTop:2}}>
                           {dbg.status ? `FMP ${dbg.status} · ${item.err}` : "En attente…"}
-                          {dbg.error && <>{"
-"}{dbg.error.slice(0,60)}</>}
+                          {dbg.error && <span style={{display:"block"}}>{dbg.error.slice(0,60)}</span>}
                         </span>
                     }
                   </div>

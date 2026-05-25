@@ -691,7 +691,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.84";
+const APP_VERSION = "v21.86";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1267,17 +1267,18 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
     const { interval, range } = TF_CONFIG[tfIdx];
+    // Si le logo FMP est déjà en base, on passe no_logo=true pour économiser un appel FMP
+    const alreadyHasLogo = !!ICON_DB[ticker]?.fmp;
     try {
-      // Le worker /yahoo-chart retourne déjà marketCap, sector, industry
       const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
-        + "&interval=" + interval + "&range=" + range;
+        + "&interval=" + interval + "&range=" + range
+        + (alreadyHasLogo ? "&no_logo=1" : "");
       const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
       const d = await r.json();
       if(d.error) throw new Error(d.error);
-      // Stocker le logo FMP dans ICON_DB si pas encore présent
-      if(d.logoUrl && !ICON_DB[ticker]?.fmp){
+      // Stocker le logo FMP dans ICON_DB seulement si nouveau
+      if(d.logoUrl && !alreadyHasLogo){
         setIconDb(ticker, { fmp: d.logoUrl });
-        // Sauvegarde silencieuse en KV
         fetch(CF_WORKER_URL+"/write-bases", {
           method:"POST",
           headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
@@ -1354,12 +1355,31 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
   const prevClose = data?.prevClose;
   const currency  = data?.currency || "USD";
   const isUSD     = currency === "USD";
-  const cvPrice   = v => v == null ? null : eur ? v * usdEur : (isUSD ? v : v);
+  const isEUR     = currency === "EUR";
+  const isGBp     = currency === "GBp"; // pence → diviser par 100
+  // Normalise le prix en USD-équivalent pour l'affichage cohérent
+  // GBp → GBP : diviser par 100
+  // EUR ticker (GOLD.PA, AI.PA…) : déjà en EUR, ne pas multiplier par usdEur
+  const normalizePrice = v => {
+    if(v == null) return null;
+    if(isGBp) return v / 100; // GBp → GBP
+    return v; // USD ou EUR : déjà dans la bonne devise de base
+  };
+  // Conversion pour l'affichage (toggle EUR)
+  const cvPrice = v => {
+    const n = normalizePrice(v);
+    if(n == null) return null;
+    if(eur){
+      if(isEUR || isGBp) return n; // déjà en EUR (GBp→GBP est une approximation acceptable)
+      return n * usdEur;           // USD → EUR
+    }
+    return n; // affichage devise native
+  };
   const priceDisp = cvPrice(price);
   const pnl1d     = (price != null && prevClose != null) ? cvPrice(price - prevClose) : null;
-  const pct1d     = (price != null && prevClose != null && prevClose !== 0) ? (price - prevClose)/prevClose : null;
+  const pct1d     = (price != null && prevClose != null && prevClose !== 0) ? (normalizePrice(price) - normalizePrice(prevClose))/normalizePrice(prevClose) : null;
   const CURRENCY_SYM = { USD:"$", EUR:"€", GBP:"£", GBp:"£", JPY:"¥", CAD:"CA$", AUD:"A$" };
-  const cur       = eur ? "€" : (CURRENCY_SYM[currency] || currency);
+  const cur       = eur ? "€" : (isGBp ? "£" : (CURRENCY_SYM[currency] || currency));
   const fmtAmt    = v => v == null ? "—" : (v>=0?"+":"")+cur+(Math.abs(v)>=100 ? Math.round(Math.abs(v)).toLocaleString("fr-FR") : Math.abs(v).toFixed(2));
   const fmtPct    = v => v == null ? "—" : (v>=0?"+":"")+(Math.abs(v)*100).toFixed(2)+"%";
   const fmtPriceV = v => v == null ? "—" : cur+(v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2));
@@ -1458,12 +1478,22 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           <div style={{flex:1,minWidth:0}}>
             {/* Ticker grand + logo + nom YF petit */}
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-              {data?.logoUrl && (
-                <img src={data.logoUrl} alt={ticker}
-                  style={{width:28,height:28,borderRadius:6,objectFit:"contain",
-                    background:C.bg2,border:`1px solid ${C.border}`,flexShrink:0}}
-                  onError={e=>{e.target.style.display="none";}}/>
-              )}
+              {(()=>{
+                // Priorité : icône user → logo fmp ICON_DB → logoUrl API
+                const db = ICON_DB[ticker];
+                const logoSrc = db?.user ? null : (db?.fmp || data?.logoUrl);
+                const userIcon = db?.user;
+                if(userIcon) return(
+                  <span style={{fontSize:24,lineHeight:1}}>{userIcon}</span>
+                );
+                if(logoSrc) return(
+                  <img src={logoSrc} alt={ticker}
+                    style={{width:28,height:28,borderRadius:6,objectFit:"contain",
+                      background:C.bg2,border:`1px solid ${C.border}`,flexShrink:0}}
+                    onError={e=>{e.target.style.display="none";}}/>
+                );
+                return null;
+              })()}
               <span style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>{ticker}</span>
               {data?.name
                 ? <span style={{fontSize:11,color:C.gray,fontWeight:400,flexShrink:1,minWidth:0}}>{data.name}</span>
@@ -1595,7 +1625,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           {data && (() => {
             const fmtMC = v => {
               if(!v) return null;
-              const vv = eur ? v * usdEur : v;
+              const vv = eur ? (isEUR || isGBp ? v : v * usdEur) : v;
               const sym = eur ? "€" : "$";
               if(vv >= 1e12) return sym + (vv/1e12).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " Bil.";
               if(vv >= 1e9)  return sym + (vv/1e9).toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2}) + " Mrd.";
@@ -2704,6 +2734,10 @@ const BANK_LOGOS = {
   Bourso:  "https://www.boursorama.com/content/branding/square-bourso-arrow-200x200.png",
   DeBlock: "https://play-lh.googleusercontent.com/Tu3s0i6GtutjWCrAYY7HPIwanBnScOccRdYNaDmjebSyBAC2WCmjwdfBva6bp9JGig",
   BCI:     "https://play-lh.googleusercontent.com/ivyTl0CBXQQ8OzSJKt2kPBQtXxoQG-BqZ9_Pyr_TDQMfEsMjuKMqz2ax5AK_9j2gXoc",
+  // Tickers EU que FMP ne reconnaît pas — logos hardcodés
+  GOLD:    "https://www.amundi.com/themes/custom/amundi/logo.png",
+  AI:      "https://upload.wikimedia.org/wikipedia/fr/thumb/3/38/Logo_Air_Liquide.svg/200px-Logo_Air_Liquide.svg.png",
+  JEDI:    "https://cdn.getmimo.com/uploads/2024/01/Mimo_Logo_250x250.png",
 };
 
 // Injecte les logos banque dans ICON_DB (.fmp) sans écraser le choix utilisateur (.user)
@@ -6690,7 +6724,50 @@ function App(){
         });
         const data = await res.json();
         if(!res.ok) throw new Error("HTTP "+res.status+" — "+(data.error||""));
-        uploadLog.push("✓ Bases sauvegardées ("+((data.written||[]).length)+" clés dont txns) : "+((data.written||[]).join(", ")));
+        const written = new Set(data.written||[]);
+        const snap   = snapResult.snap || {};
+        const src    = EFF || CURRENT;
+        // Ligne par base — on reprend les mêmes valeurs que dans le log local pour cohérence
+        const snapDate = snap.d || today();
+        if(written.has("gdb_bench")){
+          const btc = newBench?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ BENCH_IDX : BTC="+(btc?"$"+btc.BTC:"—")+(btc?.ETH?" ETH=$"+btc.ETH:"")+" ("+snapDate+")");
+        }
+        if(written.has("gdb_dd")){
+          const row = newDD?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ DD : "+(row?"ligne ("+snapDate+")":"mis à jour"));
+        }
+        if(written.has("gdb_gdbs")){
+          const row = newGDBS?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ GDBS : "+(row?"GDB.S="+row["GDB.S"]+", GDB.C="+row["GDB.C"]:"mis à jour"));
+        }
+        if(written.has("gdb_gc"))  uploadLog.push("✓ GC_FULL : mis à jour");
+        if(written.has("gdb_gsb")){
+          const row = newGSB?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ GS_B100_EXT : "+(row?row["GS.B100"]:"mis à jour"));
+        }
+        if(written.has("gdb_cm")){
+          const last = newCM && newCM[newCM.length-1];
+          uploadLog.push("✓ CRYPTO_MONTHLY : "+(last?last.y+" "+last.m+" EOM=€"+last.eur:"mis à jour"));
+        }
+        if(written.has("gdb_sm")){
+          const last = newSM && newSM[newSM.length-1];
+          uploadLog.push("✓ STOCKS_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
+        }
+        if(written.has("gdb_tm")){
+          const last = newTM && newTM[newTM.length-1];
+          uploadLog.push("✓ TOTAL_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
+        }
+        if(written.has("gdb_txns"))     uploadLog.push("✓ Transactions : "+txns.length+" lignes");
+        if(written.has("gdb_portfolio")) uploadLog.push("✓ Portfolio : sauvegardé");
+        if(written.has("gdb_crypto"))   uploadLog.push("✓ Crypto : sauvegardé");
+        if(written.has("gdb_stocks"))   uploadLog.push("✓ Stocks : sauvegardé");
+        if(written.has("gdb_bank"))     uploadLog.push("✓ Bank : sauvegardé");
+        if(written.has("gdb_yfmap"))    uploadLog.push("✓ YF_MAP : "+Object.keys(YF_MAP).length+" tickers");
+        if(written.has("gdb_icons"))    uploadLog.push("✓ ICON_DB : "+Object.keys(ICON_DB).length+" icônes");
+        // Clés échouées (dans ALLOWED mais non écrites)
+        const failed = Object.keys(bases).filter(k=>!written.has(k));
+        failed.forEach(k=>uploadErrors.push("✗ "+k+" : non confirmé"));
         basesOk = true;
       } catch(e){
         if(attempt < 3){

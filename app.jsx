@@ -300,6 +300,25 @@ let YF_MAP = {
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"GOLD.PA", IBKR:"IBKR", STRC:"STRC", ANET:"ANET", HUT:"HUT", URTH:"URTH",
 };
+
+/* Ticker → CoinGecko ID mapping (catégorie Crypto) */
+const CG_MAP = {
+  BTC:  "bitcoin",
+  ETH:  "ethereum",
+  SOL:  "solana",
+  BNB:  "binancecoin",
+  XRP:  "ripple",
+  ADA:  "cardano",
+  DOGE: "dogecoin",
+  DOT:  "polkadot",
+  AVAX: "avalanche-2",
+  MATIC:"matic-network",
+  LINK: "chainlink",
+  UNI:  "uniswap",
+  LTC:  "litecoin",
+  ATOM: "cosmos",
+  HYPE: "hyperliquid",
+};
 // Base d'icônes persistante : { ticker: { user: string|null, fmp: url|null } }
 // - user : icône choisie par l'utilisateur (emoji ou texte)
 // - fmp  : URL logo officiel récupéré via FMP (stocké pour éviter les re-fetches)
@@ -691,7 +710,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.86";
+const APP_VERSION = "v21.90";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1241,9 +1260,14 @@ const TF_CONFIG = [
   { label:"ALL", interval:"3mo",  range:"max"  },
 ];
 
-function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
-  // Résoudre le symbole Yahoo via YF_MAP
-  const yfSym = YF_MAP[ticker] || ticker;
+// Timeframes CoinGecko : days valides = 1,7,14,30,90,180,365,max
+// Mapping TF_CONFIG index → days CoinGecko
+const TF_CG_DAYS = ["1","7","7","14","30","365","1825","max"];
+
+function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
+  const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
+  const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
+  const yfSym    = YF_MAP[ticker] || ticker;
 
   const [tf, setTf]         = useState(3);
   const [data, setData]     = useState(null);
@@ -1266,27 +1290,45 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
 
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
-    const { interval, range } = TF_CONFIG[tfIdx];
-    // Si le logo FMP est déjà en base, on passe no_logo=true pour économiser un appel FMP
-    const alreadyHasLogo = !!ICON_DB[ticker]?.fmp;
     try {
-      const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
-        + "&interval=" + interval + "&range=" + range
-        + (alreadyHasLogo ? "&no_logo=1" : "");
-      const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
-      const d = await r.json();
-      if(d.error) throw new Error(d.error);
-      // Stocker le logo FMP dans ICON_DB seulement si nouveau
-      if(d.logoUrl && !alreadyHasLogo){
-        setIconDb(ticker, { fmp: d.logoUrl });
-        fetch(CF_WORKER_URL+"/write-bases", {
-          method:"POST",
-          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-          body: JSON.stringify({ gdb_icons: serializeIconDb() }),
-          signal: AbortSignal.timeout(10000),
-        }).catch(()=>{});
+      if(isCrypto){
+        // ── CoinGecko path ──────────────────────────────────────────────────
+        const days = TF_CG_DAYS[tfIdx] || "30";
+        const url  = CF_WORKER_URL + "/coingecko-coin?id=" + encodeURIComponent(cgId)
+          + "&days=" + days + "&symbol=" + encodeURIComponent(ticker);
+        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
+        const d = await r.json();
+        if(d.error) throw new Error(d.error);
+        // Logo CoinGecko → ICON_DB.fmp
+        if(d.logoUrl && !ICON_DB[ticker]?.fmp){
+          setIconDb(ticker, { fmp: d.logoUrl });
+          fetch(CF_WORKER_URL+"/write-bases", {
+            method:"POST",
+            headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+            body: JSON.stringify({ gdb_icons: serializeIconDb() }),
+            signal: AbortSignal.timeout(10000),
+          }).catch(()=>{});
+        }
+        setData(d);
+      } else {
+        // ── Yahoo Finance path ──────────────────────────────────────────────
+        const { interval, range } = TF_CONFIG[tfIdx];
+        const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
+          + "&interval=" + interval + "&range=" + range;
+        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
+        const d = await r.json();
+        if(d.error) throw new Error(d.error);
+        if(d.logoUrl && !ICON_DB[ticker]?.fmp){
+          setIconDb(ticker, { fmp: d.logoUrl });
+          fetch(CF_WORKER_URL+"/write-bases", {
+            method:"POST",
+            headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+            body: JSON.stringify({ gdb_icons: serializeIconDb() }),
+            signal: AbortSignal.timeout(10000),
+          }).catch(()=>{});
+        }
+        setData(d);
       }
-      setData(d);
     } catch(e) {
       setErr(e.message);
     } finally {
@@ -1495,25 +1537,29 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                 return null;
               })()}
               <span style={{fontSize:22,fontWeight:900,color:C.text,letterSpacing:-0.5}}>{ticker}</span>
+              {isCrypto && data?.rank && (
+                <span style={{fontSize:12,fontWeight:700,color:C.btc,background:C.btc+"22",
+                  borderRadius:6,padding:"2px 7px",flexShrink:0}}>#{data.rank}</span>
+              )}
               {data?.name
                 ? <span style={{fontSize:11,color:C.gray,fontWeight:400,flexShrink:1,minWidth:0}}>{data.name}</span>
                 : loading && <span style={{fontSize:11,color:C.border}}>…</span>
               }
             </div>
 
-            {/* Badges : type d'actif (vert) + secteur (bleu) + industrie (jaune) */}
+            {/* Badges : type d'actif + secteur/catégorie + industrie/sous-secteur */}
             {(quoteType || sector || data?.industry) && (
               <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
                 {quoteType && (()=>{
                   const QT_COLOR = {
                     EQUITY:"#10B981", ETF:"#1E40AF", MUTUALFUND:"#8B5CF6",
-                    CRYPTOCURRENCY:"#F7931A", INDEX:"#6B7280", CURRENCY:"#EAB308",
+                    CRYPTOCURRENCY:"#F7931A", CRYPTO:"#F7931A", INDEX:"#6B7280", CURRENCY:"#EAB308",
                   };
                   const qc = QT_COLOR[quoteType] || C.teal;
                   return (
                     <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:5,
                       background:qc+"22",color:qc,border:`1px solid ${qc}55`}}>
-                      {quoteType}
+                      {quoteType === "CRYPTO" ? "CRYPTO" : quoteType}
                     </span>
                   );
                 })()}
@@ -1527,6 +1573,34 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                   <span style={{fontSize:9,fontWeight:600,padding:"2px 8px",borderRadius:5,
                     background:C.gold+"18",color:C.gold,border:`1px solid ${C.gold}44`}}>
                     {data.industry}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Données spécifiques crypto : supply + dominance BTC */}
+            {isCrypto && data && (
+              <div style={{display:"flex",gap:6,marginTop:5,flexWrap:"wrap",alignItems:"center"}}>
+                {/* Circulating / Max supply */}
+                {data.circulatingSupply != null && (
+                  <span style={{fontSize:9,color:C.text3}}>
+                    Supply:{" "}
+                    <span style={{color:C.text,fontWeight:700}}>
+                      {(data.circulatingSupply/1e6).toFixed(2)}M
+                    </span>
+                    {data.maxSupply
+                      ? <span style={{color:C.btc}}>{" / "}{(data.maxSupply/1e6).toFixed(2)}M ({((data.circulatingSupply/data.maxSupply)*100).toFixed(1)}%)</span>
+                      : data.totalSupply
+                        ? <span style={{color:C.gray}}>{" / "}{(data.totalSupply/1e6).toFixed(2)}M ({((data.circulatingSupply/data.totalSupply)*100).toFixed(1)}%)</span>
+                        : null
+                    }
+                  </span>
+                )}
+                {/* Dominance BTC */}
+                {data.btcDominance != null && (
+                  <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:5,
+                    background:C.btc+"22",color:C.btc,border:`1px solid ${C.btc}44`}}>
+                    Dom. {data.btcDominance.toFixed(1)}%
                   </span>
                 )}
               </div>
@@ -1600,7 +1674,7 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
           )}
 
           {/* Debug info — visible si marketCap manquant */}
-          {data && !data.marketCap && !data.sector && (
+          {data && !isCrypto && !data.marketCap && !data.sector && (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
               <b>Debug Yahoo:</b>
               {(data._yahooDebug || data._fmpDebug) && (() => {
@@ -1639,10 +1713,27 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
               return v.toLocaleString("fr-FR");
             };
             const dbg = data._yahooDebug || data._fmpDebug || {};
-            // 3 cases sur 1 ligne — Var. du jour supprimée
-            const cases = [
-              { label:"Cap. boursière", value: fmtMC(data.marketCap), color:C.text,
-                err: !data.marketCap ? (dbg.marketCap || "null") : null },
+            const isETF = quoteType === "ETF" || quoteType === "ETC";
+            // 3 cases sur 1 ligne — contenu différent selon crypto ou action/ETF
+            const cases = isCrypto ? [
+              { label:"Cap. marché",
+                value: fmtMC(data.marketCap), color:C.text, err:null, dash:!data.marketCap },
+              { label:"Vol. 24h",
+                value: fmtVol(data.volume24h), color:C.text2, err:null, dash:!data.volume24h },
+              { label:"ATH",
+                value: data.ath
+                  ? cur+(data.ath>=1000?Math.round(data.ath).toLocaleString("fr-FR"):data.ath.toFixed(2))
+                    +(data.athChangesPct!=null?" ("+data.athChangesPct.toFixed(1)+"%)":" ")
+                  : null,
+                color: data.athChangesPct!=null&&data.athChangesPct>=-10 ? C.green : C.text3,
+                err:null, dash:!data.ath },
+            ] : [
+              { label: isETF && !data.marketCap ? "AUM" : "Cap. boursière",
+                value: fmtMC(data.marketCap),
+                color: C.text,
+                err: (!data.marketCap && !isETF) ? (dbg.marketCap || "null") : null,
+                dash: !data.marketCap && isETF,
+              },
               { label:"Vol. moyen",     value: fmtVol(data.volAvg),   color:C.text2,
                 err: !data.volAvg    ? (dbg.volAvg    || "null") : null },
               { label:"Dernier div.",
@@ -1667,9 +1758,11 @@ function TickerModal({ ticker, eur=false, usdEur=0.86, onClose }) {
                           <span style={{fontSize:12,fontWeight:700,color:item.color}}>{item.value}</span>
                           {item.sub && <span style={{fontSize:8,color:C.text3}}>{item.sub}</span>}
                         </>
-                      : <span style={{fontSize:7,color:C.orange,fontFamily:"monospace",marginTop:2}}>
-                          {dbg.qsStatus ? "qs:" + dbg.qsStatus + " · " + (item.err||"") : "En attente…"}
-                        </span>
+                      : item.dash
+                        ? <span style={{fontSize:12,fontWeight:700,color:C.text3}}>—</span>
+                        : <span style={{fontSize:7,color:C.orange,fontFamily:"monospace",marginTop:2}}>
+                            {dbg.qsStatus ? "qs:" + dbg.qsStatus + " · " + (item.err||"") : "En attente…"}
+                          </span>
                     }
                   </div>
                 ))}
@@ -2012,7 +2105,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
             const isLast=i===items.length-1;
             const pnlPct=item.pct??(item.pnl&&item.investi?item.pnl/item.investi:null);
             return(
-              <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
+              <div key={i} onClick={()=>item.ticker&&onTickerClick&&onTickerClick(item.ticker, item.cat)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderBottom:isLast?"none":`1px solid ${C.border}`,background:i%2===0?"transparent":C.bg1+"66",cursor:item.ticker?"pointer":"default"}}>
                 {/* Icon — TickerIcon si ticker connu, sinon fallback BankLogo/emoji */}
                 {(()=>{
                   // Logos SVG custom uniquement pour KUCOIN (pas de ticker boursier, logo SVG maison)
@@ -3203,6 +3296,36 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           })()}
         </div>
 
+        {/* ── 3 cases Crypto / Actions / Banque ── */}
+        {(()=>{
+          const _p = _effSrc;
+          const _uE = _p.usdEur || 0.86;
+          const _eU = _p.eurUsd || 1.162;
+          const _kuCoin = (_p.stocks?.items||[]).find(x=>x.t==="KUCOIN");
+          const _cryptoUSD = (_p.crypto?.total||0) + (_kuCoin?.val||0);
+          const _stocksUSD = (_p.stocks?.total||0) - (_kuCoin?.val||0);
+          const _bankEUR   = _p.bank?.totalEUR || CURRENT.bank?.totalEUR || 0;
+          const boxes = eur ? [
+            {label:"Crypto",  val:"€"+fmtK(Math.round(_cryptoUSD*_uE)), c:C.btc},
+            {label:"Actions", val:"€"+fmtK(Math.round(_stocksUSD*_uE)), c:C.blue},
+            {label:"Banque",  val:"€"+fmtK(_bankEUR),                   c:C.green},
+          ] : [
+            {label:"Crypto",  val:"$"+fmtK(_cryptoUSD),                 c:C.btc},
+            {label:"Actions", val:"$"+fmtK(_stocksUSD),                 c:C.blue},
+            {label:"Banque",  val:"$"+fmtK(Math.round(_bankEUR*_eU)),   c:C.green},
+          ];
+          return(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border,borderTop:`1px solid ${C.border}`}}>
+              {boxes.map((b,i)=>(
+                <div key={i} style={{background:C.bg1,padding:"8px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:9,color:C.gray,marginBottom:2}}>{b.label}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:b.c}}>{msk(b.val,hidden)}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* P&L 1J / 1S / 1M / 6M / 1A */}
         {(()=>{
           const _src2 = EFF||CURRENT;
@@ -3214,51 +3337,37 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           const _nowEUR = _src2.totalEUR || _ddLast2;
           const _nowUSD = _nowEUR / usdEurNow;
 
-          // Ligne DD à une date donnée (retourne la ligne entière pour accès au taux)
-          const _ddRowAt = days => {
-            const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
-            const ds=t.toISOString().slice(0,10);
-            return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[2]!=null?r:null),null);
+          // Ligne DD la plus proche (en valeur absolue) d'une date cible
+          // Prend la ligne avec |r[0] - targetDate| minimal parmi les lignes ayant totalEUR non null
+          const _ddClosest = days => {
+            const t = new Date(Date.now() + NC_OFFSET_MS);
+            t.setUTCDate(t.getUTCDate() - days);
+            const ds = t.toISOString().slice(0, 10);
+            let best = null, bestDiff = Infinity;
+            for (const r of _DD_PO) {
+              if (!r[0] || r[2] == null) continue;
+              const diff = Math.abs(new Date(r[0]) - new Date(ds));
+              if (diff < bestDiff) { bestDiff = diff; best = r; }
+            }
+            return best;
           };
 
-          const _invInPeriod = days => {
-            const t=new Date(); t.setDate(t.getDate()-days);
-            const cutDs=t.toISOString().slice(0,10);
-            const months=["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
-            let total=0;
-            for(const yr of Object.keys(_CM_PO)){
-              const d=_CM_PO[yr]; if(!d) continue;
-              d.m.forEach((m,i)=>{
-                const mDate=`${yr}-${String(months.indexOf(m)+1).padStart(2,"0")}-01`;
-                if(mDate>=cutDs && d.inv?.[i]!=null) total+=d.inv[i];
-              });
-            }
-            for(const yr of Object.keys(STOCKS_MONTHLY)){
-              const d=STOCKS_MONTHLY[yr]; if(!d) continue;
-              d.m.forEach((m,i)=>{
-                const mDate=`${yr}-${String(months.indexOf(m)+1).padStart(2,"0")}-01`;
-                if(mDate>=cutDs && d.inv?.[i]!=null) total+=d.inv[i];
-              });
-            }
-            return total; // toujours en €
-          };
-
-          // P&L et % selon la devise
+          // Formule : var€ = totalEUR(today) − totalEUR(today − X jours)
+          //           var$ = (totalEUR(today) / usdEurNow) − (totalEUR(ref) / usdEurRef)
+          // Aucune soustraction d'investissements — variation brute du patrimoine
           const _cell = days => {
-            const row = _ddRowAt(days);
-            if(!row) return {pnl:0, pct:0};
-            const startEUR = row[2];
+            const row = _ddClosest(days);
+            if (!row || !row[2]) return { pnl:0, pct:0 };
+            const startEUR  = row[2];
             const usdEurRef = row[5] || usdEurNow;
-            const invEUR = _invInPeriod(days);
-            if(eur){
-              const pnl = Math.round(_nowEUR - startEUR - invEUR);
-              return {pnl, pct: startEUR ? pnl/startEUR : 0};
+            if (eur) {
+              const pnl = Math.round(_nowEUR - startEUR);
+              return { pnl, pct: _nowEUR ? pnl / _nowEUR : 0 };
             } else {
-              // Convertir chaque valeur au taux de SA date
+              const nowUSD   = _nowEUR  / usdEurNow;
               const startUSD = startEUR / usdEurRef;
-              const invUSD   = invEUR   / usdEurRef; // investissement converti au taux de référence
-              const pnl = Math.round(_nowUSD - startUSD - invUSD);
-              return {pnl, pct: startUSD ? pnl/startUSD : 0};
+              const pnl = Math.round(nowUSD - startUSD);
+              return { pnl, pct: startUSD ? pnl / startUSD : 0 };
             }
           };
 
@@ -3328,7 +3437,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
                 border:`1px solid ${C.border}`,
               }}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                  <span style={{fontSize:9,color:C.gray,textTransform:"uppercase",letterSpacing:.5}}>{g.label}</span>
+                  <span style={{fontSize:12,fontWeight:800,color:g.color,letterSpacing:.3}}>{g.label}</span>
                   <span style={{fontSize:16,fontWeight:900,color:g.color,letterSpacing:-0.5}}>{hidden?"***":gcCur+g.price}</span>
                 </div>
                 <div style={{display:"flex",gap:4}}>
@@ -3434,7 +3543,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
   const[mode,setMode]=useState("detail");
   const[selSlice,setSelSlice]=useState(null);
   const[openSec,setOpenSec]=useState(null);
-  const[tickerModal,setTickerModal]=useState(null);
+  const[tickerModal,setTickerModal]=useState(null); // {ticker, cat}
   const SECTIONS = buildSections(EFF||CURRENT);
   // realD = même source que le donut portfolio — SECTIONS live
   const sectionsTotal = SECTIONS.reduce((s,sec)=>s+sec.totalUSD, 0);
@@ -3645,9 +3754,9 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
               section={sec}
               open={openSec===sec.key}
               onToggle={()=>setOpenSec(openSec===sec.key?null:sec.key)}
-              onTickerClick={t=>{
+              onTickerClick={(t, cat)=>{
                 const NO_MODAL=["BCI","Bourso","DeBlock","KUCOIN","EURO","USD"];
-                if(!NO_MODAL.includes(t)) setTickerModal(t);
+                if(!NO_MODAL.includes(t)) setTickerModal({ticker:t, cat:cat||""});
               }}
               hidden={hidden}
               eur={eur}
@@ -3731,7 +3840,8 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
     </div>
     {tickerModal && (
       <TickerModal
-        ticker={tickerModal}
+        ticker={tickerModal.ticker}
+        cat={tickerModal.cat}
         eur={eur}
         usdEur={(_src||EFF||CURRENT).usdEur||0.86}
         onClose={()=>setTickerModal(null)}

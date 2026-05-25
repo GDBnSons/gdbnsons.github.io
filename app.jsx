@@ -710,7 +710,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.90";
+const APP_VERSION = "v21.91";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1296,10 +1296,12 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         const days = TF_CG_DAYS[tfIdx] || "30";
         const url  = CF_WORKER_URL + "/coingecko-coin?id=" + encodeURIComponent(cgId)
           + "&days=" + days + "&symbol=" + encodeURIComponent(ticker);
-        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
+        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(15000) });
         const d = await r.json();
-        if(d.error) throw new Error(d.error);
-        // Logo CoinGecko → ICON_DB.fmp
+        if(d.error) throw new Error("CoinGecko [" + cgId + "] : " + d.error
+          + (d.path ? " (path: " + d.path + ")" : "")
+          + " — Vérifier que le worker v34 est bien déployé");
+        // Stocker logo CoinGecko dans ICON_DB.fmp si pas encore présent
         if(d.logoUrl && !ICON_DB[ticker]?.fmp){
           setIconDb(ticker, { fmp: d.logoUrl });
           fetch(CF_WORKER_URL+"/write-bases", {
@@ -1455,7 +1457,14 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const flag = FLAG[cc] || "🏳️";
   const city = data?.exchangeCity || data?.exchange || "";
   const mktCap = fmtMktCap(data?.marketCap);
-  const quoteType = data?.quoteType || "";
+  // quoteType : si Yahoo retourne EQUITY mais le nom contient ETC/ETF/UCITS → forcer ETF
+  const rawQuoteType = data?.quoteType || "";
+  const nameL = (data?.name || "").toLowerCase();
+  const quoteType = (rawQuoteType === "EQUITY" && (
+    nameL.includes("etc") || nameL.includes("etf") || nameL.includes("ucits") ||
+    nameL.includes("physical") || nameL.includes("tracker") || nameL.includes("index fund") ||
+    nameL.includes("amundi") || nameL.includes("ishares") || nameL.includes("lyxor") || nameL.includes("xtrackers")
+  )) ? "ETF" : rawQuoteType;
   const sector    = data?.sector || "";
 
   // Timeframes en 2 rangées (5 + 3)
@@ -1674,7 +1683,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           )}
 
           {/* Debug info — visible si marketCap manquant */}
-          {data && !isCrypto && !data.marketCap && !data.sector && (
+          {data && !isCrypto && !data.marketCap && !data.sector && quoteType !== "ETF" && (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
               <b>Debug Yahoo:</b>
               {(data._yahooDebug || data._fmpDebug) && (() => {

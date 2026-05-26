@@ -710,7 +710,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.91";
+const APP_VERSION = "v21.92";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1288,30 +1288,41 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     return () => { document.body.style.overflow = prev; };
   }, []);
 
+  // Pour crypto : métriques chargées une seule fois (cachées KV côté worker)
+  // OHLC rechargé à chaque changement de TF (endpoint léger séparé)
+  const [cgMeta, setCgMeta] = useState(null); // métriques CoinGecko persistées
+
   const fetchChart = async (tfIdx) => {
     setLoading(true); setErr(null);
     try {
       if(isCrypto){
-        // ── CoinGecko path ──────────────────────────────────────────────────
         const days = TF_CG_DAYS[tfIdx] || "30";
-        const url  = CF_WORKER_URL + "/coingecko-coin?id=" + encodeURIComponent(cgId)
-          + "&days=" + days + "&symbol=" + encodeURIComponent(ticker);
-        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(15000) });
-        const d = await r.json();
-        if(d.error) throw new Error("CoinGecko [" + cgId + "] : " + d.error
-          + (d.path ? " (path: " + d.path + ")" : "")
-          + " — Vérifier que le worker v34 est bien déployé");
-        // Stocker logo CoinGecko dans ICON_DB.fmp si pas encore présent
-        if(d.logoUrl && !ICON_DB[ticker]?.fmp){
-          setIconDb(ticker, { fmp: d.logoUrl });
-          fetch(CF_WORKER_URL+"/write-bases", {
-            method:"POST",
-            headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-            body: JSON.stringify({ gdb_icons: serializeIconDb() }),
-            signal: AbortSignal.timeout(10000),
-          }).catch(()=>{});
+        // ── Métriques : uniquement si pas encore chargées ──────────────────
+        let meta = cgMeta;
+        if(!meta){
+          const mUrl = CF_WORKER_URL + "/coingecko-coin?id=" + encodeURIComponent(cgId)
+            + "&symbol=" + encodeURIComponent(ticker);
+          const mr = await fetch(mUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(15000) });
+          const md = await mr.json();
+          if(md.error) throw new Error("CoinGecko meta ["+cgId+"] : "+md.error);
+          meta = md;
+          setCgMeta(md);
+          // Logo CoinGecko → ICON_DB.fmp
+          if(md.logoUrl && !ICON_DB[ticker]?.fmp){
+            setIconDb(ticker, { fmp: md.logoUrl });
+            fetch(CF_WORKER_URL+"/write-bases", {
+              method:"POST", headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
+              body:JSON.stringify({gdb_icons:serializeIconDb()}), signal:AbortSignal.timeout(10000),
+            }).catch(()=>{});
+          }
         }
-        setData(d);
+        // ── OHLC : rechargé à chaque TF ────────────────────────────────────
+        const oUrl = CF_WORKER_URL + "/coingecko-ohlc?id=" + encodeURIComponent(cgId) + "&days=" + days;
+        const or = await fetch(oUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(10000) });
+        const od = await or.json();
+        if(od.error) throw new Error("CoinGecko OHLC ["+cgId+"] : "+od.error);
+        // Fusionner métriques + candles dans data
+        setData({ ...meta, candles: od.candles, ohlcDays: od.ohlcDays });
       } else {
         // ── Yahoo Finance path ──────────────────────────────────────────────
         const { interval, range } = TF_CONFIG[tfIdx];

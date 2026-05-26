@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.01";
+const APP_VERSION = "v22.02";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6727,10 +6727,25 @@ function App(){
       }
 
       // ── Dernier snapshot disponible ───────────────────────────────────────
+      // gdb_dd (v9) = [[date, walletC€, total€, btc$, gdbS$, usdEur], ...]
+      // CHART_MONTHLY (legacy) = [{d, ao, t, w, ...}, ...]
+      // On normalise en objets pour le reste du code
       const snapDD = lsv9Read("gdb_dd") || localDD;
-      const snapshots = snapDD.filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
+      const normalizeDD = (arr) => {
+        if(!arr || !arr.length) return [];
+        if(Array.isArray(arr[0])){
+          // Format v9 tableau → objet
+          return arr.map(r=>({
+            d:r[0], ao:r[1]||null, t:r[2]||null, w:r[3]||null,
+            gdbs:r[4]||null, eur:r[5]||null,
+          }));
+        }
+        return arr; // déjà des objets
+      };
+      const snapshots = normalizeDD(snapDD).filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
       const last = snapshots[0];
 
+      try {
       if(last?._portfolio){
         // ── Reconstruction depuis le dernier snapshot ─────────────────────
         // On utilise les QUANTITÉS du snapshot mais les PRIX de CURRENT
@@ -6819,8 +6834,8 @@ function App(){
           setRefreshedAt(`${tx.length} transaction(s)`);
         }
       }
-
-      setReady(true);
+      } catch(e){ console.warn("[v9] Erreur init snapshot:", e.message); }
+      finally { setReady(true); }
     })();
   },[]);
 

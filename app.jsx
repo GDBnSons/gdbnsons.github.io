@@ -296,9 +296,15 @@ const msk=(val,hidden)=>hidden?"••••":val;
 
 /* Ticker → Yahoo Finance symbol mapping */
 let YF_MAP = {
+  // Stocks & ETF
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",
   GOLD:"GOLD.PA", IBKR:"IBKR", STRC:"STRC", ANET:"ANET", HUT:"HUT", URTH:"URTH",
+  // Crypto — symboles Yahoo Finance (suffixe -USD)
+  BTC:"BTC-USD", ETH:"ETH-USD", SOL:"SOL-USD", BNB:"BNB-USD",
+  XRP:"XRP-USD", ADA:"ADA-USD", DOGE:"DOGE-USD", DOT:"DOT-USD",
+  AVAX:"AVAX-USD", MATIC:"MATIC-USD", LINK:"LINK-USD", UNI:"UNI-USD",
+  LTC:"LTC-USD", ATOM:"ATOM-USD", HYPE:"HYPE-USD",
 };
 
 /* Ticker → CoinGecko ID mapping (catégorie Crypto) */
@@ -710,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.92";
+const APP_VERSION = "v21.93";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1296,7 +1302,6 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     setLoading(true); setErr(null);
     try {
       if(isCrypto){
-        const days = TF_CG_DAYS[tfIdx] || "30";
         // ── Métriques : uniquement si pas encore chargées ──────────────────
         let meta = cgMeta;
         if(!meta){
@@ -1316,13 +1321,15 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             }).catch(()=>{});
           }
         }
-        // ── OHLC : rechargé à chaque TF ────────────────────────────────────
-        const oUrl = CF_WORKER_URL + "/coingecko-ohlc?id=" + encodeURIComponent(cgId) + "&days=" + days;
+        // ── OHLC : Yahoo Finance (pas de rate-limit) ───────────────────────
+        const { interval, range } = TF_CONFIG[tfIdx];
+        const oUrl = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
+          + "&interval=" + interval + "&range=" + range;
         const or = await fetch(oUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(10000) });
         const od = await or.json();
-        if(od.error) throw new Error("CoinGecko OHLC ["+cgId+"] : "+od.error);
-        // Fusionner métriques + candles dans data
-        setData({ ...meta, candles: od.candles, ohlcDays: od.ohlcDays });
+        if(od.error) throw new Error("Yahoo chart ["+yfSym+"] : "+od.error);
+        // Fusionner métriques CoinGecko + candles Yahoo
+        setData({ ...meta, candles: od.candles || [], ohlcDays: range });
       } else {
         // ── Yahoo Finance path ──────────────────────────────────────────────
         const { interval, range } = TF_CONFIG[tfIdx];

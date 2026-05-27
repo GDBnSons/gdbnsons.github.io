@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.07";
+const APP_VERSION = "v22.08";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5104,6 +5104,12 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
     },
   };
 
+  // Liste réactive des tickers détenus (recalculée à chaque render d'EFF)
+  // → se met à jour immédiatement après un achat ou une vente
+  const portfolioTickers = (src.portfolio?.items || [])
+    .filter(x => x.cat !== "Cash Matelas" && x.qty > 0)
+    .map(x => x.t);
+
   const submitDepot=()=>{
     if(!depot.montant||!depot.bank) return;
     const montantEUR = parseFloat(depot.montant);
@@ -5239,7 +5245,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 {[["BUY","🟢 Acheter"],["SELL","🔴 Vendre"]].map(([k,l])=>(
                   <button key={k} onClick={()=>{
                     const firstSellTicker = k==="SELL" && src.portfolio?.items
-                      ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC"
+                      ? portfolioTickers[0]||"BTC"
                       : form.ticker;
                     const ticker = k==="SELL" ? firstSellTicker : form.ticker;
                     const item = src.portfolio?.items?.find(x=>x.t===ticker);
@@ -5262,7 +5268,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
                 setForm({...form,ticker:v,price:livePrice,currency:cur});
               }}
-                options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
+                options={portfolioTickers}/>
             ) : (<>
               {/* Dropdown : tickers existants uniquement */}
               <FS label="Ticker" value={showNew ? "NOUVEAU" : form.ticker} onChange={v=>{
@@ -5273,7 +5279,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cat = item ? (item.cat||"Picking") : form.cat;
                 setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
               }}
-                options={src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]}/>
+                options={portfolioTickers}/>
 
               {/* Bouton nouveau ticker */}
               <div style={{gridColumn:"1/-1"}}>

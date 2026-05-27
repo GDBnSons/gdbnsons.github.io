@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.05";
+const APP_VERSION = "v22.12";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1702,7 +1702,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/300)})`,
+      background:`rgba(0,0,0,${Math.max(0, 0.96 - dragY/300)})`,
       display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
       <div
@@ -1712,7 +1712,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         onTouchMove={onSheetTouchMove}
         onTouchEnd={onSheetTouchEnd}
         style={{
-          width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
+          width:"100%", background:C.bg, borderRadius:"20px 20px 0 0",
           paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
           transform:`translateY(${dragY}px)`,
           transition: dragY===0 ? "transform 0.25s cubic-bezier(0.32,0.72,0,1)" : "none",
@@ -1888,7 +1888,13 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           {data && !isCrypto && quoteType !== "ETF" && (data._yahooDebug || data._fmpDebug) && (() => {
             const d = data._yahooDebug || data._fmpDebug;
             // N'afficher le debug que si on a une vraie erreur de fetch (pas juste des données nulles)
-            const hasRealError = d.fcStatus === 404 || (d.qsStatus && d.qsStatus !== 200) || d.qsErr || d.error;
+            // Vraie erreur = données absentes malgré le fetch
+            // fcStatus:404 seul n'est pas une erreur si qsStatus:200 + hasResult:true
+            // (le crumb Yahoo a expiré mais le fallback quoteSummary a fonctionné)
+            const hasRealError = (d.qsStatus && d.qsStatus !== 200)
+              || d.qsErr
+              || d.error
+              || (d.fcStatus === 404 && !d.hasResult);
             if(!hasRealError) return null;
             return (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
@@ -5090,8 +5096,26 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[showNew,setShowNew]=useState(false);
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
-  const[done,setDone]=useState(null); // {type, montant, bank} après succès
-  const src = EFF||CURRENT;
+  const[done,setDone]=useState(null);
+
+  // src : EFF avec fallback sur CURRENT.portfolio.items si EFF.portfolio est vide
+  // (cas du premier lancement avant que KV soit chargé)
+  const _src = EFF || CURRENT;
+  const src = {
+    ..._src,
+    portfolio: {
+      ..._src.portfolio,
+      items: (_src.portfolio?.items?.length > 0)
+        ? _src.portfolio.items
+        : CURRENT.portfolio.items,
+    },
+  };
+
+  // Liste réactive triée alphabétiquement — se met à jour après chaque achat/vente
+  const portfolioTickers = (src.portfolio?.items || [])
+    .filter(x => x.cat !== "Cash Matelas" && x.qty > 0)
+    .map(x => x.t)
+    .sort((a, b) => a.localeCompare(b));
 
   const submitDepot=()=>{
     if(!depot.montant||!depot.bank) return;
@@ -5228,7 +5252,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 {[["BUY","🟢 Acheter"],["SELL","🔴 Vendre"]].map(([k,l])=>(
                   <button key={k} onClick={()=>{
                     const firstSellTicker = k==="SELL" && src.portfolio?.items
-                      ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC"
+                      ? portfolioTickers[0]||"BTC"
                       : form.ticker;
                     const ticker = k==="SELL" ? firstSellTicker : form.ticker;
                     const item = src.portfolio?.items?.find(x=>x.t===ticker);
@@ -5251,7 +5275,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
                 setForm({...form,ticker:v,price:livePrice,currency:cur});
               }}
-                options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
+                options={portfolioTickers}/>
             ) : (<>
               {/* Dropdown : tickers existants uniquement */}
               <FS label="Ticker" value={showNew ? "NOUVEAU" : form.ticker} onChange={v=>{
@@ -5262,7 +5286,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cat = item ? (item.cat||"Picking") : form.cat;
                 setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
               }}
-                options={src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]}/>
+                options={portfolioTickers}/>
 
               {/* Bouton nouveau ticker */}
               <div style={{gridColumn:"1/-1"}}>
@@ -7380,55 +7404,67 @@ function App(){
   return(
     <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:78,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
       <div style={{
-        padding:"10px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"13px 16px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",
         position:"sticky",top:0,zIndex:100,
-        background:C.bg,borderBottom:`1px solid ${C.border}`,
-        backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",
+        background:C.bg,
+        backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",
       }}>
-        {/* Gauche : ⟳ 📸 💵 */}
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <button onClick={handleRefresh} disabled={refreshing} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${refreshing?C.border:C.green}`,
-            background:refreshing?"transparent":C.green+"22",cursor:refreshing?"not-allowed":"pointer",
-            fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",color:refreshing?C.gray:C.green,
+        {/* Gauche : ↺ 📸 💵 */}
+        <div style={{display:"flex",gap:9,alignItems:"center"}}>
+          <button onClick={handleRefresh} disabled={refreshing} title="Actualiser les prix" style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${refreshing?C.border:C.green}`,
+            background:refreshing?"transparent":C.green+"1A",
+            cursor:refreshing?"not-allowed":"pointer",
+            display:"flex",alignItems:"center",justifyContent:"center",
+            color:refreshing?C.gray:C.green, fontSize:18, fontWeight:900,
             animation:refreshing?"spin 1s linear infinite":"none",
-          }}>⟳</button>
-          <button onClick={()=>setShowSnap(true)} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.btc}`,
-            background:C.btc+"22",cursor:"pointer",fontSize:13,
+          }}>↺</button>
+          <button onClick={()=>setShowSnap(true)} title="Prendre un snapshot" style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${C.btc}`,
+            background:C.btc+"1A",cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>📸</button>
-          <button onClick={()=>setShowTrade(true)} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.teal}`,
-            background:C.teal+"22",cursor:"pointer",fontSize:14,
+          <button onClick={()=>setShowTrade(true)} title="Achat / Vente" style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${C.teal}`,
+            background:C.teal+"1A",cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>💵</button>
         </div>
 
-        {/* Centre : titre */}
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
-          {gistSync===true  && <span onClick={()=>setShowGistDiag(true)} title="Cloudflare KV — connecté (clic pour détails)" style={{fontSize:10,color:C.green,cursor:"pointer"}}>☁︎</span>}
-          {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion — clic pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
-          {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>·</span>}
+        {/* Centre : titre + version */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:17,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
+            {gistSync===true  && <span onClick={()=>setShowGistDiag(true)} title="Cloudflare KV — connecté" style={{fontSize:10,color:C.green,cursor:"pointer"}}>☁︎</span>}
+            {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
+            {gistSync===null  && <span style={{fontSize:10,color:C.gray}}>·</span>}
+          </div>
+          <span style={{fontSize:9,fontWeight:700,color:C.btc,opacity:.8,fontFamily:"monospace",letterSpacing:.5}}>{APP_VERSION}</span>
         </div>
 
-        {/* Droite : →€/$ 👁 🎨 */}
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <button onClick={()=>setEur(!eur)} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.border}`,
-            background:C.bg2,cursor:"pointer",
-            fontSize:13,fontWeight:700,color:C.text2,
+        {/* Droite : €/$ 👁 🎨 — même taille/style que gauche */}
+        <div style={{display:"flex",gap:9,alignItems:"center"}}>
+          <button onClick={()=>setEur(!eur)} title={eur?"Passer en dollars":"Passer en euros"} style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${C.gold}`,
+            background:C.gold+"1A",cursor:"pointer",
+            fontSize:14,fontWeight:900,color:C.gold,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>{eur?"$":"€"}</button>
-          <button onClick={()=>setHidden(!hidden)} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${hidden?C.btc:C.border}`,
-            background:hidden?C.btc+"33":C.bg2,cursor:"pointer",fontSize:13,
-            display:"flex",alignItems:"center",justifyContent:"center",color:hidden?C.btc:C.gray,
+          <button onClick={()=>setHidden(!hidden)} title={hidden?"Afficher les montants":"Masquer les montants"} style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${hidden?C.btc:C.purple}`,
+            background:hidden?C.btc+"1A":C.purple+"1A",
+            cursor:"pointer",fontSize:15,color:hidden?C.btc:C.purple,
+            display:"flex",alignItems:"center",justifyContent:"center",
           }}>{hidden?"🙈":"👁"}</button>
-          <button onClick={()=>setShowTheme(true)} style={{
-            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.border}`,
-            background:C.bg2,cursor:"pointer",fontSize:13,
+          <button onClick={()=>setShowTheme(true)} title="Changer de thème" style={{
+            width:32,height:32,borderRadius:C.radiusSm||6,
+            border:`1.5px solid ${C.purple}`,
+            background:C.purple+"1A",cursor:"pointer",fontSize:14,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>🎨</button>
         </div>

@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.03";
+const APP_VERSION = "v22.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7084,31 +7084,34 @@ function App(){
     const liveState = snapResult.snap && snapResult.snap._portfolio
       ? snapResult.snap._portfolio : (EFF || CURRENT);
 
-    // 1. Sauvegarder les snapshots journaliers
+    // 1. Sauvegarder les snapshots journaliers (format objet {d, ao, ...})
     try {
       await save(SK.chart, next);
-      uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
-    } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
+      uploadLog.push("✓ gdb_snapshots : "+next.length+" points");
+    } catch(e){ uploadErrors.push("✗ gdb_snapshots : "+e.message); }
 
-    // 1b. Sauvegarder toutes les bases dans localStorage v9 (miroir KV, sans sync KV ici)
-    lsv9WriteMany({
-      gdb_txns:  txns,
-      gdb_snapshots: next, // snapshots objets {d, ao, ...}
-      gdb_dd:    newDD,
-      gdb_gdbs:  newGDBS,
-      gdb_gc:    newGC,
-      gdb_gsb:   newGSB,
-      gdb_cm:    newCM,
-      gdb_sm:    newSM,
-      gdb_tm:    newTM,
-      gdb_bench: newBench || liveBench || BENCH_IDX,
-      gdb_portfolio: snapResult.snap?._portfolio || null,
-      gdb_crypto:    snapResult.snap?._crypto    || null,
-      gdb_stocks:    snapResult.snap?._stocks    || null,
-      gdb_bank:      snapResult.snap?._bank      || null,
-      gdb_yfmap:     YF_MAP,
-      gdb_icons:     serializeIconDb(),
-    }, false); // false = pas de sync KV ici, géré par /write-bases ci-dessous
+    // 1b. Sauvegarder toutes les bases dans localStorage v9
+    try {
+      lsv9WriteMany({
+        gdb_txns:  txns,
+        gdb_snapshots: next,
+        gdb_dd:    newDD,
+        gdb_gdbs:  newGDBS,
+        gdb_gc:    newGC,
+        gdb_gsb:   newGSB,
+        gdb_cm:    newCM,
+        gdb_sm:    newSM,
+        gdb_tm:    newTM,
+        gdb_bench: newBench || liveBench || BENCH_IDX,
+        gdb_portfolio: snapResult.snap?._portfolio || null,
+        gdb_crypto:    snapResult.snap?._crypto    || null,
+        gdb_stocks:    snapResult.snap?._stocks    || null,
+        gdb_bank:      snapResult.snap?._bank      || null,
+        gdb_yfmap:     YF_MAP,
+        gdb_icons:     serializeIconDb(),
+      }, false);
+      uploadLog.push("✓ localStorage v9 : toutes bases sauvegardées");
+    } catch(e){ uploadErrors.push("✗ localStorage : "+e.message); }
 
     // 2+3. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
     let basesOk = false;
@@ -7147,36 +7150,53 @@ function App(){
         const written = new Set(data.written||[]);
         const snap   = snapResult.snap || {};
         const src    = EFF || CURRENT;
-        // Ligne par base — on reprend les mêmes valeurs que dans le log local pour cohérence
         const snapDate = snap.d || today();
+
+        // Helper : extraire année/mois depuis snapDate pour les monthly
+        const _sd   = new Date(snapDate);
+        const _year = String(_sd.getFullYear());
+        const _mi   = _sd.getMonth();
+        const MFRKV = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
+
+        if(written.has("gdb_snapshots")) uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
         if(written.has("gdb_bench")){
-          const btc = newBench?.find(r=>r.d===snapDate);
-          uploadLog.push("✓ BENCH_IDX : BTC="+(btc?"$"+btc.BTC:"—")+(btc?.ETH?" ETH=$"+btc.ETH:"")+" ("+snapDate+")");
+          // newBench = [[date, btc, eth, sp, nq, msci]]
+          const row = newBench?.find(r=>r[0]===snapDate);
+          const btcV = row?.[1] ? "$"+Math.round(row[1]) : "—";
+          const ethV = row?.[2] ? " ETH=$"+Math.round(row[2]) : "";
+          uploadLog.push("✓ BENCH_IDX : BTC="+btcV+ethV+" ("+snapDate+")");
         }
         if(written.has("gdb_dd")){
-          const row = newDD?.find(r=>r.d===snapDate);
-          uploadLog.push("✓ DD : "+(row?"ligne ("+snapDate+")":"mis à jour"));
+          // newDD = [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
+          const row = newDD?.find(r=>r[0]===snapDate);
+          uploadLog.push("✓ DD : "+(row ? "ligne ("+snapDate+") total=€"+row[2] : "mis à jour"));
         }
         if(written.has("gdb_gdbs")){
-          const row = newGDBS?.find(r=>r.d===snapDate);
-          uploadLog.push("✓ GDBS : "+(row?"GDB.S="+row["GDB.S"]+", GDB.C="+row["GDB.C"]:"mis à jour"));
+          // newGDBS = [[date, gdbS, gdbC]]
+          const row = newGDBS?.find(r=>r[0]===snapDate);
+          uploadLog.push("✓ GDBS : "+(row ? "GDB.S="+row[1]+", GDB.C="+row[2] : "mis à jour"));
         }
         if(written.has("gdb_gc"))  uploadLog.push("✓ GC_FULL : mis à jour");
         if(written.has("gdb_gsb")){
-          const row = newGSB?.find(r=>r.d===snapDate);
-          uploadLog.push("✓ GS_B100_EXT : "+(row?row["GS.B100"]:"mis à jour"));
+          // newGSB = [[date, gsb]]
+          const row = newGSB?.find(r=>r[0]===snapDate);
+          uploadLog.push("✓ GS_B100_EXT : "+(row ? row[1] : "mis à jour"));
         }
         if(written.has("gdb_cm")){
-          const last = newCM && newCM[newCM.length-1];
-          uploadLog.push("✓ CRYPTO_MONTHLY : "+(last?last.y+" "+last.m+" EOM=€"+last.eur:"mis à jour"));
+          // newCM = {année: {bom, eom, pnl, m...}}
+          const yd = newCM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
+          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
+          uploadLog.push("✓ CRYPTO_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
         }
         if(written.has("gdb_sm")){
-          const last = newSM && newSM[newSM.length-1];
-          uploadLog.push("✓ STOCKS_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
+          const yd = newSM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
+          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
+          uploadLog.push("✓ STOCKS_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
         }
         if(written.has("gdb_tm")){
-          const last = newTM && newTM[newTM.length-1];
-          uploadLog.push("✓ TOTAL_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
+          const yd = newTM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
+          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
+          uploadLog.push("✓ TOTAL_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
         }
         if(written.has("gdb_txns"))     uploadLog.push("✓ Transactions : "+txns.length+" lignes");
         if(written.has("gdb_portfolio")) uploadLog.push("✓ Portfolio : sauvegardé");
@@ -7185,7 +7205,7 @@ function App(){
         if(written.has("gdb_bank"))     uploadLog.push("✓ Bank : sauvegardé");
         if(written.has("gdb_yfmap"))    uploadLog.push("✓ YF_MAP : "+Object.keys(YF_MAP).length+" tickers");
         if(written.has("gdb_icons"))    uploadLog.push("✓ ICON_DB : "+Object.keys(ICON_DB).length+" icônes");
-        // Clés échouées (dans ALLOWED mais non écrites)
+        // Clés échouées (envoyées mais non confirmées dans written)
         const failed = Object.keys(bases).filter(k=>!written.has(k));
         failed.forEach(k=>uploadErrors.push("✗ "+k+" : non confirmé"));
         basesOk = true;

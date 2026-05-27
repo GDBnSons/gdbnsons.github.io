@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.12";
+const APP_VERSION = "v22.15";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5935,21 +5935,80 @@ function CloudKeyList({data, onRefresh}){
     var meta  = CLOUD_KEYS.find(function(k){ return k.key===selectedKey; });
     var label = meta ? meta.label : selectedKey;
 
-    var rows = []; var headers = [];
-    if(Array.isArray(val)){
-      if(val.length>0){
-        var sorted = val.slice().sort(function(a,b){
-          var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
-          var db = Array.isArray(b)?b[0]:(b.d||b.date||"");
-          return db.localeCompare(da); // décroissant
-        });
-        if(Array.isArray(sorted[0])){ headers=meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
-        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
+    // ── Formater une cellule scalaire ────────────────────────────────────────
+    function fmtCell(v){
+      if(v == null) return "—";
+      if(typeof v === "boolean") return v ? "✓" : "✗";
+      if(typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
+      if(typeof v === "string") return v;
+      if(Array.isArray(v)) return "["+v.length+"]";
+      if(typeof v === "object"){
+        var ent = Object.entries(v);
+        var allScalar = ent.every(function(e){ return e[1]==null||typeof e[1]!=="object"; });
+        if(allScalar && ent.length <= 5) return ent.map(function(e){return e[0]+":"+e[1];}).join(" · ");
+        return "{"+ent.length+" clés}";
       }
-    } else if(val && typeof val==="object"){
-      var entries=Object.entries(val);
-      if(entries.length>0 && typeof entries[0][1]==="object"){ headers=["Cle","Valeur (JSON)"]; rows=entries.map(function(e){return[e[0],JSON.stringify(e[1]).slice(0,100)];}); }
-      else { headers=["Cle","Valeur"]; rows=entries.map(function(e){return[e[0],String(e[1])]}); }
+      return String(v);
+    }
+
+    var rows = []; var headers = [];
+
+    // ── Portfolio : afficher chaque clé scalaire + résumé des sous-objets ───
+    if(selectedKey === "gdb_portfolio" && val && typeof val === "object"){
+      headers = ["Clé","Valeur"];
+      rows = Object.entries(val).map(function(e){
+        var k = e[0]; var v = e[1];
+        if(v && typeof v === "object" && !Array.isArray(v)){
+          // Sous-objet (crypto/stocks/bank/portfolio) : résumé lisible
+          var total = v.total != null ? "$"+v.total : null;
+          var items = Array.isArray(v.items) ? v.items.length+" tickers" : null;
+          var eur   = v.totalEUR != null ? "€"+v.totalEUR : null;
+          var summary = [total,items,eur].filter(Boolean).join(" · ") || "{"+Object.keys(v).length+" clés}";
+          return [k, summary];
+        }
+        return [k, fmtCell(v)];
+      });
+    }
+    // ── Monthly (cm/sm/tm) : afficher année → lignes par mois ───────────────
+    else if((selectedKey==="gdb_cm"||selectedKey==="gdb_sm"||selectedKey==="gdb_tm") && val && typeof val==="object"){
+      headers = ["Année","Mois","BOM","EOM","PNL","Pct","Inv"];
+      rows = [];
+      Object.keys(val).sort().reverse().forEach(function(year){
+        var yd = val[year];
+        if(!yd || !Array.isArray(yd.m)) return;
+        // Chaque index dans yd.m est un mois distinct
+        for(var i = yd.m.length-1; i >= 0; i--){
+          rows.push([
+            i === yd.m.length-1 ? year : "",  // Année affichée seulement sur la 1ère ligne
+            yd.m[i] || "?",
+            yd.bom && yd.bom[i] != null ? "€"+yd.bom[i] : "—",
+            yd.eom && yd.eom[i] != null ? "€"+yd.eom[i] : "—",
+            yd.pnl && yd.pnl[i] != null ? "€"+yd.pnl[i] : "—",
+            yd.pct && yd.pct[i] != null ? (yd.pct[i]>0?"+":"")+yd.pct[i]+"%" : "—",
+            yd.inv && yd.inv[i] != null ? "€"+yd.inv[i] : "—",
+          ]);
+        }
+      });
+    }
+    // ── Tableaux de tableaux [[date, val...]] ────────────────────────────────
+    else if(Array.isArray(val) && val.length > 0){
+      var sorted = val.slice().sort(function(a,b){
+        var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
+        var db2= Array.isArray(b)?b[0]:(b.d||b.date||"");
+        return db2.localeCompare(da);
+      });
+      if(Array.isArray(sorted[0])){
+        headers = meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){ return i===0?"Date":"Col "+(i+1); });
+        rows = sorted.map(function(r){ return r.map(function(v){ return fmtCell(v); }); });
+      } else if(typeof sorted[0]==="object"){
+        headers = Object.keys(sorted[0]);
+        rows = sorted.map(function(r){ return headers.map(function(h){ return fmtCell(r[h]); }); });
+      }
+    }
+    // ── Objet générique (gdb_yfmap, etc.) ────────────────────────────────────
+    else if(val && typeof val==="object"){
+      headers = ["Clé","Valeur"];
+      rows = Object.entries(val).map(function(e){ return [e[0], fmtCell(e[1])]; });
     }
     var filtered = search ? rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});}) : rows;
 
@@ -6657,29 +6716,32 @@ function App(){
         loadIconDb(localIcons); seedBankLogos(); bumpIconDb();
       }
 
-      // Portfolio local
+      // Portfolio — priorité : local > hardcodé (KV appliqué en Phase 2)
       const localPort = localStore.gdb_portfolio;
       const localCryp = localStore.gdb_crypto;
       const localStk  = localStore.gdb_stocks;
       const localBank = localStore.gdb_bank;
-      if(localPort && localCryp && localStk && localBank){
-        const lPortDate = localPort.date || null;
-        const buildDate = CURRENT.date || DD[DD.length-1]?.[0];
-        if(lPortDate && lPortDate > buildDate){
-          const usdEur = CURRENT.usdEur; const eurUsd = 1/usdEur;
-          const bankUSD = Math.round((localBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
-          const cryptoT = localCryp.total || localCryp.items?.reduce((s,x)=>s+(x.val||0),0)||0;
-          const stocksT = localStk.total  || localStk.items?.reduce((s,x)=>s+(x.val||0),0) ||0;
-          const totalUSD=cryptoT+stocksT+bankUSD; const totalEUR=Math.round(totalUSD*usdEur);
-          const nl={...CURRENT,date:lPortDate,totalUSD,totalEUR,usdEur,eurUsd,
-            crypto:{...CURRENT.crypto,...localCryp,date:lPortDate},
-            stocks:{...CURRENT.stocks,...localStk,date:lPortDate},
-            bank:{...CURRENT.bank,...localBank,date:lPortDate},
-            portfolio:{...localPort},_fromSnapshot:lPortDate};
-          const {gdbS:kgS,gdbC:kgC}=calcGdbPrices(nl);
-          setLive({...nl,gdbS:kgS,gdbC:kgC}); setRefreshedAt("snapshot "+lPortDate);
-          console.info("[v9] Portfolio local chargé ("+lPortDate+")");
-        }
+      if(localPort || localCryp || localStk){
+        // Charger dès que le local a quelque chose — sans condition de date
+        const _lPort  = localPort  || CURRENT.portfolio;
+        const _lCryp  = localCryp  || CURRENT.crypto;
+        const _lStk   = localStk   || CURRENT.stocks;
+        const _lBank  = localBank  || CURRENT.bank;
+        const lPortDate = (_lPort?.date) || CURRENT.date;
+        const usdEur = CURRENT.usdEur; const eurUsd = 1/usdEur;
+        const bankUSD = Math.round((_lBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
+        const cryptoT = _lCryp.total || (_lCryp.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
+        const stocksT = _lStk.total  || (_lStk.items||[]).reduce((s,x)=>s+(x.val||0),0) ||0;
+        const totalUSD=cryptoT+stocksT+bankUSD; const totalEUR=Math.round(totalUSD*usdEur);
+        const nl={...CURRENT,date:lPortDate,totalUSD,totalEUR,usdEur,eurUsd,
+          crypto:{...CURRENT.crypto,..._lCryp,date:lPortDate},
+          stocks:{...CURRENT.stocks,..._lStk,date:lPortDate},
+          bank:{...CURRENT.bank,..._lBank,date:lPortDate},
+          portfolio:{..._lPort},_fromSnapshot:localPort?lPortDate:null};
+        const {gdbS:kgS,gdbC:kgC}=calcGdbPrices(nl);
+        setLive({...nl,gdbS:kgS,gdbC:kgC});
+        if(localPort) setRefreshedAt("local "+lPortDate);
+        console.info("[v9] Portfolio Phase1 : "+(localPort?"local ("+lPortDate+")":"hardcodé fallback"));
       }
 
       // ── PHASE 2 : Sync KV en arrière-plan ────────────────────────────────
@@ -6735,26 +6797,43 @@ function App(){
             }
             if(kvData.gdb_icons) bumpIconDb();
 
-            // Portfolio : garder le plus récent
+            // Portfolio — comparer dates KV vs local, appliquer le plus récent
+            // Règle : max(dateKV, dateLocal) → si égale ou KV plus récent → KV
+            //         si local plus récent (offline avec achats/ventes) → garder local
             const kPort=kvData.gdb_portfolio, kCryp=kvData.gdb_crypto;
             const kStk=kvData.gdb_stocks, kBank=kvData.gdb_bank;
-            if(kPort && kCryp && kStk && kBank){
-              const kvPortDate=kPort.date||null;
-              const curDate=localPort?.date||CURRENT.date||DD[DD.length-1]?.[0];
-              if(kvPortDate && kvPortDate > curDate){
+            if(kPort && (kCryp || kStk)){
+              const kvPortDate   = kPort.date || "";
+              const localPortDate = (lsv9Read("gdb_portfolio"))?.date || "";
+              const useKV = kvPortDate >= localPortDate; // KV gagne à égalité
+
+              if(useKV){
                 const usdEur=CURRENT.usdEur; const eurUsd=1/usdEur;
-                const bankUSD=Math.round((kBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
-                const cryptoT=kCryp.total||kCryp.items?.reduce((s,x)=>s+(x.val||0),0)||0;
-                const stocksT=kStk.total||kStk.items?.reduce((s,x)=>s+(x.val||0),0)||0;
+                const _kCryp = kCryp || CURRENT.crypto;
+                const _kStk  = kStk  || CURRENT.stocks;
+                const _kBank = kBank || CURRENT.bank;
+                const bankUSD=Math.round((_kBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
+                const cryptoT=_kCryp.total||(_kCryp.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
+                const stocksT=_kStk.total||(_kStk.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
                 const totalUSD=cryptoT+stocksT+bankUSD; const totalEUR=Math.round(totalUSD*usdEur);
-                const nk={...CURRENT,date:kvPortDate,totalUSD,totalEUR,usdEur,eurUsd,
-                  crypto:{...CURRENT.crypto,...kCryp,date:kvPortDate},
-                  stocks:{...CURRENT.stocks,...kStk,date:kvPortDate},
-                  bank:{...CURRENT.bank,...kBank,date:kvPortDate},
-                  portfolio:{...kPort},_fromSnapshot:kvPortDate};
+                const nk={...CURRENT,date:kvPortDate||CURRENT.date,totalUSD,totalEUR,usdEur,eurUsd,
+                  crypto:{...CURRENT.crypto,..._kCryp,date:kvPortDate||CURRENT.date},
+                  stocks:{...CURRENT.stocks,..._kStk, date:kvPortDate||CURRENT.date},
+                  bank:{...CURRENT.bank,..._kBank,    date:kvPortDate||CURRENT.date},
+                  portfolio:{...kPort},_fromSnapshot:kvPortDate||null};
                 const {gdbS:kgS,gdbC:kgC}=calcGdbPrices(nk);
-                setLive({...nk,gdbS:kgS,gdbC:kgC}); setRefreshedAt("snapshot "+kvPortDate);
-                console.info("[v9] Portfolio KV plus récent ("+kvPortDate+")");
+                setLive({...nk,gdbS:kgS,gdbC:kgC}); setRefreshedAt("cloudflare "+(kvPortDate||""));
+                // Persister en local
+                lsv9WriteMany({ gdb_portfolio:kPort, gdb_crypto:_kCryp, gdb_stocks:_kStk, gdb_bank:_kBank }, false);
+                console.info("[v9] Portfolio KV appliqué ("+kvPortDate+") — plus récent ou égal");
+              } else {
+                // Local plus récent (offline avec transactions) → pousser local vers KV
+                const localCryp2 = lsv9Read("gdb_crypto") || CURRENT.crypto;
+                const localStk2  = lsv9Read("gdb_stocks")  || CURRENT.stocks;
+                const localBank2 = lsv9Read("gdb_bank")    || CURRENT.bank;
+                const localPort2 = lsv9Read("gdb_portfolio")|| CURRENT.portfolio;
+                cfWriteKeys({ gdb_portfolio:localPort2, gdb_crypto:localCryp2, gdb_stocks:localStk2, gdb_bank:localBank2 });
+                console.info("[v9] Portfolio LOCAL plus récent ("+localPortDate+" > "+kvPortDate+") — pushé vers KV");
               }
             }
           }
@@ -7116,6 +7195,15 @@ function App(){
 
     // 1b. Sauvegarder toutes les bases dans localStorage v9
     try {
+      // Portfolio : extraire depuis snap._portfolio (source fiable du snapshot)
+      // ou fallback sur EFF/CURRENT si _portfolio absent
+      const _p = snapResult.snap?._portfolio;
+      const _eff = EFF || CURRENT;
+      const portfolioToSave    = _p    ? { date:_p.date, totalUSD:_p.totalUSD, totalEUR:_p.totalEUR, usdEur:_p.usdEur, gdbS:_p.gdbS, gdbC:_p.gdbC, items: [...(_p.crypto?.items||[]), ...(_p.stocks?.items||[])] } : (_eff.portfolio || CURRENT.portfolio);
+      const cryptoToSave       = _p?.crypto  || _eff.crypto  || CURRENT.crypto;
+      const stocksToSave       = _p?.stocks  || _eff.stocks  || CURRENT.stocks;
+      const bankToSave         = _p?.bank    || _eff.bank    || CURRENT.bank;
+
       lsv9WriteMany({
         gdb_txns:  txns,
         gdb_snapshots: next,
@@ -7127,10 +7215,10 @@ function App(){
         gdb_sm:    newSM,
         gdb_tm:    newTM,
         gdb_bench: newBench || liveBench || BENCH_IDX,
-        gdb_portfolio: snapResult.snap?._portfolio || null,
-        gdb_crypto:    snapResult.snap?._crypto    || null,
-        gdb_stocks:    snapResult.snap?._stocks    || null,
-        gdb_bank:      snapResult.snap?._bank      || null,
+        gdb_portfolio: portfolioToSave,
+        gdb_crypto:    cryptoToSave,
+        gdb_stocks:    stocksToSave,
+        gdb_bank:      bankToSave,
         gdb_yfmap:     YF_MAP,
         gdb_icons:     serializeIconDb(),
       }, false);

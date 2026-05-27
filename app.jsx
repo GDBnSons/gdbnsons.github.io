@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.08";
+const APP_VERSION = "v22.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5091,24 +5091,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
   const[done,setDone]=useState(null); // {type, montant, bank} après succès
-  // Fallback portfolio : si EFF.portfolio.items est vide (KV pas encore chargé)
-  // on utilise CURRENT.portfolio.items (hardcodé mais toujours peuplé)
-  const _src = EFF||CURRENT;
-  const src = {
-    ..._src,
-    portfolio: {
-      ..._src.portfolio,
-      items: (_src.portfolio?.items?.length > 0)
-        ? _src.portfolio.items
-        : CURRENT.portfolio.items,
-    },
-  };
-
-  // Liste réactive des tickers détenus (recalculée à chaque render d'EFF)
-  // → se met à jour immédiatement après un achat ou une vente
-  const portfolioTickers = (src.portfolio?.items || [])
-    .filter(x => x.cat !== "Cash Matelas" && x.qty > 0)
-    .map(x => x.t);
+  const src = EFF||CURRENT;
 
   const submitDepot=()=>{
     if(!depot.montant||!depot.bank) return;
@@ -5245,7 +5228,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 {[["BUY","🟢 Acheter"],["SELL","🔴 Vendre"]].map(([k,l])=>(
                   <button key={k} onClick={()=>{
                     const firstSellTicker = k==="SELL" && src.portfolio?.items
-                      ? portfolioTickers[0]||"BTC"
+                      ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC"
                       : form.ticker;
                     const ticker = k==="SELL" ? firstSellTicker : form.ticker;
                     const item = src.portfolio?.items?.find(x=>x.t===ticker);
@@ -5268,7 +5251,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
                 setForm({...form,ticker:v,price:livePrice,currency:cur});
               }}
-                options={portfolioTickers}/>
+                options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>
               {/* Dropdown : tickers existants uniquement */}
               <FS label="Ticker" value={showNew ? "NOUVEAU" : form.ticker} onChange={v=>{
@@ -5279,7 +5262,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cat = item ? (item.cat||"Picking") : form.cat;
                 setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
               }}
-                options={portfolioTickers}/>
+                options={src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]}/>
 
               {/* Bouton nouveau ticker */}
               <div style={{gridColumn:"1/-1"}}>
@@ -5928,53 +5911,21 @@ function CloudKeyList({data, onRefresh}){
     var meta  = CLOUD_KEYS.find(function(k){ return k.key===selectedKey; });
     var label = meta ? meta.label : selectedKey;
 
-    // ── Formater une cellule selon son type ──────────────────────────────────
-    function fmtCell(v){
-      if(v == null) return "—";
-      if(typeof v === "boolean") return v ? "✓" : "✗";
-      if(typeof v === "number") return String(v);
-      if(typeof v === "string") return v;
-      if(Array.isArray(v)) return "["+v.length+"]";
-      if(typeof v === "object"){
-        // Objet court (≤3 clés scalaires) → liste inline
-        var entries = Object.entries(v);
-        var allScalar = entries.every(function(e){ return e[1]==null||typeof e[1]!=="object"; });
-        if(allScalar && entries.length<=4) return entries.map(function(e){return e[0]+":"+e[1];}).join(" ");
-        return "{"+entries.length+" clés}";
-      }
-      return String(v);
-    }
-
     var rows = []; var headers = [];
     if(Array.isArray(val)){
       if(val.length>0){
         var sorted = val.slice().sort(function(a,b){
           var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
-          var db2= Array.isArray(b)?b[0]:(b.d||b.date||"");
-          return db2.localeCompare(da);
+          var db = Array.isArray(b)?b[0]:(b.d||b.date||"");
+          return db.localeCompare(da); // décroissant
         });
-        if(Array.isArray(sorted[0])){
-          headers = meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);});
-          rows = sorted.map(function(r){ return r.map(function(v){ return fmtCell(v); }); });
-        } else if(typeof sorted[0]==="object"){
-          headers = Object.keys(sorted[0]);
-          rows = sorted.map(function(r){ return headers.map(function(h){ return fmtCell(r[h]); }); });
-        }
+        if(Array.isArray(sorted[0])){ headers=meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
+        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
       }
     } else if(val && typeof val==="object"){
-      var entries = Object.entries(val);
-      // Déterminer si les valeurs sont des objets imbriqués (ex: _portfolio, mensuels)
-      var hasNestedObj = entries.some(function(e){ return e[1]&&typeof e[1]==="object"&&!Array.isArray(e[1]); });
-      if(hasNestedObj){
-        // Vue 2 colonnes : clé + valeur formatée intelligemment
-        headers = ["Clé","Valeur"];
-        rows = entries.map(function(e){
-          return [e[0], fmtCell(e[1])];
-        });
-      } else {
-        headers = ["Clé","Valeur"];
-        rows = entries.map(function(e){ return [e[0], fmtCell(e[1])]; });
-      }
+      var entries=Object.entries(val);
+      if(entries.length>0 && typeof entries[0][1]==="object"){ headers=["Cle","Valeur (JSON)"]; rows=entries.map(function(e){return[e[0],JSON.stringify(e[1]).slice(0,100)];}); }
+      else { headers=["Cle","Valeur"]; rows=entries.map(function(e){return[e[0],String(e[1])]}); }
     }
     var filtered = search ? rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});}) : rows;
 
@@ -5996,12 +5947,7 @@ function CloudKeyList({data, onRefresh}){
         <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Filtrer..."
           style={{width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:16,marginBottom:10,outline:"none"}}/>
         {rows.length===0
-          ? <div style={{textAlign:"center",padding:"20px",color:C.gray,fontSize:12}}>
-              <div style={{marginBottom:12}}>Données complexes — JSON brut :</div>
-              <pre style={{textAlign:"left",fontSize:8,color:C.text2,whiteSpace:"pre-wrap",wordBreak:"break-all",background:C.bg3,borderRadius:8,padding:10,maxHeight:300,overflow:"auto"}}>
-                {JSON.stringify(val, null, 2).slice(0,3000)}
-              </pre>
-            </div>
+          ? <div style={{textAlign:"center",padding:"20px",color:C.gray,fontSize:12}}>Vide</div>
           : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid "+C.border}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
                 <thead><tr style={{background:C.bg3}}>
@@ -6439,8 +6385,26 @@ function App(){
   });
   const[showTheme,setShowTheme]=useState(false);
   // ── Écran de démarrage ──────────────────────────────────────────────────
-  const[chosenSource,setChosenSource]=useState("cloudflare"); // toujours cloudflare en v22
-  // Pas d'écran splash en v22 — merge automatique local + KV au démarrage
+  const[startScreen,setStartScreen]=useState(true); // afficher l'écran de choix
+  const[startLoading,setStartLoading]=useState(true); // en train de charger les 2 sources
+  const[kvData_snap,setKvData_snap]=useState(null); // {totalUSD, totalEUR, date, raw}
+  const[kvError,setKvError]=useState(null);         // message si KV inaccessible
+  const[chosenSource,setChosenSource]=useState("local"); // "local" | "cloudflare"
+  // localData initialisé avec liveDD (peut inclure des snapshots précédents)
+  const[localData,setLocalData]=useState(()=>{
+    const _dd = DD;
+    const lastRow = _dd.length>0 ? _dd[_dd.length-1] : null;
+    const lastDate = lastRow ? lastRow[0] : CURRENT.date;
+    const totalEUR = lastRow && lastRow[0] > CURRENT.date ? lastRow[2] : CURRENT.totalEUR;
+    const totalUSD = lastRow && lastRow[0] > CURRENT.date ? Math.round(totalEUR / (lastRow[5]||CURRENT.usdEur)) : CURRENT.totalUSD;
+    const lastGDBS = GDBS.length>0 ? GDBS[GDBS.length-1] : null;
+    return {
+      totalUSD, totalEUR,
+      date: lastDate,
+      gdbS: lastGDBS?.[1] || CURRENT.gdbS,
+      gdbC: lastGDBS?.[2] || CURRENT.gdbC,
+    };
+  });
   // Apply theme to global C on every render
   C = THEMES[themeName]||THEMES.dark;
   cc = getCC();
@@ -6516,6 +6480,17 @@ function App(){
       });
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
+      // Mettre à jour localData avec les nouvelles valeurs live
+      setLive(prev2=>{
+        if(prev2) setLocalData({
+          totalUSD: prev2.totalUSD||CURRENT.totalUSD,
+          totalEUR: prev2.totalEUR||CURRENT.totalEUR,
+          date: todayNC(),
+          gdbS: prev2.gdbS||CURRENT.gdbS,
+          gdbC: prev2.gdbC||CURRENT.gdbC,
+        });
+        return prev2;
+      });
       // Rapport détaillé : succès et échecs
       const successList = Object.keys(YF_MAP).filter(k=>prices[k]!=null);
       if(prices.BTC) successList.push("BTC");
@@ -6544,6 +6519,14 @@ function App(){
       // Date locale = dernière ligne de liveDD (plus récente que CURRENT.date si snapshots précédents)
       const _localDD = liveDD || DD;
       const localLastDate = _localDD.length>0 ? _localDD[_localDD.length-1][0] : CURRENT.date;
+      const localLastGDBS = (liveGDBS||GDBS);
+      const lastGDBSRow = localLastGDBS.length>0 ? localLastGDBS[localLastGDBS.length-1] : null;
+      setLocalData(prev=>({
+        ...prev,
+        date: localLastDate,
+        gdbS: lastGDBSRow?.[1] || CURRENT.gdbS,
+        gdbC: lastGDBSRow?.[2] || CURRENT.gdbC,
+      }));
       try {
         const res=await fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(8000)});
         if(res.ok){
@@ -6558,26 +6541,63 @@ function App(){
             const lastGDBS=kv.gdb_gdbs&&kv.gdb_gdbs.length>0?kv.gdb_gdbs[kv.gdb_gdbs.length-1]:null;
             const lastDD_kv=kv.gdb_dd&&kv.gdb_dd.length>0?kv.gdb_dd[kv.gdb_dd.length-1]:null;
             const kvDate = lastDD_kv?.[0] || kvPort.date || "—";
-            const newLive={...CURRENT,date:kvPort.date||CURRENT.date,totalUSD,
-              totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
-              crypto:{...CURRENT.crypto,...kvCryp},
-              stocks:{...CURRENT.stocks,...kvStk},
-              bank:{...CURRENT.bank,...kvBank},
-              portfolio:{...kvPort},
-              gdbS:lastGDBS?.[1]||CURRENT.gdbS,
-              gdbC:lastGDBS?.[2]||CURRENT.gdbC,
-              _fromSnapshot:kvPort.date};
-            const{gdbS,gdbC}=calcGdbPrices(newLive);
-            setLive({...newLive,gdbS,gdbC});
-            setGistSync(true);
-            setRefreshedAt("cloudflare "+kvDate);
-          }
-        }
-      } catch(e){ setGistSync(false); setGistError({status:null,statusText:e.message,body:""}); }
+            setKvData_snap({totalUSD,totalEUR:Math.round(totalUSD*uE),date:kvDate,gdbS:lastGDBS?.[1]||CURRENT.gdbS,gdbC:lastGDBS?.[2]||CURRENT.gdbC,raw:kv});
+          } else { setKvError("Bases KV incomplètes"); }
+        } else { setKvError("KV inaccessible ("+res.status+")"); }
+      } catch(e){ setKvError("KV hors ligne"); }
+      setStartLoading(false);
     })();
   },[]);
 
-
+  function applyStartChoice(useKV){
+    setStartScreen(false);
+    setChosenSource(useKV ? "cloudflare" : "local");
+    if(useKV&&kvData_snap?.raw){
+      const kv=kvData_snap.raw;
+      // Fusionner la base hardcodée avec les données KV pour combler les trous
+      // Le Worker ne stocke que les lignes ajoutées par snapshot — la base hardcodée
+      // couvre l'historique jusqu'au 17 mai 2026. On fusionne les deux.
+      const _mergeArrays = (base, live) => {
+        if(!live || !live.length) return base;
+        const map = {};
+        base.forEach(r=>{ if(r[0]) map[r[0]] = r; });
+        live.forEach(r=>{ if(r[0]) map[r[0]] = r; }); // live écrase si même date
+        return Object.values(map).sort((a,b)=>a[0].localeCompare(b[0]));
+      };
+      if(kv.gdb_dd)    setLiveDD(_mergeArrays(DD, kv.gdb_dd));
+      if(kv.gdb_gdbs)  setLiveGDBS(_mergeArrays(GDBS, kv.gdb_gdbs));
+      if(kv.gdb_gc)    setLiveGC(_mergeArrays(GC_FULL, kv.gdb_gc));
+      if(kv.gdb_gsb)   setLiveGSB(_mergeArrays(GS_B100_EXT, kv.gdb_gsb));
+      if(kv.gdb_cm)    setLiveCM(kv.gdb_cm);
+      if(kv.gdb_sm)    setLiveSM(kv.gdb_sm);
+      if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
+      if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
+      if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
+      if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
+        // Merger : KV écrase les entrées existantes (KV = vérité cloud)
+        // mais on conserve les entrées localStorage qui ne seraient pas dans KV
+        const merged = { ...serializeIconDb(), ...kv.gdb_icons };
+        loadIconDb(merged); // charge + persiste en localStorage
+        seedBankLogos();    // réinjecter les URLs banque (toujours fixes)
+        lsWriteIcons(serializeIconDb());
+        bumpIconDb();
+      }
+      const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
+      if(kvPort&&kvCryp&&kvStk&&kvBank){
+        const uE=CURRENT.usdEur,eU=1/uE;
+        const cryptoT=kvCryp.total||(kvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const stocksT=kvStk.total||(kvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
+        const totalUSD=cryptoT+stocksT+bankUSD;
+        const newLive={...CURRENT,date:kvPort.date||CURRENT.date,totalUSD,totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
+          crypto:{...CURRENT.crypto,...kvCryp},stocks:{...CURRENT.stocks,...kvStk},bank:{...CURRENT.bank,...kvBank},
+          portfolio:{...kvPort},_fromSnapshot:kvPort.date};
+        const{gdbS,gdbC}=calcGdbPrices(newLive);
+        setLive({...newLive,gdbS,gdbC});
+        setRefreshedAt("cloudflare "+kvPort.date);
+      }
+    }
+  }
 
   useEffect(()=>{
     (async()=>{
@@ -7039,8 +7059,15 @@ function App(){
     // Mettre à jour les états React des séries
     setLiveDD(result.newDD);
     setLiveGDBS(result.newGDBS);
-    // Mettre à jour les séries live
+    // Mettre à jour localData avec les valeurs du snapshot
     const src = EFF||CURRENT;
+    setLocalData({
+      totalUSD: src.totalUSD,
+      totalEUR: src.totalEUR,
+      date: snap.d || todayNC(),
+      gdbS: snap.gdbs || src.gdbS,
+      gdbC: snap.gdbc || src.gdbC,
+    });
     setLiveGC(result.newGC);
     setLiveGSB(result.newGSB);
     setLiveCM(result.newCM);
@@ -7266,11 +7293,94 @@ function App(){
   );
 
   // ── Écran de démarrage ────────────────────────────────────────────────────
+  if(startScreen) return(
+    <div style={{fontFamily:"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+      {/* Logo */}
+      <div style={{fontSize:48,marginBottom:8}}>₿</div>
+      <div style={{fontSize:22,fontWeight:800,color:C.btc,marginBottom:4}}>GDB & Sons</div>
+      <div style={{fontSize:11,color:C.gray,marginBottom:32}}>Choisir la source de données</div>
+      <div style={{position:"absolute",top:16,right:20,fontSize:10,color:C.btc,fontFamily:"monospace"}}>{APP_VERSION}</div>
+
+      {startLoading ? (
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+          <div style={{fontSize:24,animation:"spin 1s linear infinite"}}>↻</div>
+          <div style={{fontSize:12,color:C.gray}}>Connexion à Cloudflare...</div>
+        </div>
+      ) : (
+        <div style={{width:"100%",display:"flex",flexDirection:"column",gap:14}}>
+
+          {/* Carte LOCAL */}
+          <div onClick={()=>applyStartChoice(false)} style={{
+            background:C.bg2,borderRadius:16,padding:"18px 20px",
+            border:`2px solid ${C.btc}`,cursor:"pointer",
+            boxShadow:"0 4px 20px rgba(247,147,26,.15)",
+          }}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>📱</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:C.text}}>Base locale</div>
+                  <div style={{fontSize:10,color:C.gray}}>Build intégré dans l'app</div>
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.btc}}>${fmtK(localData?.totalUSD||0)}</div>
+                <div style={{fontSize:11,color:C.gray}}>€{fmtK(localData?.totalEUR||0)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.gray,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+              <span>📅 {localData?.date||"—"}</span>
+              <span>GDB.S ${localData?.gdbS||"—"} · GDB.C ${localData?.gdbC||"—"}</span>
+            </div>
+          </div>
+
+          {/* Carte CLOUDFLARE */}
+          {kvError ? (
+            <div style={{background:C.bg2,borderRadius:16,padding:"18px 20px",border:`2px solid ${C.border}`,opacity:.6}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>☁️</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:C.gray}}>Cloudflare KV</div>
+                  <div style={{fontSize:10,color:C.red}}>{kvError}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div onClick={()=>applyStartChoice(true)} style={{
+              background:C.bg2,borderRadius:16,padding:"18px 20px",
+              border:`2px solid ${C.teal}`,cursor:"pointer",
+              boxShadow:"0 4px 20px rgba(56,189,248,.1)",
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:22}}>☁️</span>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>Cloudflare KV</div>
+                    <div style={{fontSize:10,color:C.gray}}>Dernier snapshot cloud</div>
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:18,fontWeight:800,color:C.teal}}>${fmtK(kvData_snap?.totalUSD||0)}</div>
+                  <div style={{fontSize:11,color:C.gray}}>€{fmtK(kvData_snap?.totalEUR||0)}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.gray,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                <span>📅 {kvData_snap?.date||"—"}</span>
+                <span>GDB.S ${kvData_snap?.gdbS||"—"} · GDB.C ${kvData_snap?.gdbC||"—"}</span>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+      <style>{"@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
+    </div>
+  );
 
   return(
     <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:78,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
       <div style={{
-        padding:"12px 16px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"10px 16px 8px",display:"flex",alignItems:"center",justifyContent:"space-between",
         position:"sticky",top:0,zIndex:100,
         background:C.bg,borderBottom:`1px solid ${C.border}`,
         backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",
@@ -7278,32 +7388,29 @@ function App(){
         {/* Gauche : ⟳ 📸 💵 */}
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <button onClick={handleRefresh} disabled={refreshing} style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,border:`1px solid ${refreshing?C.border:C.green}`,
+            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${refreshing?C.border:C.green}`,
             background:refreshing?"transparent":C.green+"22",cursor:refreshing?"not-allowed":"pointer",
-            fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:refreshing?C.gray:C.green,
+            fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",color:refreshing?C.gray:C.green,
             animation:refreshing?"spin 1s linear infinite":"none",
           }}>⟳</button>
           <button onClick={()=>setShowSnap(true)} style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,border:`1px solid ${C.btc}`,
-            background:C.btc+"22",cursor:"pointer",fontSize:14,
+            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.btc}`,
+            background:C.btc+"22",cursor:"pointer",fontSize:13,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>📸</button>
           <button onClick={()=>setShowTrade(true)} style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,border:`1px solid ${C.teal}`,
-            background:C.teal+"22",cursor:"pointer",fontSize:15,
+            width:28,height:28,borderRadius:C.radiusSm||6,border:`1px solid ${C.teal}`,
+            background:C.teal+"22",cursor:"pointer",fontSize:14,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>💵</button>
         </div>
 
-        {/* Centre : titre + version */}
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:17,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
-            {gistSync===true  && <span onClick={()=>setShowGistDiag(true)} title="Cloudflare KV — connecté (clic pour détails)" style={{fontSize:10,color:C.green,cursor:"pointer"}}>☁︎</span>}
-            {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion — clic pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
-            {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>·</span>}
-          </div>
-          <span style={{fontSize:9,fontWeight:700,color:C.btc,opacity:.7,fontFamily:"monospace",letterSpacing:.5}}>{APP_VERSION}</span>
+        {/* Centre : titre */}
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:16,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
+          {gistSync===true  && <span onClick={()=>setShowGistDiag(true)} title="Cloudflare KV — connecté (clic pour détails)" style={{fontSize:10,color:C.green,cursor:"pointer"}}>☁︎</span>}
+          {gistSync===false && <span onClick={()=>setShowGistDiag(true)} title="Erreur connexion — clic pour diagnostic" style={{fontSize:10,color:C.red,cursor:"pointer"}}>✗</span>}
+          {gistSync===null  && <span title="Connexion en cours..." style={{fontSize:10,color:C.gray}}>·</span>}
         </div>
 
         {/* Droite : →€/$ 👁 🎨 */}

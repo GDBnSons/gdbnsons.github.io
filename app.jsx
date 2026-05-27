@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.02";
+const APP_VERSION = "v22.03";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -752,7 +752,7 @@ function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify
 
 // Toutes les clés gérées par le moteur
 const LS_V9_KEYS = [
-  "gdb_txns","gdb_dd","gdb_gdbs","gdb_gc","gdb_gsb",
+  "gdb_txns","gdb_dd","gdb_snapshots","gdb_gdbs","gdb_gc","gdb_gsb",
   "gdb_cm","gdb_sm","gdb_tm","gdb_bench",
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap",
@@ -988,7 +988,8 @@ function mergeAndSync(kv){
 }
 
 // ── API compatibilité avec SK (v8) — utilisée pour chart + txns ─────────────
-const SK = { chart:"gdb_dd", txns:"gdb_txns" };
+// SK.chart = snapshots objets {d,ao,...} != gdb_dd = séries tableaux [[date,...]]
+const SK = { chart:"gdb_snapshots", txns:"gdb_txns" };
 async function load(k, fallback){
   const cached = lsv9Read(k);
   return cached ?? fallback;
@@ -6603,9 +6604,15 @@ function App(){
       // ── PHASE 1 : Chargement local immédiat (offline-first) ───────────────
       const localStore = lsv9ReadAll();
 
-      const localDD   = localStore.gdb_dd   || CHART_MONTHLY;
+      // Chart + Txns
+      // IMPORTANT : chartData = snapshots objets {d, ao, ...} (CHART_MONTHLY format)
+      //             liveDD    = séries temporelles tableaux [[date,...]] (gdb_dd format)
+      // Les deux sont distincts — ne pas confondre.
+      const localDD   = localStore.gdb_dd   || null; // tableaux [[date,...]]
       const localTxns = localStore.gdb_txns || SEED_TXNS;
-      setChartData(localDD);
+      // chartData = snapshots objets (gdb_snapshots), liveDD = séries tableaux (gdb_dd)
+      const localSnaps = localStore.gdb_snapshots || CHART_MONTHLY;
+      setChartData(localSnaps);
       setTxns(localTxns);
 
       if(localStore.gdb_dd)    setLiveDD(localStore.gdb_dd);
@@ -6672,7 +6679,7 @@ function App(){
             const kvIsNewer     = kvLastDate && kvLastDate > localLastDate;
 
             if(kvIsNewer){
-              if(merged.gdb_dd)  { setLiveDD(merged.gdb_dd); setChartData(merged.gdb_dd); }
+              if(merged.gdb_dd)  { setLiveDD(merged.gdb_dd); } // chartData garde son format objet
               if(merged.gdb_gdbs)  setLiveGDBS(merged.gdb_gdbs);
               if(merged.gdb_gc)    setLiveGC(merged.gdb_gc);
               if(merged.gdb_gsb)   setLiveGSB(merged.gdb_gsb);
@@ -6684,7 +6691,7 @@ function App(){
             } else if(localHasNew){
               // Local avait des données plus récentes : appliquer le merge local
               const ll = lsv9ReadAll();
-              if(ll.gdb_dd)    { setLiveDD(ll.gdb_dd); setChartData(ll.gdb_dd); }
+              if(ll.gdb_dd)    { setLiveDD(ll.gdb_dd); } // chartData garde son format objet
               if(ll.gdb_gdbs)   setLiveGDBS(ll.gdb_gdbs);
               if(ll.gdb_gc)     setLiveGC(ll.gdb_gc);
               if(ll.gdb_gsb)    setLiveGSB(ll.gdb_gsb);
@@ -6695,6 +6702,10 @@ function App(){
               console.info("[v9] Bases locales plus riches appliquées + pushées vers KV");
             }
 
+            // Snapshots objets (format chartData)
+            if(kvData.gdb_snapshots && Array.isArray(kvData.gdb_snapshots)){
+              setChartData(kvData.gdb_snapshots);
+            }
             if(merged.gdb_yfmap && typeof merged.gdb_yfmap === "object"){
               Object.assign(YF_MAP, merged.gdb_yfmap);
             }
@@ -6727,22 +6738,21 @@ function App(){
       }
 
       // ── Dernier snapshot disponible ───────────────────────────────────────
-      // gdb_dd (v9) = [[date, walletC€, total€, btc$, gdbS$, usdEur], ...]
-      // CHART_MONTHLY (legacy) = [{d, ao, t, w, ...}, ...]
-      // On normalise en objets pour le reste du code
-      const snapDD = lsv9Read("gdb_dd") || localDD;
+      // gdb_snapshots = snapshots objets {d, ao, ...} (format chartData)
+      // gdb_dd        = séries tableaux [[date,...]] (format liveDD)
+      const rawSnaps = lsv9Read("gdb_snapshots") || CHART_MONTHLY;
+      // normalizeDD au cas où des anciennes données seraient en format tableaux
       const normalizeDD = (arr) => {
         if(!arr || !arr.length) return [];
         if(Array.isArray(arr[0])){
-          // Format v9 tableau → objet
           return arr.map(r=>({
             d:r[0], ao:r[1]||null, t:r[2]||null, w:r[3]||null,
             gdbs:r[4]||null, eur:r[5]||null,
           }));
         }
-        return arr; // déjà des objets
+        return arr;
       };
-      const snapshots = normalizeDD(snapDD).filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
+      const snapshots = normalizeDD(rawSnaps).filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
       const last = snapshots[0];
 
       try {
@@ -7083,6 +7093,7 @@ function App(){
     // 1b. Sauvegarder toutes les bases dans localStorage v9 (miroir KV, sans sync KV ici)
     lsv9WriteMany({
       gdb_txns:  txns,
+      gdb_snapshots: next, // snapshots objets {d, ao, ...}
       gdb_dd:    newDD,
       gdb_gdbs:  newGDBS,
       gdb_gc:    newGC,
@@ -7105,6 +7116,7 @@ function App(){
       try {
         const bases = {
           gdb_txns: txns,
+          gdb_snapshots: next, // snapshots objets
           gdb_bench: newBench || liveBench || BENCH_IDX,
           // Séries temporelles
           gdb_dd:   newDD,

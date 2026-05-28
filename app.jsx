@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.15";
+const APP_VERSION = "v22.18";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6293,21 +6293,43 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
 
+  // Helpers pour les bases mensuelles {année:{m:[],bom:[],eom:[],...}}
+  function countMonthly(obj){
+    var n=0;
+    Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; });
+    return n;
+  }
+  function lastMonthly(obj){
+    var yrs=Object.keys(obj||{}).sort();
+    if(!yrs.length) return "—";
+    var yr=yrs[yrs.length-1]; var d=obj[yr];
+    var ms=(d&&d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;});
+    return yr+" "+(ms.length?ms[ms.length-1]:"");
+  }
+
   var LOCAL_SUMMARY = [
-    {name:"DD",          count:_DD.length,              last:getLast(_DD)},
-    {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
-    {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
-    {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
-    {name:"BENCH_IDX",   count:_BENCH.length,     last:getLast(_BENCH)},
-    {name:"DB",          count:DB.length,               last:getLast(DB)},
-    {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
-    {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
-    {name:"TOTAL_M",     count:Object.keys(_TM).length,  last:Object.keys(_TM).slice(-1)[0]+" ans"},
-    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
-    {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
-    {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
-    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
-    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
+    // ── Séries temporelles ──────────────────────────────────────────────────
+    {name:"DD",          dbKey:"DD",        count:_DD.length,    last:getLast(_DD)},
+    {name:"GDBS",        dbKey:"GDBS",      count:_GDBS.length,  last:getLast(_GDBS)},
+    {name:"GC_FULL",     dbKey:"GC_FULL",   count:_GC.length,    last:getLast(_GC)},
+    {name:"GS_B100_EXT", dbKey:"GS_B100",   count:_GSB.length,   last:getLast(_GSB)},
+    {name:"BENCH_IDX",   dbKey:"BENCH_IDX", count:_BENCH.length, last:getLast(_BENCH)},
+    {name:"DB",          dbKey:"DB",        count:DB.length,     last:getLast(DB)},
+    // ── Monthly ─────────────────────────────────────────────────────────────
+    {name:"CRYPTO_M",  dbKey:"MONTHLY",  count:countMonthly(_CM), last:lastMonthly(_CM)},
+    {name:"STOCKS_M",  dbKey:"STOCKS_M", count:countMonthly(_SM), last:lastMonthly(_SM)},
+    {name:"TOTAL_M",   dbKey:"TOTAL_M",  count:countMonthly(_TM), last:lastMonthly(_TM)},
+    // ── Portfolio live (depuis EFF) ──────────────────────────────────────────
+    {name:"Portfolio",   dbKey:"PORTFOLIO", count:portfolioItems.length, last:portfolioDate},
+    {name:"Crypto",      dbKey:"CRYPTO",    count:(src.crypto&&src.crypto.items?src.crypto.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Stocks",      dbKey:"STOCKS",    count:(src.stocks&&src.stocks.items?src.stocks.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Banque",      dbKey:"BANK",      count:(src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0), last:"EUR"},
+    // ── Transactions & Snapshots ─────────────────────────────────────────────
+    {name:"Transactions",dbKey:"TXNS",      count:(txns||[]).length,     last:(txns&&txns.length?txns[txns.length-1].date:"—")},
+    {name:"Snapshots",   dbKey:"SNAPSHOTS", count:(chartData||[]).length, last:(chartData&&chartData.length?chartData[chartData.length-1].d:"—")},
+    // ── Références ───────────────────────────────────────────────────────────
+    {name:"YF_MAP",      dbKey:"YF_MAP",      count:Object.keys(YF_MAP).length,  last:"tickers"},
+    {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
   return(
@@ -6331,16 +6353,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
           <div style={{background:C.bg2,borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid "+C.border}}>
             <div style={{fontSize:9,color:C.gray,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>📱 Bases locales</div>
             {LOCAL_SUMMARY.map(function(b,i){
-              var dbKey = (function(){
-                // Map LOCAL_SUMMARY name → DATABASES key
-                var map = {
-                  "DD":"DD","GDBS":"GDBS","GC_FULL":"GC_FULL","GS_B100_EXT":"GS_B100",
-                  "BENCH_IDX":"BENCH_IDX","DB":"DB","CRYPTO_M":"MONTHLY","STOCKS_M":"STOCKS_M",
-                  "TOTAL_M":"TOTAL_M","Portfolio":"PORTFOLIO","Transactions":"TXNS",
-                  "Snapshots":"SNAPSHOTS","YF_MAP":"YF_MAP","CUSTOM_ICONS":"CUSTOM_ICONS",
-                };
-                return map[b.name] || null;
-              })();
+              var dbKey = b.dbKey || null;
               var isOpen = expandedBase === b.name;
               var previewDB = dbKey ? DATABASES[dbKey] : null;
               return(
@@ -6563,17 +6576,6 @@ function App(){
       });
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
-      // Mettre à jour localData avec les nouvelles valeurs live
-      setLive(prev2=>{
-        if(prev2) setLocalData({
-          totalUSD: prev2.totalUSD||CURRENT.totalUSD,
-          totalEUR: prev2.totalEUR||CURRENT.totalEUR,
-          date: todayNC(),
-          gdbS: prev2.gdbS||CURRENT.gdbS,
-          gdbC: prev2.gdbC||CURRENT.gdbC,
-        });
-        return prev2;
-      });
       // Rapport détaillé : succès et échecs
       const successList = Object.keys(YF_MAP).filter(k=>prices[k]!=null);
       if(prices.BTC) successList.push("BTC");
@@ -6668,12 +6670,22 @@ function App(){
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;
-        const cryptoT=kvCryp.total||(kvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
-        const stocksT=kvStk.total||(kvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        // Nettoyage : déplacer les cryptos mal classées dans stocks → crypto
+        const CRYPTO_CATS = new Set(["Crypto"]);
+        const cryptoMisplaced = (kvStk.items||[]).filter(x=>CRYPTO_CATS.has(x.cat)||CG_MAP[x.t]);
+        const cleanStocksItems = (kvStk.items||[]).filter(x=>!CRYPTO_CATS.has(x.cat)&&!CG_MAP[x.t]);
+        const cryptoMerged = [...(kvCryp.items||[])];
+        cryptoMisplaced.forEach(x=>{
+          if(!cryptoMerged.find(c=>c.t===x.t)) cryptoMerged.push(x);
+        });
+        const cleanCryp = {...kvCryp, items:cryptoMerged, total:cryptoMerged.reduce((s,x)=>s+(x.val||0),0)};
+        const cleanStk  = {...kvStk,  items:cleanStocksItems, total:cleanStocksItems.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+(x.val||0),0)};
+        const cryptoT=cleanCryp.total||(cleanCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const stocksT=cleanStk.total||(cleanStocksItems||[]).reduce((s,x)=>s+(x.val||0),0);
         const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
         const totalUSD=cryptoT+stocksT+bankUSD;
         const newLive={...CURRENT,date:kvPort.date||CURRENT.date,totalUSD,totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
-          crypto:{...CURRENT.crypto,...kvCryp},stocks:{...CURRENT.stocks,...kvStk},bank:{...CURRENT.bank,...kvBank},
+          crypto:{...CURRENT.crypto,...cleanCryp},stocks:{...CURRENT.stocks,...cleanStk},bank:{...CURRENT.bank,...kvBank},
           portfolio:{...kvPort},_fromSnapshot:kvPort.date};
         const{gdbS,gdbC}=calcGdbPrices(newLive);
         setLive({...newLive,gdbS,gdbC});

@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v21.97";
+const APP_VERSION = "v23.00";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5069,16 +5069,22 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
               }}
                 options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>
-              {/* Dropdown : tickers existants uniquement */}
-              <FS label="Ticker" value={showNew ? "NOUVEAU" : form.ticker} onChange={v=>{
-                if(showNew) setShowNew(false);
+              {/* Dropdown : caché si nouveau ticker actif */}
+              {!showNew && (
+              <FS label="Ticker" value={form.ticker} onChange={v=>{
                 const item = src.portfolio?.items?.find(x=>x.t===v);
                 const livePrice = item?.live ? String(item.live) : "";
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
                 const cat = item ? (item.cat||"Picking") : form.cat;
                 setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
               }}
-                options={src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]}/>
+                options={[
+                  ...(src.portfolio&&src.portfolio.items
+                    ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t).sort((a,b)=>a.localeCompare(b))
+                    : []),
+                  "EUR", "USD",
+                ]}/>
+              )}
 
               {/* Bouton nouveau ticker */}
               <div style={{gridColumn:"1/-1"}}>
@@ -5680,7 +5686,7 @@ function CloudKeyList({data, onRefresh}){
   var confirmAll = confirmAll_state[0]; var setConfirmAll = confirmAll_state[1];
 
   var CLOUD_KEYS = [
-    {key:"gdb_data",      label:"Snapshots journaliers"},
+    {key:"gdb_snapshots", label:"Snapshots journaliers (objets)"},
     {key:"gdb_txns",      label:"Transactions"},
     {key:"gdb_dd",        label:"DD (historique quotidien)"},
     {key:"gdb_gdbs",      label:"GDBS (GDB.C et GDB.S)"},
@@ -6026,21 +6032,32 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
 
+  function countMonthly(obj){ var n=0; Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; }); return n; }
+  function lastMonthly(obj){ var yrs=Object.keys(obj||{}).sort(); if(!yrs.length)return"—"; var yr=yrs[yrs.length-1];var d=obj[yr];var ms=(d&&d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;});return yr+" "+(ms.length?ms[ms.length-1]:""); }
+
   var LOCAL_SUMMARY = [
-    {name:"DD",          count:_DD.length,              last:getLast(_DD)},
-    {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
-    {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
-    {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
-    {name:"BENCH_IDX",   count:_BENCH.length,     last:getLast(_BENCH)},
-    {name:"DB",          count:DB.length,               last:getLast(DB)},
-    {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
-    {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
-    {name:"TOTAL_M",     count:Object.keys(_TM).length,  last:Object.keys(_TM).slice(-1)[0]+" ans"},
-    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
-    {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
-    {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
-    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
-    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
+    // Séries temporelles
+    {name:"DD",          dbKey:"DD",          count:_DD.length,              last:getLast(_DD)},
+    {name:"GDBS",        dbKey:"GDBS",         count:_GDBS.length,            last:getLast(_GDBS)},
+    {name:"GC_FULL",     dbKey:"GC_FULL",      count:_GC.length,              last:getLast(_GC)},
+    {name:"GS_B100_EXT", dbKey:"GS_B100",      count:_GSB.length,             last:getLast(_GSB)},
+    {name:"BENCH_IDX",   dbKey:"BENCH_IDX",    count:_BENCH.length,           last:getLast(_BENCH)},
+    {name:"DB",          dbKey:"DB",           count:DB.length,               last:getLast(DB)},
+    // Monthly
+    {name:"CRYPTO_M",    dbKey:"MONTHLY",      count:countMonthly(_CM),       last:lastMonthly(_CM)},
+    {name:"STOCKS_M",    dbKey:"STOCKS_M",     count:countMonthly(_SM),       last:lastMonthly(_SM)},
+    {name:"TOTAL_M",     dbKey:"TOTAL_M",      count:countMonthly(_TM),       last:lastMonthly(_TM)},
+    // Portfolio live
+    {name:"Portfolio",   dbKey:"PORTFOLIO",    count:portfolioItems.length,   last:portfolioDate},
+    {name:"Crypto",      dbKey:"CRYPTO",       count:(src.crypto&&src.crypto.items?src.crypto.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Stocks",      dbKey:"STOCKS",       count:(src.stocks&&src.stocks.items?src.stocks.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Banque",      dbKey:"BANK",         count:(src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0), last:"EUR"},
+    // Transactions & snapshots
+    {name:"Transactions",dbKey:"TXNS",         count:(txns||[]).length,       last:(txns&&txns.length>0?txns[txns.length-1].date:"—")},
+    {name:"Snapshots",   dbKey:"SNAPSHOTS",    count:(chartData||[]).length,  last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
+    // Références
+    {name:"YF_MAP",      dbKey:"YF_MAP",       count:Object.keys(YF_MAP).length, last:"tickers"},
+    {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS", count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
   return(
@@ -6062,18 +6079,12 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       {viewMode==="local" ? (
         <div>
           <div style={{background:C.bg2,borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid "+C.border}}>
-            <div style={{fontSize:9,color:C.gray,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>📱 Bases locales</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:9,color:C.gray,letterSpacing:1,textTransform:"uppercase"}}>📱 Bases locales</div>
+              <div style={{fontSize:10,fontWeight:700,color:C.btc}}>{LOCAL_SUMMARY.length} bases</div>
+            </div>
             {LOCAL_SUMMARY.map(function(b,i){
-              var dbKey = (function(){
-                // Map LOCAL_SUMMARY name → DATABASES key
-                var map = {
-                  "DD":"DD","GDBS":"GDBS","GC_FULL":"GC_FULL","GS_B100_EXT":"GS_B100",
-                  "BENCH_IDX":"BENCH_IDX","DB":"DB","CRYPTO_M":"MONTHLY","STOCKS_M":"STOCKS_M",
-                  "TOTAL_M":"TOTAL_M","Portfolio":"PORTFOLIO","Transactions":"TXNS",
-                  "Snapshots":"SNAPSHOTS","YF_MAP":"YF_MAP","CUSTOM_ICONS":"CUSTOM_ICONS",
-                };
-                return map[b.name] || null;
-              })();
+              var dbKey = b.dbKey || null;
               var isOpen = expandedBase === b.name;
               var previewDB = dbKey ? DATABASES[dbKey] : null;
               return(
@@ -6131,7 +6142,10 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       ) : (
         <div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontSize:11,color:C.gray}}>Donnees stockees dans Cloudflare KV</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:11,color:C.gray}}>Données stockées dans Cloudflare KV</div>
+              <div style={{fontSize:10,fontWeight:700,color:C.btc}}>16 bases</div>
+            </div>
             <button onClick={doLoadCloud} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"5px 12px",color:C.teal,fontSize:11,fontWeight:700,cursor:"pointer"}}>Actualiser</button>
           </div>
           {cloudLoading && <div style={{textAlign:"center",padding:"30px 0",color:C.gray,fontSize:13}}>Chargement...</div>}
@@ -6609,11 +6623,12 @@ function App(){
   const[pullY,setPullY]=useState(0);
   const pullStartY=useRef(0);
   const pullActive=useRef(false);
-  const PULL_THRESHOLD=70;
+  const PULL_THRESHOLD=50; // réduit de 70 à 50 pour plus de réactivité
 
   useEffect(()=>{
     const onTouchStart=e=>{
-      if(window.scrollY===0){
+      // Activer dès que scroll = 0, peu importe la position précise
+      if(window.scrollY<=2){
         pullStartY.current=e.touches[0].clientY;
         pullActive.current=true;
       }
@@ -6621,10 +6636,10 @@ function App(){
     const onTouchMove=e=>{
       if(!pullActive.current) return;
       const dy=e.touches[0].clientY-pullStartY.current;
-      if(dy>0 && window.scrollY===0){
-        setPullY(Math.min(dy*0.5, PULL_THRESHOLD+20));
-        if(dy>10) e.preventDefault(); // empêcher le scroll natif
-      } else {
+      if(dy>0 && window.scrollY<=2){
+        setPullY(Math.min(dy*0.6, PULL_THRESHOLD+30)); // résistance augmentée 0.5→0.6
+        if(dy>5) e.preventDefault(); // seuil réduit 10→5
+      } else if(dy<=0){
         pullActive.current=false;
         setPullY(0);
       }
@@ -7137,8 +7152,10 @@ function App(){
         <div style={{display:"flex",gap:9,alignItems:"center"}}>
           <button onClick={()=>setEur(!eur)} title={eur?"Passer en dollars":"Passer en euros"} style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.gold}`,background:C.gold+"1A",
-            cursor:"pointer",fontSize:14,fontWeight:900,color:C.gold,
+            border:`1.5px solid ${eur ? C.green : C.gold}`,
+            background: eur ? C.green+"1A" : C.gold+"1A",
+            cursor:"pointer",fontSize:14,fontWeight:900,
+            color: eur ? C.green : C.gold,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>{eur?"$":"€"}</button>
           <button onClick={()=>setHidden(!hidden)} title={hidden?"Afficher":"Masquer"} style={{

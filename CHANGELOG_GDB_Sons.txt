@@ -1,0 +1,362 @@
+GDB & SONS — CHANGELOG
+Portfolio tracker mobile (React/JSX + Cloudflare Worker)
+Timezone : UTC+11 (Nouvelle-Calédonie)
+=========================================================
+
+NAISSANCE DE L'APP — Discussion 2 (Excel → Mobile)
+────────────────────────────────────────────────────
+Source   GDB & Sons v5.5.xlsm — dashboard portefeuille crypto/actions/banque
+
+v1       Première app React mobile issue de l'analyse du dashboard Excel v5.5
+         Architecture : JSX + React 18 Babel standalone, thème dark Bitcoin
+         5 onglets : Overview, Allocation, Stats, GDB, Portfolio
+         Données crypto (BTC, ETH…), actions, banque hardcodées depuis l'Excel
+         Historique DD intégré dans le code source
+         Sparkline portfolio, donut allocation, chart GDB.C/GDB.S
+         Toggle €/$, masquage des montants
+
+v2–v3    Affinage UI/UX, corrections des calculs P&L
+         Amélioration du chart GDB (courbe lissée, base 100)
+         Ajout de l'onglet Stats (saisonnalité, performances mensuelles)
+
+v4       Refactoring structure : séparation CURRENT / bases historiques
+         Icônes par catégorie (₿ crypto, 🎯 stocks, 🥇 or…)
+         Correction calculs P&L total et % par ligne
+         Base stable utilisée comme référence pour les discussions suivantes
+
+v5       Bouton Refresh + animation .btn-spin (CSS)
+         EU tickers : JEDI.L, GOLD.PA, AI.PA via Finnhub + Yahoo Finance
+         CORS : corsproxy.io + allorigins.win en fallback
+         ⚠ React error #310 non résolue → retour à v4
+
+v6–v6.x  Reprise depuis v4, réintégration incrémentale des features v5
+         Correction de l'erreur #310 par refactoring des composants suspects
+         Pull-to-refresh opérationnel (swipe bas)
+         Swipe-to-close sur le modal ticker
+         Loader splash screen animé (₿ avec glow orange)
+
+v7–v7.1  Ajout onglet Transactions (achats/ventes/dépôts)
+         Formulaire d'ajout de transaction : ticker, type, qté, prix, date
+         Calcul PA moyen pondéré recalculé à chaque trade
+         Persistance des transactions en localStorage (clé SK.txns)
+
+v8       Storage Engine v8 : GitHub Gist (multi-appareils) + localStorage (fallback)
+         GIST_ID + GIST_TOKEN intégrés dans le code
+         gistRead() / gistWrite() — sync bi-directionnel
+         Chargement au démarrage depuis Gist, écriture à chaque snapshot
+
+v9–v10   Amélioration de la robustesse du chargement Gist (retry, timeout)
+         Indicateur de sync (✓ Gist / ⚠ local) dans le header
+         Onglet GDB enrichi : chart comparatif GDB.C vs indices (BTC, SP500…)
+         Métriques GDB.S et GDB.C affichées avec delta depuis 2020
+
+v11–v12  Refactoring complet de l'architecture des données :
+         Introduction du Storage Engine modulaire (SK.chart, SK.txns)
+         Séparation claire CURRENT (état live) / EFF (état appliqué)
+         Base DD étendue : [date, wallet_crypto€, total€, btc$, gdbS$, usdEur]
+         Bases GDBS, GC_FULL, GS_B100_EXT, BENCH_IDX
+
+v12.4    Première mise en ligne sur GitHub Pages
+         Génération des 3 fichiers : index.html, app.jsx, manifest.json
+
+v20.1–v20.5 Onglet Trades renforcé :
+            Ajout YahooTickerSearch (recherche ticker live)
+            Support "NOUVEAU ticker" avec saisie symbole Yahoo + icône
+            YF_MAP persisté dans KV (gdb_yfmap)
+            Calcul PA pondéré recalculé après chaque trade appliqué
+
+v20.6–v20.9 Onglet GDB enrichi :
+            Chart comparatif GDB.S vs BENCH_IDX (BTC, ETH, SP500, Nasdaq)
+            Sélecteur de timeframe sur le chart GDB
+            FondCard par fonds (GDB.S, GDB.C) avec perf all-time
+            Saisonnalité historique mensuelle (crypto + actions)
+
+v20.10–v20.14 Onglet Stats :
+              Performances mensuelles crypto et actions (tableau coloré)
+              Graphiques sparkline par mois
+              Toggle entre vue mensuelle et annuelle
+
+v20.15   Onglet Data — toutes les bases visibles :
+         DD, GDBS, GC_FULL, GS_B100_EXT, BENCH_IDX
+         CRYPTO_MONTHLY, STOCKS_MONTHLY, TOTAL_MONTHLY
+         Portfolio, Transactions, Snapshots, YF_MAP
+         Barre de recherche/filtre sur chaque table
+
+v20.16–v20.20 TickerModal (modal ticker) :
+              Appui sur un ticker → chart Yahoo Finance (via worker)
+              Métriques : marketCap, volMoyen, dividende, secteur, industrie
+              Données ETF : catégorie, top holdings
+              Scoring news : pertinence par ticker (titre, nom, secteur)
+              Swipe-to-close sur le modal
+
+v21.0–v21.10  Refactoring majeur :
+              Architecture multi-sources : EFF (live) vs CURRENT (snapshot)
+              Choix de source de données dans le header
+              Pull-to-refresh avec indicateur rotatif
+              Loader splash animé refondu
+              Worker enrichi : /yahoo-chart avec métriques complètes
+
+v21.11–v21.30 Worker Cloudflare enrichi :
+              FMP API pour logos (250 appels/jour)
+              ETF top holdings via Yahoo quoteSummary
+              Gestion cookie Yahoo (crumb) pour les données EU
+              Benchmarks dans /read (gdb_bench)
+
+v21.31–v21.45 Snapshot journalier renforcé :
+              BENCH_IDX mis à jour (BTC, ETH, indices)
+              Modal snapshot : saisie assistée avec valeurs live pré-remplies
+              Log de résultat détaillé (✓/✗ par base)
+              Retry automatique × 3 sur l'upload KV
+
+v21.46–v21.50 Stabilisation et polish :
+              5 thèmes visuels (midnight, bitcoin, forest, ocean, sunset)
+              Version affichée en haut à droite (APP_VERSION)
+              PWA loader refait (animation ₿ glow orange + barre de progression)
+              Correction timezone UTC+11 sur toutes les dates de snapshot
+              Base stable v21.50 — référence pour la discussion suivante
+
+
+DISCUSSION 3 — Serious Business (v21.51–v21.90)
+─────────────────────────────────────────────────
+v21.51   3 cases portfolio (Crypto/Actions/Banque) respectent le toggle €/$
+         STOCKS_MONTHLY : même logique EOM/nouvelles lignes que CRYPTO_MONTHLY
+         Correction doublons DD, GDBS, GC_FULL (upsert UTC+11)
+
+v21.77   Dernière version stable connue — base de la discussion suivante
+
+
+DISCUSSION 4 — Consolidation & nouvelles fonctionnalités (v21.78–v21.96)
+──────────────────────────────────────────────────────────────────────────
+v21.78   Onglet DATA : bases locales en accordéon (clic → aperçu 5 lignes)
+         Titre "code source" supprimé — CUSTOM_ICONS ajouté à la liste
+
+v21.79   Modal ticker — Top Holdings ETF repliable par défaut
+         Scoring news : +2pts/mot secteur, +1.5pts/mot industrie
+
+v21.80   Snapshot BENCH_IDX : upsert par date exacte
+         Worker v28 : gdb_bench + gdb_icons dans ALLOWED /write-bases
+
+v21.81   CUSTOM_ICONS → ICON_DB { user, fmp }
+         Composant TickerIcon : clic icône = mini-modal choix
+         Logo FMP stocké ICON_DB.fmp à la première ouverture du modal
+
+v21.82   Badge ✎ supprimé. iconDbVersion pour forcer re-render
+         Worker v29 : version dans l'entête
+
+v21.83   ICON_DB persisté localStorage. initIconDbFromLS() au démarrage
+         Merge KV + localStorage. Worker v30 : gdb_icons + gdb_bench dans /read
+
+v21.84   BANK_LOGOS hardcodés (Bourso, DeBlock, BCI). seedBankLogos()
+
+v21.85   Log KV détaillé ligne par ligne (valeurs réelles par base)
+
+v21.86   Fix prix GOLD.PA. cvPrice corrigé pour EUR. Worker v31 : no_logo=1
+
+v21.87   quoteType ETF/ETC fix (meta.instrumentType). Worker v32 : prix robuste
+
+v21.88   Modal Crypto → CoinGecko : rank, ATH, supply, dominance BTC
+         Worker v33 : endpoint /coingecko-coin
+
+v21.89   Home : 3 cases Crypto/Actions/Banque. formule _ddClosest()
+
+v21.90   Formule variations corrigée (pct€ = var€ / totalEUR)
+
+v21.91   Log erreur BTC détaillé. Fix quoteType GOLD → détection ETC/UCITS par nom
+         Debug Yahoo masqué pour ETF sans marketCap
+
+v21.92   Worker v34 : _cgDebug dans réponse CoinGecko
+
+v21.93   CoinGecko 429 résolu : OHLC crypto → Yahoo Finance (BTC-USD, ETH-USD…)
+         Worker v35 : headers navigateur CoinGecko, close OHLC marché fermé
+
+v21.94   Bouton "+ Nouveau ticker" remplace option NOUVEAU dans dropdown
+         showNew state dans TradeModal (scope corrigé)
+
+v21.95   Bouton "Nouveau ticker" plus lisible (padding, fontSize, couleurs)
+         Bouton "Top Holdings" ETF plus visible (fond, bordure, icône 📊)
+
+v21.96   Debug Yahoo masqué si données présentes (qsStatus:200 + hasResult:true)
+         CAP. BOURSIÈRE : affiche "—" pour tous les tickers sans marketCap (pas d'orange)
+         ⭐ Base stable v21.96
+
+
+DISCUSSION 5 — Storage Engine v9 & refonte architecture (v22.00–v22.18)
+─────────────────────────────────────────────────────────────────────────
+CONTEXTE
+  Les v22.xx ont tenté d'introduire un Storage Engine v9 (localStorage miroir de KV),
+  un merge bidirectionnel intelligent, et diverses améliorations UI.
+  Cette série s'est avérée instable — régression des calculs portfolio, BTC mal classé
+  dans stocks, refresh plantant, bases locales corrompues.
+  Décision finale : retour à v21.96 comme base stable pour la v23.
+
+v22.00   Storage Engine v9 introduit :
+         LS_V9_KEY = "gdb_sons_v9" — miroir exact des 15 clés KV
+         lsv9Read/Write/WriteMany, migrateV8toV9()
+         Phase 1 (local immédiat) + Phase 2 (KV async)
+         ⚠ Bloquait sur l'écran de chargement (bug format snapshots)
+
+v22.01   Merge bidirectionnel :
+         mergeTimeSeries (séries temporelles, union par date)
+         mergeTxns (union par id)
+         mergeDict (dictionnaires, KV gagne sur conflit)
+         mergeSnapshot (plus récent par date)
+         mergeAndSync : si local plus riche → push vers KV
+         ⚠ lsReadIcons manquant → crash au démarrage
+
+v22.02   Fix crash démarrage : normalizeDD() convertit [[]] → {} pour snapshots
+         finally { setReady(true) } garantit sortie du splash
+         ⚠ Onglet Data plantait (écran noir)
+
+v22.03   Séparation gdb_snapshots (objets {d,ao…}) ≠ gdb_dd (tableaux [[date,…]])
+         SK.chart = "gdb_snapshots" (distinct de "gdb_dd")
+         Correction de toutes les fonctions qui confondaient les deux formats
+         ⚠ gdb_snapshots absent des listes ALLOWED/KEYS worker
+
+v22.04   Worker v38 : gdb_snapshots ajouté dans KEYS (/read) et ALLOWED (/write-bases)
+         ⚠ Logs snapshot KV incorrects (format des bases mal lu)
+
+v22.05   Logs snapshot corrigés :
+         BENCH_IDX : r[1]/r[2] au lieu de .BTC/.ETH
+         GDBS : r[1]/r[2] au lieu de ["GDB.S"]/["GDB.C"]
+         Monthly : accès par année/mois objet au lieu de tableau
+         gdb_snapshots et localStorage confirmés dans les logs
+
+v22.06   Visualisation bases KV : fmtCell() remplace String()
+         Objets imbriqués : résumé lisible (ex: "€331k · 8 tickers")
+         Monthly renderer : déplie {année:{m:[],bom:[]}} en lignes
+         JSON brut affiché si aucune ligne exploitable
+
+v22.07   Suppression écran splash (choix local/KV) — démarrage direct
+         Header agrandi + version orange sous "GDB & Sons"
+         Boutons 28→32px avec couleurs thème
+         Fallback portfolio TradeModal sur CURRENT si EFF vide
+         ⚠ Blocs orphelins (setLocalData) → crash syntax
+
+v22.08   portfolioTickers réactif dans TradeModal (recalculé à chaque render)
+         Tri alphabétique de la liste des tickers
+         Vente totale → ticker disparaît du dropdown
+         Achat nouveau → ticker apparaît immédiatement
+
+v22.10   Retour base v22.05 stable pour les fixes UI
+         Debug Yahoo : fcStatus:404 ignoré si qsStatus:200 + hasResult:true
+         portfolioTickers réactif + trié alphabétiquement + fallback CURRENT
+
+v22.11   Header agrandi (padding 13px), boutons 32px, version sous titre
+         TickerModal : overlay opacité 0.75→0.96, fond panel opaque C.bg
+
+v22.12   Header sans bordure (borderBottom supprimé)
+         Refresh ⟳→↺, boutons droite 32px avec couleurs thème
+         €/$ → C.gold, 👁/🎨 → C.purple, border 1.5px
+
+v22.13   Visualisation bases : renderers spécifiques par type
+         Portfolio : résumé sous-objets lisible
+         Monthly : tableau année/mois/BOM/EOM/PNL
+
+v22.14   Phase 1 chargement portfolio sans condition de date stricte
+         Snapshot → localStorage : extraction correcte _portfolio.crypto/stocks/bank
+         Phase 2 KV : persist local après chargement KV
+         ⚠ Priorité KV absolue — perdait les données offline
+
+v22.15   Priorité portfolio : max(dateKV, dateLocal), KV gagne à égalité
+         Si local plus récent (offline) → push local vers KV
+         ⭐ Dernière version v22 jugée stable
+
+v22.16   LOCAL_SUMMARY : 17 bases (+Crypto, +Stocks, +Banque)
+         countMonthly/lastMonthly helpers
+         ⚠ Cassait les formules portfolio → abandonné
+
+v22.17   Reprise depuis v22.15. LOCAL_SUMMARY 17 bases (sans casser la logique)
+         dbKey intégré dans la définition des bases (plus de map séparé)
+
+v22.18   Fix crash refresh : setLocalData orphelin supprimé de handleRefresh
+         Nettoyage KV : cryptos mal classées dans stocks → déplacées vers crypto
+         ⚠ Toujours instable — BTC dans stocks, portfolio vide en local
+         ⚠ Régression majeure constatée → retour définitif à v21.96
+
+BILAN v22.xx
+  ✅ Concepts validés : Storage Engine v9, merge bidirectionnel, séparation
+     gdb_snapshots/gdb_dd, visualisation bases, header redesign
+  ❌ Instabilité persistante : données KV corrompues, BTC mal classé,
+     setLocalData orphelins, écran splash supprimé trop tôt
+  📋 À reprendre ultérieurement de manière incrémentale depuis une base propre
+
+
+WORKERS CLOUDFLARE
+──────────────────
+v1–v26  Enrichissements progressifs (proxy Yahoo, FMP logo, ETF holdings,
+         crumb Yahoo, benchmarks, retry, CORS headers)
+v27     Base discussion 4
+v28     ALLOWED : gdb_bench + gdb_icons dans /write-bases
+v29     Entête de version dans le code
+v30     KEYS /read : gdb_icons + gdb_bench
+v31     Paramètre no_logo=1
+v32     Prix robuste depuis dernier candle, quoteType ETF/ETC fix
+v33     Endpoint /coingecko-coin (métriques + OHLC + news + dominance BTC)
+v34     _cgDebug dans réponse CoinGecko
+v35     Headers navigateur CoinGecko (anti-403), close OHLC marché fermé
+v36     /coingecko-coin avec cache KV 1h, /coingecko-ohlc séparé
+v37     Fix /search : chemin sData.quotes (nouvelle API Yahoo)
+v38     gdb_snapshots dans KEYS (/read) et ALLOWED (/write-bases)
+
+
+DISCUSSION 5 SUITE — Retour à la stabilité (v21.97–v23.00)
+────────────────────────────────────────────────────────────
+v21.97   Retour à v21.96. Nouveau design header :
+         Fond sans bordure (C.bg pur, backdropFilter blur)
+         ↺ remplace ⟳, boutons 28→32px, border 1.5px
+         Version "v21.97" en monospace orange sous "GDB & Sons"
+         €/$ → C.gold, 👁/🎨 → C.purple, tous 32×32px
+         ⭐ Base stable pour la v23
+
+v23.00   Nouvelle série stable depuis v21.97 :
+
+         ONGLET DATA — EXHAUSTIVITÉ
+         ▸ LOCAL_SUMMARY passe de 14 à 17 bases :
+           Crypto (src.crypto.items), Stocks (src.stocks.items),
+           Banque (src.bank.breakdown) ajoutées
+         ▸ countMonthly() : compte les mois réels (pas les années)
+           lastMonthly() : affiche "2026 MAI" au lieu de "2026 ans"
+         ▸ Compteur "17 bases" / "16 bases" affiché au-dessus de chaque liste
+         ▸ gdb_snapshots ajouté dans CLOUD_KEYS (remplace gdb_data obsolète)
+         ▸ dbKey intégré dans LOCAL_SUMMARY (suppression du map intermédiaire)
+
+         HEADER
+         ▸ Icône €/$ : verte (C.green) quand mode EUR actif, dorée sinon
+
+         MODULE ACHAT/VENTE
+         ▸ Clic "Nouveau ticker" → dropdown tickers masqué
+         ▸ EUR et USD ajoutés en bas de la liste des tickers (IBKR EUR/USD)
+         ▸ Liste triée alphabétiquement
+
+         PULL-TO-REFRESH
+         ▸ PULL_THRESHOLD : 70 → 50px (plus réactif)
+         ▸ scrollY===0 → scrollY<=2 (tolérance scroll résiduel)
+         ▸ Seuil preventDefault : dy>10 → dy>5 (détection plus tôt)
+
+
+ARCHITECTURE TECHNIQUE
+───────────────────────
+Stack      React 18 (Babel standalone) + JSX — GitHub Pages (noindex)
+Storage    localStorage (offline) + Cloudflare KV (cloud)
+APIs       Yahoo Finance (cours, news), FMP (logos stocks),
+           CoinGecko (crypto : cours, métriques, logos, dominance)
+Worker     Cloudflare Worker v38 (proxy API, KV store, no CORS)
+Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
+
+BASES KV (16 clés)
+  gdb_snapshots   Snapshots journaliers objets {d, ao, ao_usd, eur, gdbs, gdbc}
+  gdb_txns        Transactions [{id, date, side, ticker, qty, price, cat}]
+  gdb_dd          DD séries temporelles [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
+  gdb_gdbs        GDBS [[date, gdbS, gdbC]]
+  gdb_gc          GC_FULL [[date, gdbC]]
+  gdb_gsb         GS_B100_EXT [[date, gsb]]
+  gdb_cm          CRYPTO_MONTHLY {année: {m[], bom[], eom[], pnl[], pct[], inv[]}}
+  gdb_sm          STOCKS_MONTHLY (même format)
+  gdb_tm          TOTAL_MONTHLY (même format)
+  gdb_bench       BENCH_IDX [[date, btc$, eth$, sp500, nasdaq, msci]]
+  gdb_portfolio   Portfolio {date, totalUSD, totalEUR, crypto:{items[]}, stocks:{items[]}}
+  gdb_crypto      Crypto {total, items:[{t, qty, pa, live, val, pnl, pct}]}
+  gdb_stocks      Stocks (même format)
+  gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
+  gdb_yfmap       YF_MAP {ticker: yahooSymbol}
+  gdb_icons       ICON_DB {ticker: {user, fmp}}

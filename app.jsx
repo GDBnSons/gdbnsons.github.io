@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.16";
+const APP_VERSION = "v22.17";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6293,28 +6293,43 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
 
-  // Helper : compter les lignes d'un monthly {année: {m:[], bom:[], ...}}
-  function countMonthly(obj){ var n=0; Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; }); return n; }
-  function lastMonthly(obj){ var years=Object.keys(obj||{}).sort(); if(!years.length) return "—"; var yr=years[years.length-1]; var d=obj[yr]; var m=d&&d.m&&d.m.length?d.m[d.m.length-1]:""; return yr+" "+m; }
+  // Helpers pour les bases mensuelles {année:{m:[],bom:[],eom:[],...}}
+  function countMonthly(obj){
+    var n=0;
+    Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; });
+    return n;
+  }
+  function lastMonthly(obj){
+    var yrs=Object.keys(obj||{}).sort();
+    if(!yrs.length) return "—";
+    var yr=yrs[yrs.length-1]; var d=obj[yr];
+    var ms=(d&&d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;});
+    return yr+" "+(ms.length?ms[ms.length-1]:"");
+  }
 
   var LOCAL_SUMMARY = [
-    {name:"DD",          count:_DD.length,              last:getLast(_DD),                        dbKey:"DD"},
-    {name:"GDBS",        count:_GDBS.length,            last:getLast(_GDBS),                      dbKey:"GDBS"},
-    {name:"GC_FULL",     count:_GC.length,              last:getLast(_GC),                        dbKey:"GC_FULL"},
-    {name:"GS_B100_EXT", count:_GSB.length,             last:getLast(_GSB),                       dbKey:"GS_B100"},
-    {name:"BENCH_IDX",   count:_BENCH.length,           last:getLast(_BENCH),                     dbKey:"BENCH_IDX"},
-    {name:"DB",          count:DB.length,               last:getLast(DB),                         dbKey:"DB"},
-    {name:"CRYPTO_M",    count:countMonthly(_CM),        last:lastMonthly(_CM),                   dbKey:"MONTHLY"},
-    {name:"STOCKS_M",    count:countMonthly(_SM),        last:lastMonthly(_SM),                   dbKey:"STOCKS_M"},
-    {name:"TOTAL_M",     count:countMonthly(_TM),        last:lastMonthly(_TM),                   dbKey:"TOTAL_M"},
-    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate,                       dbKey:"PORTFOLIO"},
-    {name:"Crypto",      count:src.crypto&&src.crypto.items?src.crypto.items.length:0, last:(EFF||CURRENT).date||"—", dbKey:"CRYPTO"},
-    {name:"Stocks",      count:src.stocks&&src.stocks.items?src.stocks.items.length:0, last:(EFF||CURRENT).date||"—", dbKey:"STOCKS"},
-    {name:"Banque",      count:src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0, last:"EUR", dbKey:"BANK"},
-    {name:"Transactions",count:(txns||[]).length,       last:(txns&&txns.length>0?txns[txns.length-1].date:"—"), dbKey:"TXNS"},
-    {name:"Snapshots",   count:(chartData||[]).length,  last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—"), dbKey:"SNAPSHOTS"},
-    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers",                       dbKey:"YF_MAP"},
-    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones",                       dbKey:"CUSTOM_ICONS"},
+    // ── Séries temporelles ──────────────────────────────────────────────────
+    {name:"DD",          dbKey:"DD",        count:_DD.length,    last:getLast(_DD)},
+    {name:"GDBS",        dbKey:"GDBS",      count:_GDBS.length,  last:getLast(_GDBS)},
+    {name:"GC_FULL",     dbKey:"GC_FULL",   count:_GC.length,    last:getLast(_GC)},
+    {name:"GS_B100_EXT", dbKey:"GS_B100",   count:_GSB.length,   last:getLast(_GSB)},
+    {name:"BENCH_IDX",   dbKey:"BENCH_IDX", count:_BENCH.length, last:getLast(_BENCH)},
+    {name:"DB",          dbKey:"DB",        count:DB.length,     last:getLast(DB)},
+    // ── Monthly ─────────────────────────────────────────────────────────────
+    {name:"CRYPTO_M",  dbKey:"MONTHLY",  count:countMonthly(_CM), last:lastMonthly(_CM)},
+    {name:"STOCKS_M",  dbKey:"STOCKS_M", count:countMonthly(_SM), last:lastMonthly(_SM)},
+    {name:"TOTAL_M",   dbKey:"TOTAL_M",  count:countMonthly(_TM), last:lastMonthly(_TM)},
+    // ── Portfolio live (depuis EFF) ──────────────────────────────────────────
+    {name:"Portfolio",   dbKey:"PORTFOLIO", count:portfolioItems.length, last:portfolioDate},
+    {name:"Crypto",      dbKey:"CRYPTO",    count:(src.crypto&&src.crypto.items?src.crypto.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Stocks",      dbKey:"STOCKS",    count:(src.stocks&&src.stocks.items?src.stocks.items.length:0), last:(EFF||CURRENT).date||"—"},
+    {name:"Banque",      dbKey:"BANK",      count:(src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0), last:"EUR"},
+    // ── Transactions & Snapshots ─────────────────────────────────────────────
+    {name:"Transactions",dbKey:"TXNS",      count:(txns||[]).length,     last:(txns&&txns.length?txns[txns.length-1].date:"—")},
+    {name:"Snapshots",   dbKey:"SNAPSHOTS", count:(chartData||[]).length, last:(chartData&&chartData.length?chartData[chartData.length-1].d:"—")},
+    // ── Références ───────────────────────────────────────────────────────────
+    {name:"YF_MAP",      dbKey:"YF_MAP",      count:Object.keys(YF_MAP).length,  last:"tickers"},
+    {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
   return(

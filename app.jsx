@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.15";
+const APP_VERSION = "v22.16";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6293,21 +6293,28 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
 
+  // Helper : compter les lignes d'un monthly {année: {m:[], bom:[], ...}}
+  function countMonthly(obj){ var n=0; Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; }); return n; }
+  function lastMonthly(obj){ var years=Object.keys(obj||{}).sort(); if(!years.length) return "—"; var yr=years[years.length-1]; var d=obj[yr]; var m=d&&d.m&&d.m.length?d.m[d.m.length-1]:""; return yr+" "+m; }
+
   var LOCAL_SUMMARY = [
-    {name:"DD",          count:_DD.length,              last:getLast(_DD)},
-    {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
-    {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
-    {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
-    {name:"BENCH_IDX",   count:_BENCH.length,     last:getLast(_BENCH)},
-    {name:"DB",          count:DB.length,               last:getLast(DB)},
-    {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
-    {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
-    {name:"TOTAL_M",     count:Object.keys(_TM).length,  last:Object.keys(_TM).slice(-1)[0]+" ans"},
-    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
-    {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
-    {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
-    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
-    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
+    {name:"DD",          count:_DD.length,              last:getLast(_DD),                        dbKey:"DD"},
+    {name:"GDBS",        count:_GDBS.length,            last:getLast(_GDBS),                      dbKey:"GDBS"},
+    {name:"GC_FULL",     count:_GC.length,              last:getLast(_GC),                        dbKey:"GC_FULL"},
+    {name:"GS_B100_EXT", count:_GSB.length,             last:getLast(_GSB),                       dbKey:"GS_B100"},
+    {name:"BENCH_IDX",   count:_BENCH.length,           last:getLast(_BENCH),                     dbKey:"BENCH_IDX"},
+    {name:"DB",          count:DB.length,               last:getLast(DB),                         dbKey:"DB"},
+    {name:"CRYPTO_M",    count:countMonthly(_CM),        last:lastMonthly(_CM),                   dbKey:"MONTHLY"},
+    {name:"STOCKS_M",    count:countMonthly(_SM),        last:lastMonthly(_SM),                   dbKey:"STOCKS_M"},
+    {name:"TOTAL_M",     count:countMonthly(_TM),        last:lastMonthly(_TM),                   dbKey:"TOTAL_M"},
+    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate,                       dbKey:"PORTFOLIO"},
+    {name:"Crypto",      count:src.crypto&&src.crypto.items?src.crypto.items.length:0, last:(EFF||CURRENT).date||"—", dbKey:"CRYPTO"},
+    {name:"Stocks",      count:src.stocks&&src.stocks.items?src.stocks.items.length:0, last:(EFF||CURRENT).date||"—", dbKey:"STOCKS"},
+    {name:"Banque",      count:src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0, last:"EUR", dbKey:"BANK"},
+    {name:"Transactions",count:(txns||[]).length,       last:(txns&&txns.length>0?txns[txns.length-1].date:"—"), dbKey:"TXNS"},
+    {name:"Snapshots",   count:(chartData||[]).length,  last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—"), dbKey:"SNAPSHOTS"},
+    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers",                       dbKey:"YF_MAP"},
+    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones",                       dbKey:"CUSTOM_ICONS"},
   ];
 
   return(
@@ -6331,16 +6338,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
           <div style={{background:C.bg2,borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid "+C.border}}>
             <div style={{fontSize:9,color:C.gray,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>📱 Bases locales</div>
             {LOCAL_SUMMARY.map(function(b,i){
-              var dbKey = (function(){
-                // Map LOCAL_SUMMARY name → DATABASES key
-                var map = {
-                  "DD":"DD","GDBS":"GDBS","GC_FULL":"GC_FULL","GS_B100_EXT":"GS_B100",
-                  "BENCH_IDX":"BENCH_IDX","DB":"DB","CRYPTO_M":"MONTHLY","STOCKS_M":"STOCKS_M",
-                  "TOTAL_M":"TOTAL_M","Portfolio":"PORTFOLIO","Transactions":"TXNS",
-                  "Snapshots":"SNAPSHOTS","YF_MAP":"YF_MAP","CUSTOM_ICONS":"CUSTOM_ICONS",
-                };
-                return map[b.name] || null;
-              })();
+              var dbKey = b.dbKey || null;
               var isOpen = expandedBase === b.name;
               var previewDB = dbKey ? DATABASES[dbKey] : null;
               return(

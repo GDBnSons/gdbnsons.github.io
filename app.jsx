@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v22.18";
+const APP_VERSION = "v21.97";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -727,89 +727,15 @@ const today = todayNC; // alias utilisé partout dans le code
 const mnt=(val,hidden,prefix="")=>hidden?"***":(prefix+String(val));
 const uid=()=>"t"+Date.now();
 /* ═══════════════════════════════════════════════════════════
-   STORAGE ENGINE v9 — localStorage miroir exact de Cloudflare KV
-   Principe :
-     • Un seul objet LS "gdb_sons_v9" avec les mêmes clés que KV
-     • Lecture : local immédiat (offline-first), puis KV en arrière-plan
-     • Écriture : local synchrone + KV asynchrone (fire-and-forget)
-     • Migration automatique depuis v8 au premier chargement
-   Clés gérées :
-     gdb_txns, gdb_dd, gdb_gdbs, gdb_gc, gdb_gsb,
-     gdb_cm, gdb_sm, gdb_tm, gdb_bench,
-     gdb_portfolio, gdb_crypto, gdb_stocks, gdb_bank,
-     gdb_yfmap, gdb_icons
+   STORAGE ENGINE v8 — GitHub Gist (multi-appareils) + localStorage (fallback offline)
+   Gist layout: un seul fichier gdb_data.json = { chart: [...], txns: [...] }
 ═══════════════════════════════════════════════════════════ */
-
-/* ── Cloudflare Worker ──────────────────────────────────────── */
+/* ── Cloudflare Worker Storage ─────────────────────────────────── */
 const CF_WORKER_URL = "https://still-moon-9884.fgodbille.workers.dev";
 const CF_AUTH_KEY   = "gdb-sons-secret-2026";
+const LS_KEY     = "gdb_sons_v8";
 
-/* ── Storage Engine v9 ─────────────────────────────────────── */
-const LS_V9_KEY     = "gdb_sons_v9";
-const LS_ICONS_KEY  = "gdb_sons_icons_v1"; // clé séparée pour ICON_DB (taille)
-function lsReadIcons(){ try{ const v=localStorage.getItem(LS_ICONS_KEY); return v?JSON.parse(v):null; }catch{ return null; } }
-function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify(db)); }catch{} }
-
-// Toutes les clés gérées par le moteur
-const LS_V9_KEYS = [
-  "gdb_txns","gdb_dd","gdb_snapshots","gdb_gdbs","gdb_gc","gdb_gsb",
-  "gdb_cm","gdb_sm","gdb_tm","gdb_bench",
-  "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
-  "gdb_yfmap",
-];
-
-// Lire tout le store local
-function lsv9ReadAll(){
-  try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }
-  catch{ return {}; }
-}
-// Écrire tout le store local
-function lsv9WriteAll(obj){
-  try{
-    obj._meta = { ...(obj._meta||{}), lastSave: new Date().toISOString(), version:9 };
-    localStorage.setItem(LS_V9_KEY, JSON.stringify(obj));
-  }catch(e){ console.warn("lsv9WriteAll:", e.message); }
-}
-// Lire une seule clé
-function lsv9Read(key){
-  const store = lsv9ReadAll();
-  return store[key] ?? null;
-}
-// Écrire une seule clé (synchrone local + async KV)
-function lsv9Write(key, value, syncKV=true){
-  const store = lsv9ReadAll();
-  store[key] = value;
-  lsv9WriteAll(store);
-  if(syncKV) cfWriteKey(key, value); // fire-and-forget
-}
-// Écrire plusieurs clés en une fois (pour le snapshot)
-function lsv9WriteMany(obj, syncKV=true){
-  const store = lsv9ReadAll();
-  Object.entries(obj).forEach(([k,v])=>{ if(v !== undefined) store[k]=v; });
-  lsv9WriteAll(store);
-  if(syncKV) cfWriteKeys(obj); // fire-and-forget
-}
-
-// ── Migration v8 → v9 (exécutée une seule fois) ─────────────────────────────
-function migrateV8toV9(){
-  const v9 = lsv9ReadAll();
-  if(v9._meta?.version === 9) return; // déjà migré
-  try{
-    const oldLS = localStorage.getItem("gdb_sons_v8");
-    if(oldLS){
-      const old = JSON.parse(oldLS);
-      // chart (v8) → gdb_dd (v9)
-      if(old.chart && !v9.gdb_dd) v9.gdb_dd = old.chart;
-      // txns (v8) → gdb_txns (v9)
-      if(old.txns && !v9.gdb_txns) v9.gdb_txns = old.txns;
-    }
-    // ICON_DB : clé séparée conservée telle quelle (pas migrée dans v9 pour contrôler la taille)
-  }catch(e){}
-  lsv9WriteAll(v9);
-  console.info("Storage Engine v9 : migration depuis v8 OK");
-}
-
-// ── Cloudflare : lecture et écriture ────────────────────────────────────────
+/* Lit le Gist complet — retourne l'objet JSON ou null */
 async function cfRead(){
   try{
     const res = await fetch(`${CF_WORKER_URL}/read`,{
@@ -825,39 +751,9 @@ async function cfRead(){
     return {_error:true, status:null, statusText:e.message, body:e.name};
   }
 }
-const gistRead  = cfRead;
-const cfPingURL = `${CF_WORKER_URL}/ping`;
+const gistRead = cfRead;
 
-async function cfPing(){
-  try{
-    const res = await fetch(cfPingURL,{
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal: AbortSignal.timeout(5000),
-    });
-    if(!res.ok) return {_error:true, status:res.status, statusText:res.statusText, body:""};
-    const data = await res.json();
-    return data?.ok ? null : {_error:true, status:200, statusText:"Réponse inattendue", body:JSON.stringify(data)};
-  }catch(e){
-    return {_error:true, status:null, statusText:e.message, body:e.name};
-  }
-}
-
-// Écrire une seule clé vers KV (fire-and-forget)
-function cfWriteKey(key, value){
-  const body = {}; body[key] = value;
-  cfWriteKeys(body);
-}
-// Écrire plusieurs clés vers KV (fire-and-forget)
-function cfWriteKeys(obj){
-  fetch(`${CF_WORKER_URL}/write-bases`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-    body: JSON.stringify(obj),
-    signal: AbortSignal.timeout(12000),
-  }).catch(e=>console.warn("cfWriteKeys:", e.message));
-}
-
-// Écriture complète legacy (pour compatibilité avec l'ancien cfWrite/gistWrite)
+/* Écrit l'objet complet dans Cloudflare KV */
 async function cfWrite(obj){
   try{
     const res = await fetch(`${CF_WORKER_URL}/write`,{
@@ -871,135 +767,55 @@ async function cfWrite(obj){
 }
 const gistWrite = cfWrite;
 
-// ── Fonctions de merge intelligent ──────────────────────────────────────────
-
-// Série temporelle : [[date, ...valeurs]] — union par date, KV gagne sur conflit
-function mergeTimeSeries(kvArr, localArr){
-  if(!kvArr   || !kvArr.length)   return localArr || [];
-  if(!localArr|| !localArr.length) return kvArr   || [];
-  const map = {};
-  (localArr).forEach(r => { if(r && r[0]) map[r[0]] = r; });
-  (kvArr   ).forEach(r => { if(r && r[0]) map[r[0]] = r; }); // KV écrase conflit
-  return Object.values(map).sort((a,b) => a[0] < b[0] ? -1 : 1);
-}
-
-// Transactions : union par id unique — KV gagne sur conflit d'id
-function mergeTxns(kvArr, localArr){
-  if(!kvArr   || !kvArr.length)   return localArr || [];
-  if(!localArr|| !localArr.length) return kvArr   || [];
-  const map = {};
-  (localArr).forEach(t => { if(t && t.id) map[t.id] = t; });
-  (kvArr   ).forEach(t => { if(t && t.id) map[t.id] = t; }); // KV écrase conflit
-  return Object.values(map).sort((a,b) => (a.date||"") < (b.date||"") ? -1 : 1);
-}
-
-// Dictionnaire clé/valeur : union, KV gagne sur conflit
-function mergeDict(kvObj, localObj){
-  if(!kvObj)    return localObj || {};
-  if(!localObj) return kvObj   || {};
-  return { ...localObj, ...kvObj }; // KV écrase les clés en conflit
-}
-
-// Snapshot état courant : garder le plus récent par date
-function mergeSnapshot(kvObj, localObj){
-  if(!kvObj)    return localObj;
-  if(!localObj) return kvObj;
-  return (kvObj.date||"") >= (localObj.date||"") ? kvObj : localObj;
-}
-
-// ── Merge bidirectionnel complet KV ↔ local ──────────────────────────────────
-// Appelé à la reconnexion.
-// Retourne { merged, localHasNew } :
-//   merged      = résultat fusionné (toutes les dates des 2 sources)
-//   localHasNew = true si local apportait des données absentes de KV → push vers KV
-function mergeBidirectional(kv, local){
-  if(!kv    || kv._error)    return { merged: local   || {}, localHasNew: false };
-  if(!local || !local._meta) return { merged: kv,            localHasNew: false };
-
-  const merged = {};
-  let localHasNew = false;
-
-  // Séries temporelles
-  const TIME_SERIES = ["gdb_dd","gdb_gdbs","gdb_gc","gdb_gsb","gdb_cm","gdb_sm","gdb_tm","gdb_bench"];
-  TIME_SERIES.forEach(key => {
-    const kvArr    = kv[key]    || [];
-    const localArr = local[key] || [];
-    merged[key] = mergeTimeSeries(kvArr, localArr);
-    // Local apporte des données nouvelles si il a des dates que KV n'a pas
-    if(localArr.length > 0){
-      const kvDates = new Set((kvArr).map(r=>r[0]));
-      if(localArr.some(r => r[0] && !kvDates.has(r[0]))) localHasNew = true;
-    }
-  });
-
-  // Transactions
-  const kvTxns    = kv["gdb_txns"]    || [];
-  const localTxns = local["gdb_txns"] || [];
-  merged["gdb_txns"] = mergeTxns(kvTxns, localTxns);
-  if(localTxns.some(t => t.id && !kvTxns.find(k=>k.id===t.id))) localHasNew = true;
-
-  // Dictionnaires
-  merged["gdb_yfmap"] = mergeDict(kv["gdb_yfmap"], local["gdb_yfmap"]);
-  if(Object.keys(local["gdb_yfmap"]||{}).some(k=>!(kv["gdb_yfmap"]||{})[k])) localHasNew=true;
-
-  // Snapshots état courant (garder le plus récent)
-  ["gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank"].forEach(key => {
-    merged[key] = mergeSnapshot(kv[key], local[key]);
-    if(local[key] && (!kv[key] || (local[key].date||"") > (kv[key].date||""))) localHasNew=true;
-  });
-
-  // ICON_DB : merge dans ICON_DB via loadIconDb (géré séparément)
-  return { merged, localHasNew };
-}
-
-// ── Merge KV ↔ local au chargement, push si local plus riche ────────────────
-// Retourne { merged, localHasNew }
-function mergeAndSync(kv){
-  const local = lsv9ReadAll();
-  const { merged, localHasNew: _lhn } = mergeBidirectional(kv, local);
-  let localHasNew = _lhn;
-
-  // Persister le résultat mergé en local
-  lsv9WriteAll(merged);
-
-  // ICON_DB
-  if(kv.gdb_icons && typeof kv.gdb_icons === "object"){
-    const localIcons = lsReadIcons() || {};
-    const mergedIcons = { ...localIcons, ...kv.gdb_icons };
-    loadIconDb(mergedIcons);
-    seedBankLogos();
-    lsWriteIcons(serializeIconDb());
-    // Vérifier si local avait des icônes absentes de KV
-    if(Object.keys(localIcons).some(k=>!kv.gdb_icons[k])) localHasNew = true;
-  }
-
-  // Si local apportait des données nouvelles → push le résultat mergé vers KV
-  if(localHasNew){
-    console.info("[v9] Local plus riche que KV → push merge vers KV");
-    const toSync = {};
-    [...LS_V9_KEYS, "gdb_icons"].forEach(k => {
-      if(k === "gdb_icons") toSync[k] = serializeIconDb();
-      else if(merged[k] !== undefined) toSync[k] = merged[k];
+async function cfPing(){
+  try{
+    const res = await fetch(`${CF_WORKER_URL}/ping`,{
+      headers:{"X-Auth-Key":CF_AUTH_KEY},
+      signal: AbortSignal.timeout(5000),
     });
-    cfWriteKeys(toSync);
+    if(!res.ok) return {_error:true, status:res.status, statusText:res.statusText, body:""};
+    const data = await res.json();
+    return data?.ok ? null : {_error:true, status:200, statusText:"Réponse inattendue", body:JSON.stringify(data)};
+  }catch(e){
+    return {_error:true, status:null, statusText:e.message, body:e.name};
   }
-
-  return { merged, localHasNew };
 }
 
-// ── API compatibilité avec SK (v8) — utilisée pour chart + txns ─────────────
-// SK.chart = snapshots objets {d,ao,...} != gdb_dd = séries tableaux [[date,...]]
-const SK = { chart:"gdb_snapshots", txns:"gdb_txns" };
+/* Cache local (localStorage) */
+function lsRead(){ try{ const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
+function lsWrite(obj){ try{ localStorage.setItem(LS_KEY,JSON.stringify(obj)); }catch{} }
+
+/* Cache local pour ICON_DB — clé séparée pour éviter les conflits de taille */
+const LS_ICONS_KEY = "gdb_sons_icons_v1";
+function lsReadIcons(){ try{ const v=localStorage.getItem(LS_ICONS_KEY); return v?JSON.parse(v):null; }catch{ return null; } }
+function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify(db)); }catch{} }
+
+/* API publique : load / save — transparent Gist + localStorage */
+const SK={chart:"chart",txns:"txns"};
+
 async function load(k, fallback){
-  const cached = lsv9Read(k);
-  return cached ?? fallback;
-}
-async function save(k, v){
-  lsv9Write(k, v, true); // local + KV
+  // 1. Essai localStorage (instantané)
+  const ls = lsRead();
+  const cached = ls[k];
+  // 2. Essai Gist (vérité de référence multi-appareils)
+  const gist = await gistRead();
+  if(gist && gist[k]){
+    // Mettre à jour le cache local si le Gist est plus récent
+    ls[k] = gist[k];
+    lsWrite(ls);
+    return gist[k];
+  }
+  return cached || fallback;
 }
 
-// Exécuter la migration au chargement du module
-migrateV8toV9();
+async function save(k, v){
+  // 1. Écriture immédiate dans localStorage
+  const ls = lsRead();
+  ls[k] = v;
+  lsWrite(ls);
+  // 2. Sync vers Gist (async, non bloquant)
+  gistWrite(ls);  // ls contient maintenant chart + txns
+}
 
 /* ─── DAILY DATA from Excel Chart sheet ────────────────
    DD:        [date, wallet_crypto€, total_hors_immo€, BTC$, GDB.S$]
@@ -1702,7 +1518,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:`rgba(0,0,0,${Math.max(0, 0.96 - dragY/300)})`,
+      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/300)})`,
       display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
       <div
@@ -1712,7 +1528,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         onTouchMove={onSheetTouchMove}
         onTouchEnd={onSheetTouchEnd}
         style={{
-          width:"100%", background:C.bg, borderRadius:"20px 20px 0 0",
+          width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
           paddingBottom:36, maxHeight:"88vh", overflowY:"auto",
           transform:`translateY(${dragY}px)`,
           transition: dragY===0 ? "transform 0.25s cubic-bezier(0.32,0.72,0,1)" : "none",
@@ -1888,13 +1704,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           {data && !isCrypto && quoteType !== "ETF" && (data._yahooDebug || data._fmpDebug) && (() => {
             const d = data._yahooDebug || data._fmpDebug;
             // N'afficher le debug que si on a une vraie erreur de fetch (pas juste des données nulles)
-            // Vraie erreur = données absentes malgré le fetch
-            // fcStatus:404 seul n'est pas une erreur si qsStatus:200 + hasResult:true
-            // (le crumb Yahoo a expiré mais le fallback quoteSummary a fonctionné)
-            const hasRealError = (d.qsStatus && d.qsStatus !== 200)
-              || d.qsErr
-              || d.error
-              || (d.fcStatus === 404 && !d.hasResult);
+            const hasRealError = d.fcStatus === 404 || (d.qsStatus && d.qsStatus !== 200) || d.qsErr || d.error;
             if(!hasRealError) return null;
             return (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
@@ -5096,26 +4906,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[showNew,setShowNew]=useState(false);
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
-  const[done,setDone]=useState(null);
-
-  // src : EFF avec fallback sur CURRENT.portfolio.items si EFF.portfolio est vide
-  // (cas du premier lancement avant que KV soit chargé)
-  const _src = EFF || CURRENT;
-  const src = {
-    ..._src,
-    portfolio: {
-      ..._src.portfolio,
-      items: (_src.portfolio?.items?.length > 0)
-        ? _src.portfolio.items
-        : CURRENT.portfolio.items,
-    },
-  };
-
-  // Liste réactive triée alphabétiquement — se met à jour après chaque achat/vente
-  const portfolioTickers = (src.portfolio?.items || [])
-    .filter(x => x.cat !== "Cash Matelas" && x.qty > 0)
-    .map(x => x.t)
-    .sort((a, b) => a.localeCompare(b));
+  const[done,setDone]=useState(null); // {type, montant, bank} après succès
+  const src = EFF||CURRENT;
 
   const submitDepot=()=>{
     if(!depot.montant||!depot.bank) return;
@@ -5252,7 +5044,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 {[["BUY","🟢 Acheter"],["SELL","🔴 Vendre"]].map(([k,l])=>(
                   <button key={k} onClick={()=>{
                     const firstSellTicker = k==="SELL" && src.portfolio?.items
-                      ? portfolioTickers[0]||"BTC"
+                      ? src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t)[0]||"BTC"
                       : form.ticker;
                     const ticker = k==="SELL" ? firstSellTicker : form.ticker;
                     const item = src.portfolio?.items?.find(x=>x.t===ticker);
@@ -5275,7 +5067,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
                 setForm({...form,ticker:v,price:livePrice,currency:cur});
               }}
-                options={portfolioTickers}/>
+                options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>
               {/* Dropdown : tickers existants uniquement */}
               <FS label="Ticker" value={showNew ? "NOUVEAU" : form.ticker} onChange={v=>{
@@ -5286,7 +5078,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const cat = item ? (item.cat||"Picking") : form.cat;
                 setForm({...form, ticker:v, price:livePrice, currency:cur, cat});
               }}
-                options={portfolioTickers}/>
+                options={src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0).map(x=>x.t):[]}/>
 
               {/* Bouton nouveau ticker */}
               <div style={{gridColumn:"1/-1"}}>
@@ -5935,80 +5727,21 @@ function CloudKeyList({data, onRefresh}){
     var meta  = CLOUD_KEYS.find(function(k){ return k.key===selectedKey; });
     var label = meta ? meta.label : selectedKey;
 
-    // ── Formater une cellule scalaire ────────────────────────────────────────
-    function fmtCell(v){
-      if(v == null) return "—";
-      if(typeof v === "boolean") return v ? "✓" : "✗";
-      if(typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
-      if(typeof v === "string") return v;
-      if(Array.isArray(v)) return "["+v.length+"]";
-      if(typeof v === "object"){
-        var ent = Object.entries(v);
-        var allScalar = ent.every(function(e){ return e[1]==null||typeof e[1]!=="object"; });
-        if(allScalar && ent.length <= 5) return ent.map(function(e){return e[0]+":"+e[1];}).join(" · ");
-        return "{"+ent.length+" clés}";
-      }
-      return String(v);
-    }
-
     var rows = []; var headers = [];
-
-    // ── Portfolio : afficher chaque clé scalaire + résumé des sous-objets ───
-    if(selectedKey === "gdb_portfolio" && val && typeof val === "object"){
-      headers = ["Clé","Valeur"];
-      rows = Object.entries(val).map(function(e){
-        var k = e[0]; var v = e[1];
-        if(v && typeof v === "object" && !Array.isArray(v)){
-          // Sous-objet (crypto/stocks/bank/portfolio) : résumé lisible
-          var total = v.total != null ? "$"+v.total : null;
-          var items = Array.isArray(v.items) ? v.items.length+" tickers" : null;
-          var eur   = v.totalEUR != null ? "€"+v.totalEUR : null;
-          var summary = [total,items,eur].filter(Boolean).join(" · ") || "{"+Object.keys(v).length+" clés}";
-          return [k, summary];
-        }
-        return [k, fmtCell(v)];
-      });
-    }
-    // ── Monthly (cm/sm/tm) : afficher année → lignes par mois ───────────────
-    else if((selectedKey==="gdb_cm"||selectedKey==="gdb_sm"||selectedKey==="gdb_tm") && val && typeof val==="object"){
-      headers = ["Année","Mois","BOM","EOM","PNL","Pct","Inv"];
-      rows = [];
-      Object.keys(val).sort().reverse().forEach(function(year){
-        var yd = val[year];
-        if(!yd || !Array.isArray(yd.m)) return;
-        // Chaque index dans yd.m est un mois distinct
-        for(var i = yd.m.length-1; i >= 0; i--){
-          rows.push([
-            i === yd.m.length-1 ? year : "",  // Année affichée seulement sur la 1ère ligne
-            yd.m[i] || "?",
-            yd.bom && yd.bom[i] != null ? "€"+yd.bom[i] : "—",
-            yd.eom && yd.eom[i] != null ? "€"+yd.eom[i] : "—",
-            yd.pnl && yd.pnl[i] != null ? "€"+yd.pnl[i] : "—",
-            yd.pct && yd.pct[i] != null ? (yd.pct[i]>0?"+":"")+yd.pct[i]+"%" : "—",
-            yd.inv && yd.inv[i] != null ? "€"+yd.inv[i] : "—",
-          ]);
-        }
-      });
-    }
-    // ── Tableaux de tableaux [[date, val...]] ────────────────────────────────
-    else if(Array.isArray(val) && val.length > 0){
-      var sorted = val.slice().sort(function(a,b){
-        var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
-        var db2= Array.isArray(b)?b[0]:(b.d||b.date||"");
-        return db2.localeCompare(da);
-      });
-      if(Array.isArray(sorted[0])){
-        headers = meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){ return i===0?"Date":"Col "+(i+1); });
-        rows = sorted.map(function(r){ return r.map(function(v){ return fmtCell(v); }); });
-      } else if(typeof sorted[0]==="object"){
-        headers = Object.keys(sorted[0]);
-        rows = sorted.map(function(r){ return headers.map(function(h){ return fmtCell(r[h]); }); });
+    if(Array.isArray(val)){
+      if(val.length>0){
+        var sorted = val.slice().sort(function(a,b){
+          var da = Array.isArray(a)?a[0]:(a.d||a.date||"");
+          var db = Array.isArray(b)?b[0]:(b.d||b.date||"");
+          return db.localeCompare(da); // décroissant
+        });
+        if(Array.isArray(sorted[0])){ headers=meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
+        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
       }
-    }
-    // ── Objet générique (gdb_yfmap, etc.) ────────────────────────────────────
-    else if(val && typeof val==="object"){
-      headers = ["Clé","Valeur"];
-      rows = Object.entries(val).map(function(e){ return [e[0], fmtCell(e[1])]; });
+    } else if(val && typeof val==="object"){
+      var entries=Object.entries(val);
+      if(entries.length>0 && typeof entries[0][1]==="object"){ headers=["Cle","Valeur (JSON)"]; rows=entries.map(function(e){return[e[0],JSON.stringify(e[1]).slice(0,100)];}); }
+      else { headers=["Cle","Valeur"]; rows=entries.map(function(e){return[e[0],String(e[1])]}); }
     }
     var filtered = search ? rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});}) : rows;
 
@@ -6293,43 +6026,21 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
     : currentDB.rows;
 
-  // Helpers pour les bases mensuelles {année:{m:[],bom:[],eom:[],...}}
-  function countMonthly(obj){
-    var n=0;
-    Object.values(obj||{}).forEach(function(d){ n+=(d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;}).length; });
-    return n;
-  }
-  function lastMonthly(obj){
-    var yrs=Object.keys(obj||{}).sort();
-    if(!yrs.length) return "—";
-    var yr=yrs[yrs.length-1]; var d=obj[yr];
-    var ms=(d&&d.m||[]).filter(function(_,i){return d.bom&&d.bom[i]!=null;});
-    return yr+" "+(ms.length?ms[ms.length-1]:"");
-  }
-
   var LOCAL_SUMMARY = [
-    // ── Séries temporelles ──────────────────────────────────────────────────
-    {name:"DD",          dbKey:"DD",        count:_DD.length,    last:getLast(_DD)},
-    {name:"GDBS",        dbKey:"GDBS",      count:_GDBS.length,  last:getLast(_GDBS)},
-    {name:"GC_FULL",     dbKey:"GC_FULL",   count:_GC.length,    last:getLast(_GC)},
-    {name:"GS_B100_EXT", dbKey:"GS_B100",   count:_GSB.length,   last:getLast(_GSB)},
-    {name:"BENCH_IDX",   dbKey:"BENCH_IDX", count:_BENCH.length, last:getLast(_BENCH)},
-    {name:"DB",          dbKey:"DB",        count:DB.length,     last:getLast(DB)},
-    // ── Monthly ─────────────────────────────────────────────────────────────
-    {name:"CRYPTO_M",  dbKey:"MONTHLY",  count:countMonthly(_CM), last:lastMonthly(_CM)},
-    {name:"STOCKS_M",  dbKey:"STOCKS_M", count:countMonthly(_SM), last:lastMonthly(_SM)},
-    {name:"TOTAL_M",   dbKey:"TOTAL_M",  count:countMonthly(_TM), last:lastMonthly(_TM)},
-    // ── Portfolio live (depuis EFF) ──────────────────────────────────────────
-    {name:"Portfolio",   dbKey:"PORTFOLIO", count:portfolioItems.length, last:portfolioDate},
-    {name:"Crypto",      dbKey:"CRYPTO",    count:(src.crypto&&src.crypto.items?src.crypto.items.length:0), last:(EFF||CURRENT).date||"—"},
-    {name:"Stocks",      dbKey:"STOCKS",    count:(src.stocks&&src.stocks.items?src.stocks.items.length:0), last:(EFF||CURRENT).date||"—"},
-    {name:"Banque",      dbKey:"BANK",      count:(src.bank&&src.bank.breakdown?Object.keys(src.bank.breakdown).length:0), last:"EUR"},
-    // ── Transactions & Snapshots ─────────────────────────────────────────────
-    {name:"Transactions",dbKey:"TXNS",      count:(txns||[]).length,     last:(txns&&txns.length?txns[txns.length-1].date:"—")},
-    {name:"Snapshots",   dbKey:"SNAPSHOTS", count:(chartData||[]).length, last:(chartData&&chartData.length?chartData[chartData.length-1].d:"—")},
-    // ── Références ───────────────────────────────────────────────────────────
-    {name:"YF_MAP",      dbKey:"YF_MAP",      count:Object.keys(YF_MAP).length,  last:"tickers"},
-    {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
+    {name:"DD",          count:_DD.length,              last:getLast(_DD)},
+    {name:"GDBS",        count:_GDBS.length,             last:getLast(_GDBS)},
+    {name:"GC_FULL",     count:_GC.length,          last:getLast(_GC)},
+    {name:"GS_B100_EXT", count:_GSB.length,      last:getLast(_GSB)},
+    {name:"BENCH_IDX",   count:_BENCH.length,     last:getLast(_BENCH)},
+    {name:"DB",          count:DB.length,               last:getLast(DB)},
+    {name:"CRYPTO_M",    count:Object.keys(_CM).length, last:Object.keys(_CM).slice(-1)[0]+" ans"},
+    {name:"STOCKS_M",    count:Object.keys(_SM).length, last:Object.keys(_SM).slice(-1)[0]+" ans"},
+    {name:"TOTAL_M",     count:Object.keys(_TM).length,  last:Object.keys(_TM).slice(-1)[0]+" ans"},
+    {name:"Portfolio",   count:portfolioItems.length,   last:portfolioDate},
+    {name:"Transactions",count:(txns||[]).length,        last:(txns&&txns.length>0?txns[0].date:"—")},
+    {name:"Snapshots",   count:(chartData||[]).length,   last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
+    {name:"YF_MAP",      count:Object.keys(YF_MAP).length, last:"tickers"},
+    {name:"CUSTOM_ICONS",count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
   return(
@@ -6353,7 +6064,16 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
           <div style={{background:C.bg2,borderRadius:10,padding:"10px 12px",marginBottom:10,border:"1px solid "+C.border}}>
             <div style={{fontSize:9,color:C.gray,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>📱 Bases locales</div>
             {LOCAL_SUMMARY.map(function(b,i){
-              var dbKey = b.dbKey || null;
+              var dbKey = (function(){
+                // Map LOCAL_SUMMARY name → DATABASES key
+                var map = {
+                  "DD":"DD","GDBS":"GDBS","GC_FULL":"GC_FULL","GS_B100_EXT":"GS_B100",
+                  "BENCH_IDX":"BENCH_IDX","DB":"DB","CRYPTO_M":"MONTHLY","STOCKS_M":"STOCKS_M",
+                  "TOTAL_M":"TOTAL_M","Portfolio":"PORTFOLIO","Transactions":"TXNS",
+                  "Snapshots":"SNAPSHOTS","YF_MAP":"YF_MAP","CUSTOM_ICONS":"CUSTOM_ICONS",
+                };
+                return map[b.name] || null;
+              })();
               var isOpen = expandedBase === b.name;
               var previewDB = dbKey ? DATABASES[dbKey] : null;
               return(
@@ -6576,6 +6296,17 @@ function App(){
       });
       const ts = new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
       setRefreshedAt(ts);
+      // Mettre à jour localData avec les nouvelles valeurs live
+      setLive(prev2=>{
+        if(prev2) setLocalData({
+          totalUSD: prev2.totalUSD||CURRENT.totalUSD,
+          totalEUR: prev2.totalEUR||CURRENT.totalEUR,
+          date: todayNC(),
+          gdbS: prev2.gdbS||CURRENT.gdbS,
+          gdbC: prev2.gdbC||CURRENT.gdbC,
+        });
+        return prev2;
+      });
       // Rapport détaillé : succès et échecs
       const successList = Object.keys(YF_MAP).filter(k=>prices[k]!=null);
       if(prices.BTC) successList.push("BTC");
@@ -6670,22 +6401,12 @@ function App(){
       const kvPort=kv.gdb_portfolio,kvCryp=kv.gdb_crypto,kvStk=kv.gdb_stocks,kvBank=kv.gdb_bank;
       if(kvPort&&kvCryp&&kvStk&&kvBank){
         const uE=CURRENT.usdEur,eU=1/uE;
-        // Nettoyage : déplacer les cryptos mal classées dans stocks → crypto
-        const CRYPTO_CATS = new Set(["Crypto"]);
-        const cryptoMisplaced = (kvStk.items||[]).filter(x=>CRYPTO_CATS.has(x.cat)||CG_MAP[x.t]);
-        const cleanStocksItems = (kvStk.items||[]).filter(x=>!CRYPTO_CATS.has(x.cat)&&!CG_MAP[x.t]);
-        const cryptoMerged = [...(kvCryp.items||[])];
-        cryptoMisplaced.forEach(x=>{
-          if(!cryptoMerged.find(c=>c.t===x.t)) cryptoMerged.push(x);
-        });
-        const cleanCryp = {...kvCryp, items:cryptoMerged, total:cryptoMerged.reduce((s,x)=>s+(x.val||0),0)};
-        const cleanStk  = {...kvStk,  items:cleanStocksItems, total:cleanStocksItems.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+(x.val||0),0)};
-        const cryptoT=cleanCryp.total||(cleanCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
-        const stocksT=cleanStk.total||(cleanStocksItems||[]).reduce((s,x)=>s+(x.val||0),0);
+        const cryptoT=kvCryp.total||(kvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const stocksT=kvStk.total||(kvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
         const bankUSD=Math.round((kvBank.totalEUR||0)*eU);
         const totalUSD=cryptoT+stocksT+bankUSD;
         const newLive={...CURRENT,date:kvPort.date||CURRENT.date,totalUSD,totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
-          crypto:{...CURRENT.crypto,...cleanCryp},stocks:{...CURRENT.stocks,...cleanStk},bank:{...CURRENT.bank,...kvBank},
+          crypto:{...CURRENT.crypto,...kvCryp},stocks:{...CURRENT.stocks,...kvStk},bank:{...CURRENT.bank,...kvBank},
           portfolio:{...kvPort},_fromSnapshot:kvPort.date};
         const{gdbS,gdbC}=calcGdbPrices(newLive);
         setLive({...newLive,gdbS,gdbC});
@@ -6696,181 +6417,98 @@ function App(){
 
   useEffect(()=>{
     (async()=>{
-      // ── PHASE 1 : Chargement local immédiat (offline-first) ───────────────
-      const localStore = lsv9ReadAll();
-
-      // Chart + Txns
-      // IMPORTANT : chartData = snapshots objets {d, ao, ...} (CHART_MONTHLY format)
-      //             liveDD    = séries temporelles tableaux [[date,...]] (gdb_dd format)
-      // Les deux sont distincts — ne pas confondre.
-      const localDD   = localStore.gdb_dd   || null; // tableaux [[date,...]]
-      const localTxns = localStore.gdb_txns || SEED_TXNS;
-      // chartData = snapshots objets (gdb_snapshots), liveDD = séries tableaux (gdb_dd)
-      const localSnaps = localStore.gdb_snapshots || CHART_MONTHLY;
-      setChartData(localSnaps);
-      setTxns(localTxns);
-
-      if(localStore.gdb_dd)    setLiveDD(localStore.gdb_dd);
-      if(localStore.gdb_gdbs)  setLiveGDBS(localStore.gdb_gdbs);
-      if(localStore.gdb_gc)    setLiveGC(localStore.gdb_gc);
-      if(localStore.gdb_gsb)   setLiveGSB(localStore.gdb_gsb);
-      if(localStore.gdb_cm)    setLiveCM(localStore.gdb_cm);
-      if(localStore.gdb_sm)    setLiveSM(localStore.gdb_sm);
-      if(localStore.gdb_tm)    setLiveTM(localStore.gdb_tm);
-      if(localStore.gdb_bench) setLiveBench(localStore.gdb_bench);
-
-      if(localStore.gdb_yfmap && typeof localStore.gdb_yfmap === "object"){
-        Object.assign(YF_MAP, localStore.gdb_yfmap);
-      }
-
-      const localIcons = lsReadIcons();
-      if(localIcons && typeof localIcons === "object"){
-        loadIconDb(localIcons); seedBankLogos(); bumpIconDb();
-      }
-
-      // Portfolio — priorité : local > hardcodé (KV appliqué en Phase 2)
-      const localPort = localStore.gdb_portfolio;
-      const localCryp = localStore.gdb_crypto;
-      const localStk  = localStore.gdb_stocks;
-      const localBank = localStore.gdb_bank;
-      if(localPort || localCryp || localStk){
-        // Charger dès que le local a quelque chose — sans condition de date
-        const _lPort  = localPort  || CURRENT.portfolio;
-        const _lCryp  = localCryp  || CURRENT.crypto;
-        const _lStk   = localStk   || CURRENT.stocks;
-        const _lBank  = localBank  || CURRENT.bank;
-        const lPortDate = (_lPort?.date) || CURRENT.date;
-        const usdEur = CURRENT.usdEur; const eurUsd = 1/usdEur;
-        const bankUSD = Math.round((_lBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
-        const cryptoT = _lCryp.total || (_lCryp.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
-        const stocksT = _lStk.total  || (_lStk.items||[]).reduce((s,x)=>s+(x.val||0),0) ||0;
-        const totalUSD=cryptoT+stocksT+bankUSD; const totalEUR=Math.round(totalUSD*usdEur);
-        const nl={...CURRENT,date:lPortDate,totalUSD,totalEUR,usdEur,eurUsd,
-          crypto:{...CURRENT.crypto,..._lCryp,date:lPortDate},
-          stocks:{...CURRENT.stocks,..._lStk,date:lPortDate},
-          bank:{...CURRENT.bank,..._lBank,date:lPortDate},
-          portfolio:{..._lPort},_fromSnapshot:localPort?lPortDate:null};
-        const {gdbS:kgS,gdbC:kgC}=calcGdbPrices(nl);
-        setLive({...nl,gdbS:kgS,gdbC:kgC});
-        if(localPort) setRefreshedAt("local "+lPortDate);
-        console.info("[v9] Portfolio Phase1 : "+(localPort?"local ("+lPortDate+")":"hardcodé fallback"));
-      }
-
-      // ── PHASE 2 : Sync KV en arrière-plan ────────────────────────────────
       const pingResult = await cfPing();
       const gistOk = pingResult === null;
       if(!gistOk) setGistError(pingResult||{status:null,statusText:"Réponse vide",body:""});
       setGistSync(gistOk);
+      const[cd,tx]=await Promise.all([load(SK.chart,CHART_MONTHLY),load(SK.txns,SEED_TXNS)]);
+      setChartData(cd);
+      setTxns(tx);
 
-      if(gistOk){
-        try {
-          const res = await fetch(CF_WORKER_URL+"/read",{
-            headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(10000),
-          });
-          if(res.ok){
-            const kvData = await res.json();
-          const { merged, localHasNew } = mergeAndSync(kvData);
-          if(localHasNew) console.info("[v9] Push merge vers KV (local avait des données nouvelles)");
+      // ── Charger les bases depuis Cloudflare KV (remplace les constantes statiques) ─
+      try {
+        const res = await fetch(CF_WORKER_URL+"/read",{
+          headers:{"X-Auth-Key":CF_AUTH_KEY},
+          signal: AbortSignal.timeout(10000),
+        });
+        if(res.ok){
+          const kvData = await res.json();
+          // Remplacer les séries statiques si KV a des données plus récentes
+          const kvDD   = kvData.gdb_dd;
+          const kvGDBS = kvData.gdb_gdbs;
+          const kvGC   = kvData.gdb_gc;
+          const kvGSB  = kvData.gdb_gsb;
+          const kvCM   = kvData.gdb_cm;
+          const kvSM   = kvData.gdb_sm;
+          const kvTM   = kvData.gdb_tm;
+          const kvYF   = kvData.gdb_yfmap;
+          const kvPort = kvData.gdb_portfolio;
+          const kvCryp = kvData.gdb_crypto;
+          const kvStk  = kvData.gdb_stocks;
+          const kvBank = kvData.gdb_bank;
 
-            const localLastDate = localStore.gdb_dd?.at?.(-1)?.[0] ?? DD[DD.length-1]?.[0];
-            const kvLastDate    = merged.gdb_dd?.at?.(-1)?.[0] ?? null;
-            const kvIsNewer     = kvLastDate && kvLastDate > localLastDate;
+          // N'utiliser les données KV que si elles sont plus récentes que le build
+          const buildLastDate = DD[DD.length-1] && DD[DD.length-1][0];
+          const kvLastDate    = kvDD && kvDD.length>0 ? kvDD[kvDD.length-1][0] : null;
+          const kvIsNewer     = kvLastDate && kvLastDate > buildLastDate;
 
-            if(kvIsNewer){
-              if(merged.gdb_dd)  { setLiveDD(merged.gdb_dd); } // chartData garde son format objet
-              if(merged.gdb_gdbs)  setLiveGDBS(merged.gdb_gdbs);
-              if(merged.gdb_gc)    setLiveGC(merged.gdb_gc);
-              if(merged.gdb_gsb)   setLiveGSB(merged.gdb_gsb);
-              if(merged.gdb_cm)    setLiveCM(merged.gdb_cm);
-              if(merged.gdb_sm)    setLiveSM(merged.gdb_sm);
-              if(merged.gdb_tm)    setLiveTM(merged.gdb_tm);
-              if(merged.gdb_bench) setLiveBench(merged.gdb_bench);
-              console.info("[v9] Bases mergées appliquées ("+kvLastDate+")");
-            } else if(localHasNew){
-              // Local avait des données plus récentes : appliquer le merge local
-              const ll = lsv9ReadAll();
-              if(ll.gdb_dd)    { setLiveDD(ll.gdb_dd); } // chartData garde son format objet
-              if(ll.gdb_gdbs)   setLiveGDBS(ll.gdb_gdbs);
-              if(ll.gdb_gc)     setLiveGC(ll.gdb_gc);
-              if(ll.gdb_gsb)    setLiveGSB(ll.gdb_gsb);
-              if(ll.gdb_cm)     setLiveCM(ll.gdb_cm);
-              if(ll.gdb_sm)     setLiveSM(ll.gdb_sm);
-              if(ll.gdb_tm)     setLiveTM(ll.gdb_tm);
-              if(ll.gdb_bench)  setLiveBench(ll.gdb_bench);
-              console.info("[v9] Bases locales plus riches appliquées + pushées vers KV");
-            }
+          if(kvIsNewer){
+            if(kvDD)   setLiveDD(kvDD);
+            if(kvGDBS) setLiveGDBS(kvGDBS);
+            if(kvGC)   setLiveGC(kvGC);
+            if(kvGSB)  setLiveGSB(kvGSB);
+            if(kvCM)   setLiveCM(kvCM);
+            if(kvSM)   setLiveSM(kvSM);
+            if(kvTM)   setLiveTM(kvTM);
+            console.info("Bases KV chargées ("+kvLastDate+" > "+buildLastDate+")");
+          } else {
+            console.info("Build plus récent que KV ("+buildLastDate+" >= "+kvLastDate+") — bases locales conservées");
+          }
 
-            // Snapshots objets (format chartData)
-            if(kvData.gdb_snapshots && Array.isArray(kvData.gdb_snapshots)){
-              setChartData(kvData.gdb_snapshots);
-            }
-            if(merged.gdb_yfmap && typeof merged.gdb_yfmap === "object"){
-              Object.assign(YF_MAP, merged.gdb_yfmap);
-            }
-            if(kvData.gdb_icons) bumpIconDb();
+          // YF_MAP : toujours merger (nouveaux tickers ajoutés par l'utilisateur)
+          if(kvYF && typeof kvYF === "object"){
+            Object.assign(YF_MAP, kvYF);
+          }
 
-            // Portfolio — comparer dates KV vs local, appliquer le plus récent
-            // Règle : max(dateKV, dateLocal) → si égale ou KV plus récent → KV
-            //         si local plus récent (offline avec achats/ventes) → garder local
-            const kPort=kvData.gdb_portfolio, kCryp=kvData.gdb_crypto;
-            const kStk=kvData.gdb_stocks, kBank=kvData.gdb_bank;
-            if(kPort && (kCryp || kStk)){
-              const kvPortDate   = kPort.date || "";
-              const localPortDate = (lsv9Read("gdb_portfolio"))?.date || "";
-              const useKV = kvPortDate >= localPortDate; // KV gagne à égalité
-
-              if(useKV){
-                const usdEur=CURRENT.usdEur; const eurUsd=1/usdEur;
-                const _kCryp = kCryp || CURRENT.crypto;
-                const _kStk  = kStk  || CURRENT.stocks;
-                const _kBank = kBank || CURRENT.bank;
-                const bankUSD=Math.round((_kBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
-                const cryptoT=_kCryp.total||(_kCryp.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
-                const stocksT=_kStk.total||(_kStk.items||[]).reduce((s,x)=>s+(x.val||0),0)||0;
-                const totalUSD=cryptoT+stocksT+bankUSD; const totalEUR=Math.round(totalUSD*usdEur);
-                const nk={...CURRENT,date:kvPortDate||CURRENT.date,totalUSD,totalEUR,usdEur,eurUsd,
-                  crypto:{...CURRENT.crypto,..._kCryp,date:kvPortDate||CURRENT.date},
-                  stocks:{...CURRENT.stocks,..._kStk, date:kvPortDate||CURRENT.date},
-                  bank:{...CURRENT.bank,..._kBank,    date:kvPortDate||CURRENT.date},
-                  portfolio:{...kPort},_fromSnapshot:kvPortDate||null};
-                const {gdbS:kgS,gdbC:kgC}=calcGdbPrices(nk);
-                setLive({...nk,gdbS:kgS,gdbC:kgC}); setRefreshedAt("cloudflare "+(kvPortDate||""));
-                // Persister en local
-                lsv9WriteMany({ gdb_portfolio:kPort, gdb_crypto:_kCryp, gdb_stocks:_kStk, gdb_bank:_kBank }, false);
-                console.info("[v9] Portfolio KV appliqué ("+kvPortDate+") — plus récent ou égal");
-              } else {
-                // Local plus récent (offline avec transactions) → pousser local vers KV
-                const localCryp2 = lsv9Read("gdb_crypto") || CURRENT.crypto;
-                const localStk2  = lsv9Read("gdb_stocks")  || CURRENT.stocks;
-                const localBank2 = lsv9Read("gdb_bank")    || CURRENT.bank;
-                const localPort2 = lsv9Read("gdb_portfolio")|| CURRENT.portfolio;
-                cfWriteKeys({ gdb_portfolio:localPort2, gdb_crypto:localCryp2, gdb_stocks:localStk2, gdb_bank:localBank2 });
-                console.info("[v9] Portfolio LOCAL plus récent ("+localPortDate+" > "+kvPortDate+") — pushé vers KV");
-              }
+          // Portfolio KV : injecter dans live si disponible et plus récent que le build
+          if(kvPort && kvCryp && kvStk && kvBank){
+            const kvPortDate = kvPort.date || null;
+            const buildDate  = CURRENT.date || DD[DD.length-1]?.[0];
+            if(kvPortDate && kvPortDate > buildDate){
+              console.info("Portfolio KV plus récent ("+kvPortDate+") — injection dans live");
+              const usdEur  = kvBank.totalEUR && kvStk.total && kvCryp.total
+                ? (CURRENT.usdEur) : CURRENT.usdEur;
+              const eurUsd  = 1/usdEur;
+              const bankUSD = Math.round((kvBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
+              const cryptoT = kvCryp.total || kvCryp.items.reduce((s,x)=>s+(x.val||0),0);
+              const stocksT = kvStk.total  || kvStk.items.reduce((s,x)=>s+(x.val||0),0);
+              const totalUSD = cryptoT + stocksT + bankUSD;
+              const totalEUR = Math.round(totalUSD * usdEur);
+              const newLiveFromKV = {
+                ...CURRENT,
+                date:     kvPortDate,
+                totalUSD, totalEUR, usdEur, eurUsd,
+                crypto:   {...CURRENT.crypto, ...kvCryp, date: kvPortDate},
+                stocks:   {...CURRENT.stocks, ...kvStk,  date: kvPortDate},
+                bank:     {...CURRENT.bank,   ...kvBank, date: kvPortDate},
+                portfolio:{...kvPort},
+                _fromSnapshot: kvPortDate,
+              };
+              // Recalculer GDB.C et GDB.S depuis les nouvelles positions
+              const {gdbS: kgS, gdbC: kgC} = calcGdbPrices(newLiveFromKV);
+              setLive({...newLiveFromKV, gdbS: kgS, gdbC: kgC});
+              setRefreshedAt("snapshot "+kvPortDate);
             }
           }
-        } catch(e){ console.warn("[v9] Sync KV échoué:", e.message); }
+        }
+      } catch(e){
+        console.warn("Chargement bases KV échoué:", e.message);
       }
 
-      // ── Dernier snapshot disponible ───────────────────────────────────────
-      // gdb_snapshots = snapshots objets {d, ao, ...} (format chartData)
-      // gdb_dd        = séries tableaux [[date,...]] (format liveDD)
-      const rawSnaps = lsv9Read("gdb_snapshots") || CHART_MONTHLY;
-      // normalizeDD au cas où des anciennes données seraient en format tableaux
-      const normalizeDD = (arr) => {
-        if(!arr || !arr.length) return [];
-        if(Array.isArray(arr[0])){
-          return arr.map(r=>({
-            d:r[0], ao:r[1]||null, t:r[2]||null, w:r[3]||null,
-            gdbs:r[4]||null, eur:r[5]||null,
-          }));
-        }
-        return arr;
-      };
-      const snapshots = normalizeDD(rawSnaps).filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
+      // Dernier snapshot disponible
+      const snapshots = cd.filter(r=>r.ao||r.t||r.w).sort((a,b)=>b.d.localeCompare(a.d));
       const last = snapshots[0];
 
-      try {
       if(last?._portfolio){
         // ── Reconstruction depuis le dernier snapshot ─────────────────────
         // On utilise les QUANTITÉS du snapshot mais les PRIX de CURRENT
@@ -6959,8 +6597,8 @@ function App(){
           setRefreshedAt(`${tx.length} transaction(s)`);
         }
       }
-      } catch(e){ console.warn("[v9] Erreur init snapshot:", e.message); }
-      finally { setReady(true); }
+
+      setReady(true);
     })();
   },[]);
 
@@ -7199,43 +6837,11 @@ function App(){
     const liveState = snapResult.snap && snapResult.snap._portfolio
       ? snapResult.snap._portfolio : (EFF || CURRENT);
 
-    // 1. Sauvegarder les snapshots journaliers (format objet {d, ao, ...})
+    // 1. Sauvegarder les snapshots journaliers
     try {
       await save(SK.chart, next);
-      uploadLog.push("✓ gdb_snapshots : "+next.length+" points");
-    } catch(e){ uploadErrors.push("✗ gdb_snapshots : "+e.message); }
-
-    // 1b. Sauvegarder toutes les bases dans localStorage v9
-    try {
-      // Portfolio : extraire depuis snap._portfolio (source fiable du snapshot)
-      // ou fallback sur EFF/CURRENT si _portfolio absent
-      const _p = snapResult.snap?._portfolio;
-      const _eff = EFF || CURRENT;
-      const portfolioToSave    = _p    ? { date:_p.date, totalUSD:_p.totalUSD, totalEUR:_p.totalEUR, usdEur:_p.usdEur, gdbS:_p.gdbS, gdbC:_p.gdbC, items: [...(_p.crypto?.items||[]), ...(_p.stocks?.items||[])] } : (_eff.portfolio || CURRENT.portfolio);
-      const cryptoToSave       = _p?.crypto  || _eff.crypto  || CURRENT.crypto;
-      const stocksToSave       = _p?.stocks  || _eff.stocks  || CURRENT.stocks;
-      const bankToSave         = _p?.bank    || _eff.bank    || CURRENT.bank;
-
-      lsv9WriteMany({
-        gdb_txns:  txns,
-        gdb_snapshots: next,
-        gdb_dd:    newDD,
-        gdb_gdbs:  newGDBS,
-        gdb_gc:    newGC,
-        gdb_gsb:   newGSB,
-        gdb_cm:    newCM,
-        gdb_sm:    newSM,
-        gdb_tm:    newTM,
-        gdb_bench: newBench || liveBench || BENCH_IDX,
-        gdb_portfolio: portfolioToSave,
-        gdb_crypto:    cryptoToSave,
-        gdb_stocks:    stocksToSave,
-        gdb_bank:      bankToSave,
-        gdb_yfmap:     YF_MAP,
-        gdb_icons:     serializeIconDb(),
-      }, false);
-      uploadLog.push("✓ localStorage v9 : toutes bases sauvegardées");
-    } catch(e){ uploadErrors.push("✗ localStorage : "+e.message); }
+      uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
+    } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 
     // 2+3. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
     let basesOk = false;
@@ -7243,7 +6849,6 @@ function App(){
       try {
         const bases = {
           gdb_txns: txns,
-          gdb_snapshots: next, // snapshots objets
           gdb_bench: newBench || liveBench || BENCH_IDX,
           // Séries temporelles
           gdb_dd:   newDD,
@@ -7274,53 +6879,36 @@ function App(){
         const written = new Set(data.written||[]);
         const snap   = snapResult.snap || {};
         const src    = EFF || CURRENT;
+        // Ligne par base — on reprend les mêmes valeurs que dans le log local pour cohérence
         const snapDate = snap.d || today();
-
-        // Helper : extraire année/mois depuis snapDate pour les monthly
-        const _sd   = new Date(snapDate);
-        const _year = String(_sd.getFullYear());
-        const _mi   = _sd.getMonth();
-        const MFRKV = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
-
-        if(written.has("gdb_snapshots")) uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
         if(written.has("gdb_bench")){
-          // newBench = [[date, btc, eth, sp, nq, msci]]
-          const row = newBench?.find(r=>r[0]===snapDate);
-          const btcV = row?.[1] ? "$"+Math.round(row[1]) : "—";
-          const ethV = row?.[2] ? " ETH=$"+Math.round(row[2]) : "";
-          uploadLog.push("✓ BENCH_IDX : BTC="+btcV+ethV+" ("+snapDate+")");
+          const btc = newBench?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ BENCH_IDX : BTC="+(btc?"$"+btc.BTC:"—")+(btc?.ETH?" ETH=$"+btc.ETH:"")+" ("+snapDate+")");
         }
         if(written.has("gdb_dd")){
-          // newDD = [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
-          const row = newDD?.find(r=>r[0]===snapDate);
-          uploadLog.push("✓ DD : "+(row ? "ligne ("+snapDate+") total=€"+row[2] : "mis à jour"));
+          const row = newDD?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ DD : "+(row?"ligne ("+snapDate+")":"mis à jour"));
         }
         if(written.has("gdb_gdbs")){
-          // newGDBS = [[date, gdbS, gdbC]]
-          const row = newGDBS?.find(r=>r[0]===snapDate);
-          uploadLog.push("✓ GDBS : "+(row ? "GDB.S="+row[1]+", GDB.C="+row[2] : "mis à jour"));
+          const row = newGDBS?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ GDBS : "+(row?"GDB.S="+row["GDB.S"]+", GDB.C="+row["GDB.C"]:"mis à jour"));
         }
         if(written.has("gdb_gc"))  uploadLog.push("✓ GC_FULL : mis à jour");
         if(written.has("gdb_gsb")){
-          // newGSB = [[date, gsb]]
-          const row = newGSB?.find(r=>r[0]===snapDate);
-          uploadLog.push("✓ GS_B100_EXT : "+(row ? row[1] : "mis à jour"));
+          const row = newGSB?.find(r=>r.d===snapDate);
+          uploadLog.push("✓ GS_B100_EXT : "+(row?row["GS.B100"]:"mis à jour"));
         }
         if(written.has("gdb_cm")){
-          // newCM = {année: {bom, eom, pnl, m...}}
-          const yd = newCM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
-          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
-          uploadLog.push("✓ CRYPTO_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
+          const last = newCM && newCM[newCM.length-1];
+          uploadLog.push("✓ CRYPTO_MONTHLY : "+(last?last.y+" "+last.m+" EOM=€"+last.eur:"mis à jour"));
         }
         if(written.has("gdb_sm")){
-          const yd = newSM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
-          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
-          uploadLog.push("✓ STOCKS_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
+          const last = newSM && newSM[newSM.length-1];
+          uploadLog.push("✓ STOCKS_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
         }
         if(written.has("gdb_tm")){
-          const yd = newTM?.[_year]; const mi2 = yd?.m?.indexOf(MFRKV[_mi]);
-          const eom = yd && mi2>=0 ? yd.eom[mi2] : null;
-          uploadLog.push("✓ TOTAL_MONTHLY : "+_year+" "+MFRKV[_mi]+(eom!=null?" EOM=€"+eom:""));
+          const last = newTM && newTM[newTM.length-1];
+          uploadLog.push("✓ TOTAL_MONTHLY : "+(last?"€"+last.eur:"mis à jour"));
         }
         if(written.has("gdb_txns"))     uploadLog.push("✓ Transactions : "+txns.length+" lignes");
         if(written.has("gdb_portfolio")) uploadLog.push("✓ Portfolio : sauvegardé");
@@ -7329,7 +6917,7 @@ function App(){
         if(written.has("gdb_bank"))     uploadLog.push("✓ Bank : sauvegardé");
         if(written.has("gdb_yfmap"))    uploadLog.push("✓ YF_MAP : "+Object.keys(YF_MAP).length+" tickers");
         if(written.has("gdb_icons"))    uploadLog.push("✓ ICON_DB : "+Object.keys(ICON_DB).length+" icônes");
-        // Clés échouées (envoyées mais non confirmées dans written)
+        // Clés échouées (dans ALLOWED mais non écrites)
         const failed = Object.keys(bases).filter(k=>!written.has(k));
         failed.forEach(k=>uploadErrors.push("✗ "+k+" : non confirmé"));
         basesOk = true;
@@ -7517,24 +7105,24 @@ function App(){
             background:refreshing?"transparent":C.green+"1A",
             cursor:refreshing?"not-allowed":"pointer",
             display:"flex",alignItems:"center",justifyContent:"center",
-            color:refreshing?C.gray:C.green, fontSize:18, fontWeight:900,
+            color:refreshing?C.gray:C.green,fontSize:18,fontWeight:900,
             animation:refreshing?"spin 1s linear infinite":"none",
           }}>↺</button>
           <button onClick={()=>setShowSnap(true)} title="Prendre un snapshot" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.btc}`,
-            background:C.btc+"1A",cursor:"pointer",fontSize:15,
+            border:`1.5px solid ${C.btc}`,background:C.btc+"1A",
+            cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>📸</button>
           <button onClick={()=>setShowTrade(true)} title="Achat / Vente" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.teal}`,
-            background:C.teal+"1A",cursor:"pointer",fontSize:15,
+            border:`1.5px solid ${C.teal}`,background:C.teal+"1A",
+            cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>💵</button>
         </div>
 
-        {/* Centre : titre + version */}
+        {/* Centre : GDB & Sons + version */}
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <span style={{fontSize:17,fontWeight:900,color:C.btc,letterSpacing:.3,whiteSpace:"nowrap"}}>GDB & Sons</span>
@@ -7545,26 +7133,25 @@ function App(){
           <span style={{fontSize:9,fontWeight:700,color:C.btc,opacity:.8,fontFamily:"monospace",letterSpacing:.5}}>{APP_VERSION}</span>
         </div>
 
-        {/* Droite : €/$ 👁 🎨 — même taille/style que gauche */}
+        {/* Droite : €/$ 👁 🎨 */}
         <div style={{display:"flex",gap:9,alignItems:"center"}}>
           <button onClick={()=>setEur(!eur)} title={eur?"Passer en dollars":"Passer en euros"} style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.gold}`,
-            background:C.gold+"1A",cursor:"pointer",
-            fontSize:14,fontWeight:900,color:C.gold,
+            border:`1.5px solid ${C.gold}`,background:C.gold+"1A",
+            cursor:"pointer",fontSize:14,fontWeight:900,color:C.gold,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>{eur?"$":"€"}</button>
-          <button onClick={()=>setHidden(!hidden)} title={hidden?"Afficher les montants":"Masquer les montants"} style={{
+          <button onClick={()=>setHidden(!hidden)} title={hidden?"Afficher":"Masquer"} style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
             border:`1.5px solid ${hidden?C.btc:C.purple}`,
             background:hidden?C.btc+"1A":C.purple+"1A",
             cursor:"pointer",fontSize:15,color:hidden?C.btc:C.purple,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>{hidden?"🙈":"👁"}</button>
-          <button onClick={()=>setShowTheme(true)} title="Changer de thème" style={{
+          <button onClick={()=>setShowTheme(true)} title="Thème" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.purple}`,
-            background:C.purple+"1A",cursor:"pointer",fontSize:14,
+            border:`1.5px solid ${C.purple}`,background:C.purple+"1A",
+            cursor:"pointer",fontSize:14,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>🎨</button>
         </div>

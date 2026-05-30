@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.04";
+const APP_VERSION = "v23.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -830,13 +830,22 @@ function lsv9SetMany(obj, t){
   lsv9WriteAll(all);
   return n;
 }
-// Seed depuis une réponse KV /read — écriture additive only (ne lit jamais)
+// Seed depuis une réponse KV /read — REMPLISSAGE des clés manquantes uniquement.
+// Ne remplace jamais une base déjà présente en local, ni une base "dirty"
+// (changement local non encore synchronisé). La mise à jour local↔cloud par
+// récence sera gérée par la réconciliation/loadBase, pas par ce seed.
 function lsv9SeedFromKv(kv){
   if(!kv || typeof kv!=="object") return 0;
+  const dirty = (typeof lsv9DirtyList==="function") ? lsv9DirtyList() : [];
+  const existing = lsv9ReadAll();
   const picked={};
-  LSV9_KEYS.forEach(function(k){ if(kv[k]!==undefined && kv[k]!==null) picked[k]=kv[k]; });
+  LSV9_KEYS.forEach(function(k){
+    if(dirty.indexOf(k)>=0) return;       // ne pas écraser un changement local non synchronisé
+    if(existing[k]!==undefined) return;   // ne pas écraser une base déjà présente
+    if(kv[k]!==undefined && kv[k]!==null) picked[k]=kv[k];
+  });
   const n=lsv9SetMany(picked);
-  if(n>0) console.info("[lsv9] seed KV→v9 : "+n+" base(s)");
+  console.info("[lsv9] seed KV→v9 : "+n+" base(s) remplie(s) (dirty/existant préservés)");
   return n;
 }
 // Migration unique v8 → v9 : chart→gdb_snapshots, txns→gdb_txns, icons→gdb_icons
@@ -935,6 +944,16 @@ async function flushDirtyBases(){
   }
   console.info("[flush] "+ok+"/"+dirty.length+" base(s) re-poussée(s) vers KV");
   return ok;
+}
+
+// Phase 3 (v23.05) — fusion de deux listes de transactions par id.
+// `a` est prioritaire en cas de doublon (local gagne) ; les entrées de `b`
+// absentes de `a` sont ajoutées. Multi-appareils safe : ne perd aucune txn.
+function unionTxnsById(a, b){
+  const out=[]; const seen=new Set();
+  (a||[]).forEach(function(t){ if(t && t.id!=null && !seen.has(t.id)){ seen.add(t.id); out.push(t); } });
+  (b||[]).forEach(function(t){ if(t && t.id!=null && !seen.has(t.id)){ seen.add(t.id); out.push(t); } });
+  return out;
 }
 
 async function save(k, v){
@@ -6585,6 +6604,22 @@ function App(){
         });
         if(res.ok){
           const kvData = await res.json();
+          // Phase 3 v23.05 — réconciliation des transactions (fusion par id).
+          // Récupère une txn ajoutée offline (présente en local, pas en KV) ET
+          // une txn faite sur un autre appareil (présente en KV, pas en local).
+          try{
+            const kvTx = Array.isArray(kvData.gdb_txns) ? kvData.gdb_txns : [];
+            const merged = unionTxnsById(tx, kvTx);   // local prioritaire, puis cloud-only
+            if(merged.length !== tx.length || merged.length !== kvTx.length){
+              setTxns(merged);
+              lsv9Set('gdb_txns', merged);
+              console.info("[txns] fusion local("+tx.length+") ∪ KV("+kvTx.length+") = "+merged.length+" ligne(s)");
+            }
+            if(merged.length > kvTx.length){   // le local apporte des txns absentes du cloud → re-push
+              saveBase('gdb_txns', merged);
+              console.info("[txns] re-push KV : "+(merged.length - kvTx.length)+" txn(s) locale(s) manquante(s)");
+            }
+          }catch(e){ console.warn("[txns] réconciliation échouée:", e && e.message); }
           // Remplacer les séries statiques si KV a des données plus récentes
           const kvDD   = kvData.gdb_dd;
           const kvGDBS = kvData.gdb_gdbs;
@@ -7149,6 +7184,7 @@ function App(){
 
   const delTxn=useCallback(async id=>{
     const next=txns.filter(t=>t.id!==id);setTxns(next);await save(SK.txns,next);
+    saveBase('gdb_txns', next);   // Phase 3 — propager la suppression vers la base canonique
   },[txns]);
 
   if(!ready)return(

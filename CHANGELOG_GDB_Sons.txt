@@ -418,3 +418,19 @@ v23.04   PHASE 3 (étape 1) — Re-push automatique des bases "dirty" (flush)
                  console « [flush] 1 base(s) dirty… » puis « 1/1 re-poussée(s) » ;
                  kv/gdb_txns passe au même nombre de lignes que le local ;
                  la clé gdb_sons_v9_dirty redevient vide ([]).
+
+v23.05   FIX Phase 3 — Seed non destructif + réconciliation des transactions
+         Problème observé en v23.04 : le seed KV→v9 (boot) écrasait le miroir
+         local gdb_txns AVANT le flush → la txn ajoutée hors ligne était gommée
+         puis "re-poussée" à l'identique (KV restait à 8 lignes).
+         • lsv9SeedFromKv : ne remplit plus que les clés MANQUANTES, et ne touche
+           jamais une clé "dirty" (changement local non synchronisé). Fini le clobber.
+         • Réconciliation des transactions au boot : fusion local ∪ KV par id
+           (unionTxnsById). Récupère une txn ajoutée offline (local-only) ET une
+           txn faite sur un autre appareil (cloud-only) — sans perte. Re-push KV
+           si le local apporte des txns manquantes.
+         • removeTxn câblé sur saveBase('gdb_txns') : les suppressions se propagent
+           au cloud (évite que la fusion ne ressuscite une txn supprimée).
+         ⚠ Lecture des séries/positions toujours inchangée (chemin v23.00).
+         Vérif : rouvrir l'app EN LIGNE → console « [txns] fusion local(9) ∪ KV(8)
+                 = 9 » puis « [txns] re-push KV : 1 txn… » ; kv/gdb_txns passe à 9.

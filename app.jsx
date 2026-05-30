@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.00";
+const APP_VERSION = "v23.01";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -789,6 +789,73 @@ function lsWrite(obj){ try{ localStorage.setItem(LS_KEY,JSON.stringify(obj)); }c
 const LS_ICONS_KEY = "gdb_sons_icons_v1";
 function lsReadIcons(){ try{ const v=localStorage.getItem(LS_ICONS_KEY); return v?JSON.parse(v):null; }catch{ return null; } }
 function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify(db)); }catch{} }
+
+/* ═══════════════════════════════════════════════════════════
+   STORAGE ENGINE v9 — miroir localStorage des 16 clés KV (Phase 1)
+   But : installer la couche de persistance locale unifiée.
+   ⚠ Phase 1 = conteneur seul. AUCUNE lecture/écriture applicative
+   ne dépend encore de v9 (ce sera la Phase 2). On se contente
+   d'écrire/seeder le miroir. Rien ne change pour l'utilisateur.
+   Chaque entrée est encapsulée : { v: <valeur>, t: <timestamp ms> }.
+═══════════════════════════════════════════════════════════ */
+const LS_V9_KEY = "gdb_sons_v9";
+// Mêmes noms que les clés KV (cf. Worker /read & /write-bases ALLOWED)
+const LSV9_KEYS = [
+  "gdb_snapshots","gdb_txns","gdb_dd","gdb_gdbs","gdb_gc","gdb_gsb",
+  "gdb_cm","gdb_sm","gdb_tm","gdb_bench",
+  "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
+  "gdb_yfmap","gdb_icons",
+];
+function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
+function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
+// Lit la valeur d'une base (déballe l'enveloppe {v,t}) — null si absente
+function lsv9Get(key){ const all=lsv9ReadAll(); const e=all[key]; return e && typeof e==="object" && "v" in e ? e.v : (e!==undefined?e:null); }
+// Lit l'horodatage d'écriture d'une base — null si absente
+function lsv9GetMeta(key){ const all=lsv9ReadAll(); const e=all[key]; return e && typeof e==="object" && "t" in e ? e.t : null; }
+// Écrit une base (ignore les clés inconnues et les valeurs vides)
+function lsv9Set(key, value, t){
+  if(LSV9_KEYS.indexOf(key)<0) return false;
+  if(value===undefined || value===null) return false;
+  const all=lsv9ReadAll();
+  all[key]={ v:value, t: t || Date.now() };
+  return lsv9WriteAll(all);
+}
+// Écrit plusieurs bases d'un coup — retourne le nombre de bases écrites
+function lsv9SetMany(obj, t){
+  if(!obj || typeof obj!=="object") return 0;
+  const all=lsv9ReadAll(); const ts=t||Date.now(); let n=0;
+  LSV9_KEYS.forEach(function(k){
+    if(obj[k]!==undefined && obj[k]!==null){ all[k]={ v:obj[k], t:ts }; n++; }
+  });
+  lsv9WriteAll(all);
+  return n;
+}
+// Seed depuis une réponse KV /read — écriture additive only (ne lit jamais)
+function lsv9SeedFromKv(kv){
+  if(!kv || typeof kv!=="object") return 0;
+  const picked={};
+  LSV9_KEYS.forEach(function(k){ if(kv[k]!==undefined && kv[k]!==null) picked[k]=kv[k]; });
+  const n=lsv9SetMany(picked);
+  if(n>0) console.info("[lsv9] seed KV→v9 : "+n+" base(s)");
+  return n;
+}
+// Migration unique v8 → v9 : chart→gdb_snapshots, txns→gdb_txns, icons→gdb_icons
+const LSV9_MIGRATED_FLAG = "gdb_sons_v9_migrated";
+function migrateV8toV9(){
+  try{
+    if(localStorage.getItem(LSV9_MIGRATED_FLAG)==="1") return false;
+    const v8 = lsRead();           // { chart, txns }
+    const icons = lsReadIcons();   // ICON_DB sérialisé
+    const seed={};
+    if(v8 && v8.chart) seed.gdb_snapshots = v8.chart;
+    if(v8 && v8.txns)  seed.gdb_txns      = v8.txns;
+    if(icons)          seed.gdb_icons     = icons;
+    const n = lsv9SetMany(seed);
+    localStorage.setItem(LSV9_MIGRATED_FLAG, "1");
+    console.info("[lsv9] migration v8→v9 : "+n+" base(s) migrée(s) ("+Object.keys(seed).join(", ")+")");
+    return true;
+  }catch(e){ console.warn("[lsv9] migration échouée:", e && e.message); return false; }
+}
 
 /* API publique : load / save — transparent Gist + localStorage */
 const SK={chart:"chart",txns:"txns"};
@@ -6346,6 +6413,8 @@ function App(){
   // ── Préchargement au démarrage — charge local + KV en parallèle ──────────
   useEffect(()=>{
     (async()=>{
+      // Phase 1 v23.01 — migration unique v8→v9 (idempotente, sans effet visible)
+      migrateV8toV9();
       // Date locale = dernière ligne de liveDD (plus récente que CURRENT.date si snapshots précédents)
       const _localDD = liveDD || DD;
       const localLastDate = _localDD.length>0 ? _localDD[_localDD.length-1][0] : CURRENT.date;
@@ -6361,6 +6430,8 @@ function App(){
         const res=await fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(8000)});
         if(res.ok){
           const kv=await res.json();
+          // Phase 1 v23.01 — seeder le miroir local v9 depuis KV (écriture additive)
+          lsv9SeedFromKv(kv);
           const kvPort=kv.gdb_portfolio,kvStk=kv.gdb_stocks,kvCryp=kv.gdb_crypto,kvBank=kv.gdb_bank;
           if(kvPort&&kvCryp&&kvStk&&kvBank){
             const uE=CURRENT.usdEur,eU=1/uE;

@@ -360,3 +360,16 @@ BASES KV (16 clés)
   gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
   gdb_yfmap       YF_MAP {ticker: yahooSymbol}
   gdb_icons       ICON_DB {ticker: {user, fmp}}
+
+v23.01   PHASE 1 — Couche de persistance locale unifiée « lsv9 » (invisible)
+         Objectif : poser le socle pour fiabiliser local + cloud (cf. PLAN).
+         • Nouveau miroir localStorage « gdb_sons_v9 » des 16 clés KV,
+           chaque base encapsulée { v: valeur, t: timestamp }.
+         • Primitives lsv9Get / lsv9Set / lsv9SetMany / lsv9GetMeta / lsv9SeedFromKv.
+         • Migration unique v8→v9 (idempotente) : chart→gdb_snapshots,
+           txns→gdb_txns, icons→gdb_icons (flag gdb_sons_v9_migrated).
+         • Au boot : migrateV8toV9() puis seed additif du miroir depuis le /read KV.
+         ⚠ AUCUN chemin de lecture/écriture applicatif modifié — comportement
+           identique à v23.00. Le câblage des écritures viendra en Phase 2 (v23.02+).
+         Vérif : DevTools→Application→localStorage → clé « gdb_sons_v9 » peuplée ;
+                 console : « [lsv9] migration v8→v9… » et « [lsv9] seed KV→v9… ».

@@ -452,3 +452,35 @@ v23.06   PHASE 3 (snapshots) — Persistance unifiée de gdb_snapshots
                  puis « [snap] re-push KV : N snapshot(s)… » ; onglet Data →
                  kv/gdb_snapshots passe de vide à N points. Faire un snapshot →
                  « ✓ Snapshots journaliers » + KV gdb_snapshots incrémenté.
+
+v23.07   FIX affichage — Mapping de la vue locale "Snapshots" (onglet Data)
+         Cosmétique uniquement (aucune donnée ni persistance touchée).
+         Le tableau lisait des champs inexistants → colonnes toujours vides :
+         • GDB.C : lisait s.gdbc → lit désormais s.gc (champ réel, col AF).
+         • Total USD : aucun champ stocké → calculé = Total EUR / usdEur
+           (relation EUR = USD × usdEur déjà utilisée par l'app).
+         • Total EUR : repli s.ao → s.t (les points mensuels n'ont que t).
+         • GDB.S : repli s.gdbs → s.gs (les points mensuels n'ont que gs).
+         • Une valeur 0 n'est plus affichée comme "—".
+         → Les snapshots quotidiens s'affichent complets ; les points mensuels
+           montrent ce qu'ils contiennent réellement (le reste reste "—").
+         Rappel : les deux vues (locale vs KV) projettent des sous-ensembles
+         différents des ~30 champs d'un snapshot ; ce n'était pas une divergence
+         local↔cloud mais un affichage de champs différents.
+
+v23.08   PHASE 3 (séries 1/3) — gdb_dd + gdb_gdbs en fusion par date
+         Avant : au boot, DD/GDBS étaient REMPLACÉES en bloc par KV si KV plus
+         récent (risque de perte des dates présentes d'un seul côté).
+         • Nouveau helper unionSeriesByDate([date,…]) : fusion par row[0].
+         • doSnapUpload câblé : saveBase('gdb_dd', newDD) + saveBase('gdb_gdbs',
+           newGDBS) → miroir v9 local + KV + gestion offline (dirty), en plus
+           du batch /write-bases existant.
+         • Boot : DD/GDBS = build ∪ miroir local v9 ∪ KV (KV prioritaire sur
+           conflit de date), re-push des dates local-only. Récupère un snapshot
+           offline ET adopte une date faite sur un autre appareil. Zéro perte.
+         • Les autres séries (gc/gsb/cm/sm/tm) gardent l'ancienne logique
+           « remplacement si KV plus récent » — traitées en v23.09 / v23.10.
+         Vérif : au boot en ligne → console « [dd] fusion DD=N · GDBS=M » ;
+                 snapshot → KV gdb_dd / gdb_gdbs mis à jour (onglet Data) ;
+                 offline : snapshot → dirty → reload online → flush + fusion
+                 → les deux séries se synchronisent.

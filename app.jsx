@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.06";
+const APP_VERSION = "v23.08";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -964,6 +964,16 @@ function unionSnapsByDate(a, b){
   (b||[]).forEach(function(s){ if(s && s.d!=null) map.set(s.d, s); });   // cloud d'abord
   (a||[]).forEach(function(s){ if(s && s.d!=null) map.set(s.d, s); });   // local écrase (prioritaire)
   return Array.from(map.values()).sort(function(x,y){ return (x.d||"").localeCompare(y.d||""); });
+}
+
+// Phase 3 (v23.08) — fusion de deux séries temporelles [date, …valeurs] par date (row[0]).
+// `a` (local/build) d'abord, `b` (KV) écrase en cas de même date → KV prioritaire.
+// Multi-appareils safe : conserve les dates présentes d'un seul côté. Triée par date.
+function unionSeriesByDate(a, b){
+  const map=new Map();
+  (a||[]).forEach(function(r){ if(Array.isArray(r) && r[0]!=null) map.set(r[0], r); });
+  (b||[]).forEach(function(r){ if(Array.isArray(r) && r[0]!=null) map.set(r[0], r); });
+  return Array.from(map.values()).sort(function(x,y){ return (x[0]||"").localeCompare(y[0]||""); });
 }
 
 async function save(k, v){
@@ -6149,7 +6159,12 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       desc:"Historique des snapshots ("+(chartData||[]).length+" points)",
       headers:["Date","Total EUR","Total USD","usdEur","GDB.S","GDB.C"],
       rows: (chartData||[]).slice().sort(function(a,b){return b.d.localeCompare(a.d);}).map(function(s){
-        return[s.d, s.ao||"—", s.ao_usd||"—", s.eur||"—", s.gdbs||"—", s.gdbc||"—"];
+        // v23.07 — mapping corrigé : champs réels + repli mensuel, Total USD calculé
+        var eurTot = (s.ao!=null ? s.ao : s.t);                 // ao (quotidien) ou t (mensuel)
+        var usdTot = (eurTot!=null && s.eur) ? Math.round(eurTot / s.eur) : null; // EUR / usdEur
+        var gdbS   = (s.gdbs!=null ? s.gdbs : s.gs);            // gdbs (col Q) ou gs (col AM)
+        var gdbC   = (s.gc!=null ? s.gc : s.gdbc);              // gc (col AF) = GDB.C réel
+        return[s.d, eurTot!=null?eurTot:"—", usdTot!=null?usdTot:"—", s.eur||"—", gdbS!=null?gdbS:"—", gdbC!=null?gdbC:"—"];
       }),
     },
     "MONTHLY": {
@@ -6665,9 +6680,26 @@ function App(){
           const kvLastDate    = kvDD && kvDD.length>0 ? kvDD[kvDD.length-1][0] : null;
           const kvIsNewer     = kvLastDate && kvLastDate > buildLastDate;
 
+          // Phase 3 v23.08 — DD & GDBS : FUSION par date (build ∪ miroir local ∪ KV),
+          // au lieu d'un remplacement en bloc. KV prioritaire sur conflit ; re-push des
+          // dates présentes en local mais absentes du cloud (récupère un snapshot offline).
+          try {
+            const mergedDD = unionSeriesByDate(unionSeriesByDate(DD, lsv9Get('gdb_dd')), kvDD);
+            setLiveDD(mergedDD);
+            lsv9Set('gdb_dd', mergedDD);
+            const kvDDlen = (kvDD&&kvDD.length)||0;
+            if(mergedDD.length > kvDDlen){ saveBase('gdb_dd', mergedDD); console.info("[dd] re-push KV : "+(mergedDD.length-kvDDlen)+" date(s) locale(s)"); }
+
+            const mergedGDBS = unionSeriesByDate(unionSeriesByDate(GDBS, lsv9Get('gdb_gdbs')), kvGDBS);
+            setLiveGDBS(mergedGDBS);
+            lsv9Set('gdb_gdbs', mergedGDBS);
+            const kvGlen = (kvGDBS&&kvGDBS.length)||0;
+            if(mergedGDBS.length > kvGlen){ saveBase('gdb_gdbs', mergedGDBS); console.info("[gdbs] re-push KV : "+(mergedGDBS.length-kvGlen)+" date(s) locale(s)"); }
+            console.info("[dd] fusion DD="+mergedDD.length+" · GDBS="+mergedGDBS.length);
+          } catch(e){ console.warn("[dd] réconciliation DD/GDBS échouée:", e && e.message); }
+
           if(kvIsNewer){
-            if(kvDD)   setLiveDD(kvDD);
-            if(kvGDBS) setLiveGDBS(kvGDBS);
+            // Les autres séries restent en « remplacement si KV plus récent » (Phases 23.09/23.10)
             if(kvGC)   setLiveGC(kvGC);
             if(kvGSB)  setLiveGSB(kvGSB);
             if(kvCM)   setLiveCM(kvCM);
@@ -7055,6 +7087,8 @@ function App(){
     try {
       await save(SK.chart, next);
       saveBase('gdb_snapshots', next);   // Phase 3 — base canonique : miroir v9 local + KV gdb_snapshots
+      saveBase('gdb_dd',   newDD);       // Phase 3 v23.08 — série DD : miroir v9 + KV + offline dirty
+      saveBase('gdb_gdbs', newGDBS);     // Phase 3 v23.08 — série GDBS
       uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 

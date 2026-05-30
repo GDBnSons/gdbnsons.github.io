@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.03";
+const APP_VERSION = "v23.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -918,6 +918,23 @@ async function saveBase(key, value){
       await new Promise(function(r){ setTimeout(r, 400*attempt); });
     }
   }
+}
+
+// Phase 3 (v23.04) — re-push des bases "dirty" (laissées en local hors ligne) vers KV.
+// Appelé quand on a la preuve d'être en ligne (après un /read KV réussi au boot).
+async function flushDirtyBases(){
+  const dirty = lsv9DirtyList();
+  if(!dirty.length) return 0;
+  console.info("[flush] "+dirty.length+" base(s) dirty à re-pousser : "+dirty.join(", "));
+  let ok=0;
+  for(const key of dirty){
+    const val = lsv9Get(key);
+    if(val===null || val===undefined){ lsv9ClearDirty(key); continue; }
+    const r = await saveBase(key, val);   // saveBase efface le flag dirty si succès
+    if(r) ok++;
+  }
+  console.info("[flush] "+ok+"/"+dirty.length+" base(s) re-poussée(s) vers KV");
+  return ok;
 }
 
 async function save(k, v){
@@ -6480,6 +6497,8 @@ function App(){
           const kv=await res.json();
           // Phase 1 v23.01 — seeder le miroir local v9 depuis KV (écriture additive)
           lsv9SeedFromKv(kv);
+          // Phase 3 v23.04 — /read KV a réussi → on est en ligne → re-pousser les bases dirty
+          flushDirtyBases();
           const kvPort=kv.gdb_portfolio,kvStk=kv.gdb_stocks,kvCryp=kv.gdb_crypto,kvBank=kv.gdb_bank;
           if(kvPort&&kvCryp&&kvStk&&kvBank){
             const uE=CURRENT.usdEur,eU=1/uE;

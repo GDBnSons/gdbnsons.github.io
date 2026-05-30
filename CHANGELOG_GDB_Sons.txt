@@ -404,3 +404,17 @@ v23.03   PHASE 2 (début) — Écriture unifiée saveBase() + câblage addTxn
          désormais ouvrable tel quel dans l'aperçu Claude (montage ReactDOM gardé
          par typeof + export default App). app.jsx (déploiement GitHub) reste
          inchangé dans son montage (ReactDOM.createRoot via index.html).
+
+v23.04   PHASE 3 (étape 1) — Re-push automatique des bases "dirty" (flush)
+         • Nouvelle fonction flushDirtyBases() : lit la liste gdb_sons_v9_dirty,
+           relit chaque base depuis le miroir local v9 et la re-pousse via
+           saveBase() (qui efface le flag dirty en cas de succès).
+         • Déclenchée au boot juste après un /read KV réussi (= preuve d'être
+           en ligne). Une transaction ajoutée hors ligne se synchronise donc
+           toute seule à la prochaine ouverture en ligne.
+         ⚠ La LECTURE reste inchangée (toujours le chemin v23.00). loadBase()
+           (lecture local OU cloud selon le plus récent) viendra en étape 2.
+         Vérif : après une txn ajoutée offline (dirty), rouvrir l'app EN LIGNE →
+                 console « [flush] 1 base(s) dirty… » puis « 1/1 re-poussée(s) » ;
+                 kv/gdb_txns passe au même nombre de lignes que le local ;
+                 la clé gdb_sons_v9_dirty redevient vide ([]).

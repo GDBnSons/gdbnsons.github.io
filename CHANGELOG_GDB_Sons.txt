@@ -373,3 +373,34 @@ v23.01   PHASE 1 — Couche de persistance locale unifiée « lsv9 » (invisible
            identique à v23.00. Le câblage des écritures viendra en Phase 2 (v23.02+).
          Vérif : DevTools→Application→localStorage → clé « gdb_sons_v9 » peuplée ;
                  console : « [lsv9] migration v8→v9… » et « [lsv9] seed KV→v9… ».
+
+v23.02   FIX — Panneau « Debug Yahoo » qui réapparaissait dans le modal EQUITY
+         Régression d'un correctif v22.xx : le panneau de diagnostic s'affichait
+         alors que les données étaient bien chargées.
+         • Cause : hasRealError se déclenchait sur fcStatus:404 (étape « crumb »
+           de Yahoo), bénin dès lors que quoteSummary renvoie hasResult:true
+           (données récupérées via fallback).
+         • Correctif : hasRealError exige désormais !d.hasResult — le panneau
+           n'apparaît plus que si le chargement a réellement échoué.
+         Bloc ETF (fallback sans holdings) laissé inchangé (non concerné).
+         Diff minimal, aucun impact sur les calculs ni sur la couche lsv9 (Phase 1).
+
+v23.03   PHASE 2 (début) — Écriture unifiée saveBase() + câblage addTxn
+         • Nouvelle fonction saveBase(key, value) :
+             1) miroir local immédiat (lsv9Set) — non bloquant, marche offline ;
+             2) push KV /write-bases avec retry (×3) ; échec → clé marquée "dirty"
+                (gdb_sons_v9_dirty) pour re-push ultérieur.
+           + helpers cfWriteBase / lsv9MarkDirty / lsv9ClearDirty / lsv9DirtyList.
+         • addTxn câblé : conserve le save() legacy (gdb_sons_v8 + gdb_data) ET
+           écrit désormais la base canonique gdb_txns (local v9 + KV) via saveBase.
+           → 1ʳᵉ branche de la Phase 2, la plus sûre : testable offline, aucun
+             impact sur les calculs de portefeuille.
+         ⚠ Aucune LECTURE ne dépend encore de v9 (ce sera la Phase 3 / loadBase).
+         Vérif : ajouter une transaction → console « [saveBase] gdb_txns → KV OK » ;
+                 offline → « …KV échec, conservé en local (dirty) » + clé gdb_txns
+                 présente dans localStorage gdb_sons_v9.
+
+         BONUS livraison : le fichier d'archive GDB_Sons_App_v23_03.jsx est
+         désormais ouvrable tel quel dans l'aperçu Claude (montage ReactDOM gardé
+         par typeof + export default App). app.jsx (déploiement GitHub) reste
+         inchangé dans son montage (ReactDOM.createRoot via index.html).

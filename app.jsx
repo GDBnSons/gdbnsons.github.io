@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.01";
+const APP_VERSION = "v23.03";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -873,6 +873,51 @@ async function load(k, fallback){
     return gist[k];
   }
   return cached || fallback;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PHASE 2 (v23.03) — saveBase : écriture unifiée d'une base
+   1) miroir local immédiat (lsv9) — jamais bloquant, marche offline
+   2) push vers KV /write-bases avec petit retry
+   Si le cloud échoue (offline), la donnée reste en local et la clé
+   est marquée "dirty" (gdb_sons_v9_dirty) pour un re-push ultérieur.
+   ⚠ Aucune lecture ne dépend encore de v9 : on ne fait qu'ÉCRIRE.
+═══════════════════════════════════════════════════════════ */
+const LSV9_DIRTY_FLAG = "gdb_sons_v9_dirty";
+function lsv9DirtyList(){ try{ const r=localStorage.getItem(LSV9_DIRTY_FLAG); return r?JSON.parse(r):[]; }catch{ return []; } }
+function lsv9MarkDirty(key){ try{ const s=lsv9DirtyList(); if(s.indexOf(key)<0){ s.push(key); localStorage.setItem(LSV9_DIRTY_FLAG, JSON.stringify(s)); } }catch{} }
+function lsv9ClearDirty(key){ try{ const s=lsv9DirtyList().filter(function(k){return k!==key;}); localStorage.setItem(LSV9_DIRTY_FLAG, JSON.stringify(s)); }catch{} }
+// Pousse UNE base vers le Worker (même contrat que doSnapUpload)
+async function cfWriteBase(key, value){
+  const res = await fetch(`${CF_WORKER_URL}/write-bases`, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "X-Auth-Key": CF_AUTH_KEY },
+    body: JSON.stringify({ [key]: value }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if(!res.ok) throw new Error("HTTP "+res.status);
+  return true;
+}
+async function saveBase(key, value){
+  if(LSV9_KEYS.indexOf(key)<0){ console.warn("[saveBase] clé inconnue ignorée:", key); return false; }
+  // 1) local immédiat (jamais bloquant)
+  lsv9Set(key, value);
+  // 2) push cloud avec retry ; échec → garde local + dirty
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      await cfWriteBase(key, value);
+      lsv9ClearDirty(key);
+      console.info("[saveBase] "+key+" → KV OK (tentative "+attempt+")");
+      return true;
+    }catch(e){
+      if(attempt===3){
+        lsv9MarkDirty(key);
+        console.warn("[saveBase] "+key+" → KV échec, conservé en local (dirty):", e && e.message);
+        return false;
+      }
+      await new Promise(function(r){ setTimeout(r, 400*attempt); });
+    }
+  }
 }
 
 async function save(k, v){
@@ -1771,7 +1816,10 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           {data && !isCrypto && quoteType !== "ETF" && (data._yahooDebug || data._fmpDebug) && (() => {
             const d = data._yahooDebug || data._fmpDebug;
             // N'afficher le debug que si on a une vraie erreur de fetch (pas juste des données nulles)
-            const hasRealError = d.fcStatus === 404 || (d.qsStatus && d.qsStatus !== 200) || d.qsErr || d.error;
+            // v23.02 — ne montrer le debug que si le chargement a VRAIMENT échoué.
+            // Un fcStatus 404 sur l'étape crumb est bénin si quoteSummary a renvoyé
+            // un résultat (hasResult:true) : les données sont chargées via le fallback.
+            const hasRealError = !d.hasResult && (d.fcStatus === 404 || (d.qsStatus && d.qsStatus !== 200) || d.qsErr || d.error);
             if(!hasRealError) return null;
             return (
             <div style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:9,color:C.orange}}>
@@ -7020,7 +7068,9 @@ function App(){
   },[snapResult, txns, EFF]);
 
   const addTxn=useCallback(async t=>{
-    const next=[t,...txns];setTxns(next);await save(SK.txns,next);
+    const next=[t,...txns];setTxns(next);
+    await save(SK.txns,next);                 // legacy (gdb_sons_v8 + KV gdb_data) — inchangé
+    saveBase('gdb_txns', next);               // Phase 2 — base canonique : miroir v9 local + KV gdb_txns
   },[txns]);
 
   const applyTradeToEFF=useCallback(trade=>{

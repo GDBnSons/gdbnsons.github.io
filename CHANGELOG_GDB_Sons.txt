@@ -434,3 +434,21 @@ v23.05   FIX Phase 3 — Seed non destructif + réconciliation des transactions
          ⚠ Lecture des séries/positions toujours inchangée (chemin v23.00).
          Vérif : rouvrir l'app EN LIGNE → console « [txns] fusion local(9) ∪ KV(8)
                  = 9 » puis « [txns] re-push KV : 1 txn… » ; kv/gdb_txns passe à 9.
+
+v23.06   PHASE 3 (snapshots) — Persistance unifiée de gdb_snapshots
+         La clé canonique gdb_snapshots n'était jamais peuplée (snapshots
+         persistés seulement via le moteur legacy save(SK.chart) → gdb_data).
+         Même pattern que les transactions, dédup par date `d` :
+         • doSnapUpload câblé sur saveBase('gdb_snapshots', next) : miroir local
+           v9 + KV, avec gestion offline (dirty) — en plus du save() legacy.
+         • Réconciliation au boot : fusion local ∪ KV par date (unionSnapsByDate),
+           local prioritaire en cas de conflit de date. Récupère un snapshot
+           local-only ET un snapshot fait sur un autre appareil. Re-push si le
+           local apporte des dates absentes du cloud.
+         • 1er boot : tes snapshots existants (chartData) sont poussés vers KV →
+           la clé gdb_snapshots se remplit enfin (onglet Data).
+         ⚠ Positions/portefeuille toujours non câblés (zone de calcul, en dernier).
+         Vérif : au boot en ligne → console « [snap] fusion local(N) ∪ KV(0) = N »
+                 puis « [snap] re-push KV : N snapshot(s)… » ; onglet Data →
+                 kv/gdb_snapshots passe de vide à N points. Faire un snapshot →
+                 « ✓ Snapshots journaliers » + KV gdb_snapshots incrémenté.

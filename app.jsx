@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.05";
+const APP_VERSION = "v23.06";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -954,6 +954,16 @@ function unionTxnsById(a, b){
   (a||[]).forEach(function(t){ if(t && t.id!=null && !seen.has(t.id)){ seen.add(t.id); out.push(t); } });
   (b||[]).forEach(function(t){ if(t && t.id!=null && !seen.has(t.id)){ seen.add(t.id); out.push(t); } });
   return out;
+}
+
+// Phase 3 (v23.06) — fusion de deux listes de snapshots par date `d` (upsert).
+// `a` (local) prioritaire sur `b` (cloud) en cas de même date ; triée par date.
+// Multi-appareils safe : conserve les dates présentes d'un seul côté.
+function unionSnapsByDate(a, b){
+  const map=new Map();
+  (b||[]).forEach(function(s){ if(s && s.d!=null) map.set(s.d, s); });   // cloud d'abord
+  (a||[]).forEach(function(s){ if(s && s.d!=null) map.set(s.d, s); });   // local écrase (prioritaire)
+  return Array.from(map.values()).sort(function(x,y){ return (x.d||"").localeCompare(y.d||""); });
 }
 
 async function save(k, v){
@@ -6620,6 +6630,22 @@ function App(){
               console.info("[txns] re-push KV : "+(merged.length - kvTx.length)+" txn(s) locale(s) manquante(s)");
             }
           }catch(e){ console.warn("[txns] réconciliation échouée:", e && e.message); }
+          // Phase 3 v23.06 — réconciliation des snapshots (fusion par date d).
+          // Récupère un snapshot local-only ET un snapshot fait sur un autre appareil,
+          // et popule la clé canonique gdb_snapshots (restée vide jusqu'ici).
+          try{
+            const kvSnap = Array.isArray(kvData.gdb_snapshots) ? kvData.gdb_snapshots : [];
+            const mergedSnap = unionSnapsByDate(cd, kvSnap);
+            if(mergedSnap.length !== cd.length || mergedSnap.length !== kvSnap.length){
+              setChartData(mergedSnap);
+              lsv9Set('gdb_snapshots', mergedSnap);
+              console.info("[snap] fusion local("+cd.length+") ∪ KV("+kvSnap.length+") = "+mergedSnap.length+" point(s)");
+            }
+            if(mergedSnap.length > kvSnap.length){   // local apporte des dates absentes du cloud → re-push
+              saveBase('gdb_snapshots', mergedSnap);
+              console.info("[snap] re-push KV : "+(mergedSnap.length - kvSnap.length)+" snapshot(s) manquant(s)");
+            }
+          }catch(e){ console.warn("[snap] réconciliation échouée:", e && e.message); }
           // Remplacer les séries statiques si KV a des données plus récentes
           const kvDD   = kvData.gdb_dd;
           const kvGDBS = kvData.gdb_gdbs;
@@ -7028,6 +7054,7 @@ function App(){
     // 1. Sauvegarder les snapshots journaliers
     try {
       await save(SK.chart, next);
+      saveBase('gdb_snapshots', next);   // Phase 3 — base canonique : miroir v9 local + KV gdb_snapshots
       uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 

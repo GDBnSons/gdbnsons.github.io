@@ -484,17 +484,17 @@ function applyTrade(trade, currentEFF){
   let bank = {...src.bank, breakdown: {...src.bank.breakdown}};
   if(bankAccount && bankAccount !== "Aucune"){
     const tradeEUR = Math.round(tradeUSD * usdEur);
-    const current  = bank.breakdown[bankAccount] || 0;
-    bank.breakdown[bankAccount] = isBuy
-      ? current - tradeEUR   // peut devenir négatif (découvert autorisé)
-      : current + tradeEUR;
-    bank.totalEUR = Object.values(bank.breakdown).reduce((s,v)=>s+v, 0);
-
-    // Si contrepartie = IBKR → mouvementer IBKR Euro OU IBKR Dollar selon la devise
-    if(bankAccount === "IBKR"){
+    // v23.14 — 3 cas MUTUELLEMENT EXCLUSIFS (fini l'écriture parasite + double-comptage)
+    const isMatelas = Object.prototype.hasOwnProperty.call(bank.breakdown, bankAccount);
+    if(isMatelas){
+      // Compte Cash Matelas (BCI/Bourso/DeBlock) → bank.breakdown
+      const current = bank.breakdown[bankAccount] || 0;
+      bank.breakdown[bankAccount] = isBuy ? current - tradeEUR : current + tradeEUR;
+      bank.totalEUR = Object.values(bank.breakdown).reduce((s,v)=>s+v, 0);
+    } else if(bankAccount === "IBKR"){
+      // IBKR → item EURO (trade en €) ou USD (trade en $)
       const tradeInEUR = trade.currency === "EUR";
       if(tradeInEUR){
-        // IBKR Euro : mouvementer l'item EURO (qty en €)
         const euroIdx = stocksItems.findIndex(x=>x.t==="EURO");
         if(euroIdx >= 0){
           const euroItem = {...stocksItems[euroIdx]};
@@ -506,7 +506,6 @@ function applyTrade(trade, currentEFF){
           stocksItems[euroIdx] = euroItem;
         }
       } else {
-        // IBKR Dollar : mouvementer l'item USD (qty en $)
         const usdIdx = stocksItems.findIndex(x=>x.t==="USD");
         if(usdIdx >= 0){
           const usdItem = {...stocksItems[usdIdx]};
@@ -518,6 +517,25 @@ function applyTrade(trade, currentEFF){
           usdItem.valEUR = Math.round(newQtyUSD * usdEur);
           stocksItems[usdIdx] = usdItem;
         }
+      }
+    } else {
+      // Compte "Cash Dip" (ex. KuCoin) → débiter l'item Cash correspondant EN VALEUR ($),
+      // sans aucune borne (découvert/crédit autorisé). Pont de casse "KuCoin"↔"KUCOIN".
+      const csIdx = stocksItems.findIndex(x=>x.cat==="Cash" && (x.t||"").toUpperCase()===bankAccount.toUpperCase());
+      if(csIdx >= 0){
+        const cs = {...stocksItems[csIdx]};
+        const amtUSD  = Math.round(tradeUSD);
+        const beforeV = cs.val || 0;
+        const afterV  = isBuy ? beforeV - amtUSD : beforeV + amtUSD;   // peut devenir négatif
+        const live    = (cs.live && cs.live !== 0) ? cs.live : 1;
+        cs.val    = afterV;
+        cs.qty    = afterV / live;
+        cs.valEUR = Math.round(afterV * usdEur);
+        cs.pnl    = 0;
+        stocksItems[csIdx] = cs;
+        console.info("[contrepartie] "+cs.t+" : "+beforeV+"$ → "+afterV+"$ (achat "+amtUSD+"$, sans borne)");
+      } else {
+        console.warn("[contrepartie] item Cash introuvable pour '"+bankAccount+"' — rien débité (tickers Cash: "+stocksItems.filter(x=>x.cat==="Cash").map(x=>x.t).join(",")+")");
       }
     }
   }
@@ -726,7 +744,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.13";
+const APP_VERSION = "v23.15";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5404,6 +5422,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                       const isIBKR_EUR = form.bank==="IBKR"&&form.currency==="EUR";
                       const bal = isIBKR_EUR
                         ? (src.stocks.items.find(x=>x.t==="EURO")?.qty||0)
+                        : form.bank==="KuCoin"
+                        ? (src.stocks.items.find(x=>x.t==="KUCOIN")?.val||0)
                         : isStockCash
                         ? (src.stocks.items.find(x=>x.t==="USD")?.val||0)
                         : (src.bank.breakdown[form.bank]||0);

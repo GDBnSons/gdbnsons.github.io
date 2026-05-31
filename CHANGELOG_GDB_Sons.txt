@@ -562,3 +562,31 @@ v23.13   FIX affichage — Nom des cryptos dans l'onglet Portfolio
            sinon le ticker) ; detail utilise l'unité réelle (x.t).
          Données et persistance inchangées (le détail crypto affichait déjà BTC/ETH
          correctement). Bug KuCoin (contrepartie) traité séparément en v23.14.
+
+v23.14   FIX calcul — Contrepartie KuCoin (et comptes "Cash Dip" en général)
+         Le formulaire envoie "KuCoin" mais l'item est "KUCOIN" (cat:"Cash"),
+         et applyTrade ne gérait la contrepartie que pour Cash Matelas + IBKR.
+         → KuCoin n'était jamais débité ; en plus, l'écriture parasite dans
+         bank.breakdown créait un double-comptage latent (aussi pour IBKR).
+         • Contrepartie réécrite en 3 cas MUTUELLEMENT EXCLUSIFS :
+             - Cash Matelas (présent dans bank.breakdown) → bank.breakdown ;
+             - IBKR → item EURO ou USD (inchangé, mais sans écriture parasite) ;
+             - Cash Dip (ex. KuCoin) → décrémente l'item Cash correspondant
+               (pont de casse "KuCoin"↔"KUCOIN", montant via le live de l'item).
+         Vérifié hors-app : achat ETH avec contrepartie KuCoin / IBKR-USD / BCI →
+         total CONSERVÉ dans les 3 cas (cash → actif), compte correctement débité,
+         aucun double-comptage. portfolio.items se synchronise via le mapping existant.
+         Affichage KuCoin : non hardcodé (lit l'item) ; "$1" = live d'un compte vide.
+
+v23.15   FIX — Contrepartie Cash Dip (KuCoin) : montant correct + découvert autorisé
+         La contrepartie KuCoin est maintenant débitée EN VALEUR ($), du montant
+         exact du trade, SANS borne (le compte peut passer en négatif = découvert).
+         • Débit val-based : val -= tradeUSD (achat) / += (vente), qty recalculé,
+           aucun Math.max ni plancher à 0. Propagé à portfolio.items.
+         • Log console [contrepartie] TICKER : avant$ → après$ pour diagnostic,
+           + avertissement si l'item Cash est introuvable au runtime.
+         • Aperçu "KuCoin après" corrigé : lit l'item KUCOIN (et non USD).
+         Rappel : Cash Matelas (bank.breakdown), IBKR et Cash Dip autorisent déjà
+         tous le négatif (aucun clamp dans les chemins de trade).
+         Vérifié hors-app : achat 2 ETH @2000$ via KuCoin → KUCOIN 0$ → -4000$
+         (stocks + portfolio), valEUR -3440.

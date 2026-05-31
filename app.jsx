@@ -451,22 +451,32 @@ function applyTrade(trade, currentEFF){
     }
   }
 
-  /* ── Mise à jour BTC si ticker = BTC ── */
+  /* ── Mise à jour crypto (BTC + toute autre crypto) — v23.12 ── */
   let cryptoItems = src.crypto.items.map(i => ({...i}));
-  if(ticker.toUpperCase() === "BTC"){
-    const bi = {...cryptoItems[0]};
-    if(isBuy){
-      const newQty  = bi.qty + qty;
-      const newCost = (bi.pa * bi.qty) + (price * qty);
-      bi.pa  = newCost / newQty;
-      bi.qty = newQty;
-    } else {
-      bi.qty = Math.max(0, bi.qty - qty);
+  const isCryptoTrade = (tradeCAT === "Crypto") || (ticker.toUpperCase() === "BTC");
+  if(isCryptoTrade){
+    const cidx = cryptoItems.findIndex(x => (x.t||"").toUpperCase() === ticker.toUpperCase());
+    if(cidx >= 0){
+      const ci = {...cryptoItems[cidx]};
+      if(isBuy){
+        const newQty  = ci.qty + qty;
+        const newCost = (ci.pa * ci.qty) + (price * qty);
+        ci.pa  = newCost / newQty;
+        ci.qty = newQty;
+      } else {
+        ci.qty = Math.max(0, ci.qty - qty);
+      }
+      ci.val = Math.round(ci.qty * (ci.live || price));
+      ci.pnl = Math.round(ci.val - ci.pa * ci.qty);
+      ci.pct = ci.pa * ci.qty > 0 ? ci.pnl / (ci.pa * ci.qty) : 0;
+      cryptoItems[cidx] = ci;
+    } else if(isBuy){
+      // Nouvelle crypto — ajouter (cat:"Crypto" pour un classement correct dans portfolio.items)
+      cryptoItems.push({
+        t: ticker, cat: "Crypto", qty, pa: price, live: price,
+        val: Math.round(qty * price), pnl: 0, pct: 0,
+      });
     }
-    bi.val = Math.round(bi.qty * bi.live);
-    bi.pnl = Math.round(bi.val - bi.pa * bi.qty);
-    bi.pct = bi.pa * bi.qty > 0 ? bi.pnl / (bi.pa * bi.qty) : 0;
-    cryptoItems[0] = bi;
   }
   // Supprimer crypto à qty=0
   cryptoItems = cryptoItems.filter(x => x.qty > 0);
@@ -716,7 +726,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.11";
+const APP_VERSION = "v23.12";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

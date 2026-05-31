@@ -538,3 +538,19 @@ v23.11   PHASE 3 (positions 1/2) — Write-side : persister l'état après un tr
                  (savedAt=…) » + saveBase gdb_crypto/stocks/bank/portfolio KV OK ;
                  onglet Data → ces 4 bases reflètent le trade ; RELOAD en ligne →
                  le trade est toujours là dans le portefeuille.
+
+v23.12   FIX calcul — Achat/vente de crypto autre que BTC (applyTrade)
+         Bug (pré-existant) : le bloc crypto de applyTrade ne gérait QUE BTC.
+         Acheter ETH (ou toute crypto) ne créait/màj aucune position crypto ;
+         le trade semblait « ne rien mouvementer ».
+         • Bloc crypto généralisé : recherche par ticker dans crypto.items ;
+           achat existant → qty + PA pondéré ; achat nouveau → ajout avec
+           cat:"Crypto" (évite le mal-classement en "Picking"/stocks, piège v22) ;
+           vente → réduction qty. BTC inchangé (même résultat qu'avant).
+         • La contrepartie bancaire (déjà générique) décrémente alors correctement
+           le compte sélectionné + le Cash Matelas correspondant.
+         Vérifié hors-app : achat ETH+Kucoin → ETH ajouté & Kucoin débité ;
+         régression BTC OK (1→2, PA pondéré) ; vente partielle OK.
+         Vérif app : acheter une crypto ≠ BTC avec contrepartie banque → la ligne
+         crypto apparaît/augmente ET le compte bancaire diminue ; total ≈ inchangé
+         (cash converti en crypto). Persistance v23.11 inchangée.

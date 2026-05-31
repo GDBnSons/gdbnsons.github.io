@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.08";
+const APP_VERSION = "v23.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6583,7 +6583,7 @@ function App(){
       if(kv.gdb_cm)    setLiveCM(kv.gdb_cm);
       if(kv.gdb_sm)    setLiveSM(kv.gdb_sm);
       if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
-      if(kv.gdb_bench) setLiveBench(kv.gdb_bench);
+      if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
         // Merger : KV écrase les entrées existantes (KV = vérité cloud)
@@ -6698,10 +6698,28 @@ function App(){
             console.info("[dd] fusion DD="+mergedDD.length+" · GDBS="+mergedGDBS.length);
           } catch(e){ console.warn("[dd] réconciliation DD/GDBS échouée:", e && e.message); }
 
+          // Phase 3 v23.09 — GC / GSB / BENCH : même fusion par date (build ∪ miroir v9 ∪ KV).
+          try {
+            const mergedGC = unionSeriesByDate(unionSeriesByDate(GC_FULL, lsv9Get('gdb_gc')), kvGC);
+            setLiveGC(mergedGC); lsv9Set('gdb_gc', mergedGC);
+            const kvGCl=(kvGC&&kvGC.length)||0;
+            if(mergedGC.length>kvGCl){ saveBase('gdb_gc', mergedGC); console.info("[gc] re-push KV : "+(mergedGC.length-kvGCl)+" date(s)"); }
+
+            const mergedGSB = unionSeriesByDate(unionSeriesByDate(GS_B100_EXT, lsv9Get('gdb_gsb')), kvGSB);
+            setLiveGSB(mergedGSB); lsv9Set('gdb_gsb', mergedGSB);
+            const kvGSBl=(kvGSB&&kvGSB.length)||0;
+            if(mergedGSB.length>kvGSBl){ saveBase('gdb_gsb', mergedGSB); console.info("[gsb] re-push KV : "+(mergedGSB.length-kvGSBl)+" date(s)"); }
+
+            const kvBench = kvData.gdb_bench;
+            const mergedBench = unionSeriesByDate(unionSeriesByDate(BENCH_IDX, lsv9Get('gdb_bench')), kvBench);
+            setLiveBench(mergedBench); lsv9Set('gdb_bench', mergedBench);
+            const kvBl=(kvBench&&kvBench.length)||0;
+            if(mergedBench.length>kvBl){ saveBase('gdb_bench', mergedBench); console.info("[bench] re-push KV : "+(mergedBench.length-kvBl)+" date(s)"); }
+            console.info("[series] fusion GC="+mergedGC.length+" · GSB="+mergedGSB.length+" · BENCH="+mergedBench.length);
+          } catch(e){ console.warn("[series] réconciliation GC/GSB/BENCH échouée:", e && e.message); }
+
           if(kvIsNewer){
-            // Les autres séries restent en « remplacement si KV plus récent » (Phases 23.09/23.10)
-            if(kvGC)   setLiveGC(kvGC);
-            if(kvGSB)  setLiveGSB(kvGSB);
+            // Restent en « remplacement si KV plus récent » : monthly cm/sm/tm (v23.10)
             if(kvCM)   setLiveCM(kvCM);
             if(kvSM)   setLiveSM(kvSM);
             if(kvTM)   setLiveTM(kvTM);
@@ -7089,6 +7107,9 @@ function App(){
       saveBase('gdb_snapshots', next);   // Phase 3 — base canonique : miroir v9 local + KV gdb_snapshots
       saveBase('gdb_dd',   newDD);       // Phase 3 v23.08 — série DD : miroir v9 + KV + offline dirty
       saveBase('gdb_gdbs', newGDBS);     // Phase 3 v23.08 — série GDBS
+      saveBase('gdb_gc',   newGC);                          // Phase 3 v23.09
+      saveBase('gdb_gsb',  newGSB);                         // Phase 3 v23.09
+      saveBase('gdb_bench', newBench || liveBench || BENCH_IDX); // Phase 3 v23.09
       uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 

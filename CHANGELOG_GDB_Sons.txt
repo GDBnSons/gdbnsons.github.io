@@ -484,3 +484,18 @@ v23.08   PHASE 3 (séries 1/3) — gdb_dd + gdb_gdbs en fusion par date
                  snapshot → KV gdb_dd / gdb_gdbs mis à jour (onglet Data) ;
                  offline : snapshot → dirty → reload online → flush + fusion
                  → les deux séries se synchronisent.
+
+v23.09   PHASE 3 (séries 2/3) — gdb_gc + gdb_gsb + gdb_bench en fusion par date
+         Mêmes garanties que DD/GDBS (union par date, KV prioritaire, re-push
+         des dates local-only). Séries concernées : GC_FULL, GS_B100_EXT, BENCH_IDX.
+         • doSnapUpload câblé : saveBase('gdb_gc'/'gdb_gsb'/'gdb_bench') → miroir
+           v9 local + KV + offline dirty, en plus du batch existant.
+         • Boot (2e effet) : GC/GSB/BENCH = build ∪ miroir v9 ∪ KV ; retrait de
+           l'écrasement en bloc (setLiveGC(kvGC)/setLiveGSB(kvGSB)) du chemin kvIsNewer.
+         • Boot (1er effet) : bench passe de remplacement brut à _mergeArrays
+           (cohérent, ne perd plus les dates du build).
+         • Reste à traiter : monthly cm/sm/tm (objets par année, fusion différente) → v23.10.
+         Vérif : boot en ligne → console « [series] fusion GC=N · GSB=M · BENCH=P » ;
+                 snapshot → kv/gdb_gc, kv/gdb_gsb, kv/gdb_bench mis à jour ;
+                 offline snapshot → dirty → reload online → flush + fusion ;
+                 NON-RÉGRESSION : pages GDB / comparaison (courbes GC/GSB/BENCH) OK.

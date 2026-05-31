@@ -726,7 +726,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.12";
+const APP_VERSION = "v23.13";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3286,8 +3286,9 @@ function buildSections(L){
       totalEUR: Math.round(cryptoUSD * usdEur),
       pct: pct(cryptoUSD),
       items: src.crypto.items.map(x=>({
-        ticker: x.t, icon: TICKER_ICONS[x.t]||"₿", label:"Bitcoin",
-        detail: `${x.qty} BTC · $${x.live.toLocaleString("fr-FR")}`,
+        ticker: x.t, icon: TICKER_ICONS[x.t]||"₿",
+        label: ({BTC:"Bitcoin",ETH:"Ethereum",SOL:"Solana",DOGE:"Dogecoin",TAO:"Bittensor"}[x.t]) || x.t,
+        detail: `${x.qty} ${x.t} · $${(x.live||0).toLocaleString("fr-FR")}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
         pa: x.pa, live: x.live,

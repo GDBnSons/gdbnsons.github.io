@@ -554,3 +554,11 @@ v23.12   FIX calcul — Achat/vente de crypto autre que BTC (applyTrade)
          Vérif app : acheter une crypto ≠ BTC avec contrepartie banque → la ligne
          crypto apparaît/augmente ET le compte bancaire diminue ; total ≈ inchangé
          (cash converti en crypto). Persistance v23.11 inchangée.
+
+v23.13   FIX affichage — Nom des cryptos dans l'onglet Portfolio
+         Le libellé de chaque crypto était codé en dur "Bitcoin" (et l'unité "BTC")
+         dans la vue catégorie. → ETH s'affichait "Bitcoin".
+         • label dérivé du ticker ({BTC:Bitcoin, ETH:Ethereum, SOL, DOGE, TAO},
+           sinon le ticker) ; detail utilise l'unité réelle (x.t).
+         Données et persistance inchangées (le détail crypto affichait déjà BTC/ETH
+         correctement). Bug KuCoin (contrepartie) traité séparément en v23.14.

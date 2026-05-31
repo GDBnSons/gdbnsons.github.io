@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.10";
+const APP_VERSION = "v23.11";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7289,15 +7289,33 @@ function App(){
           totalUSD: newTotalUSD,
           totalEUR: newTotalEURtot,
           ...(newPortfolioItems ? {portfolio:{...base.portfolio, items:newPortfolioItems}} : {}),
+          savedAt: Date.now(),   // v23.11 — tampon : déclenche la persistance de l'état
         };
       }
       // Achat/Vente : applyTrade retourne un objet complet
       const updated = applyTrade(trade, base);
       // Recalculer GDB.C et GDB.S depuis les nouvelles valeurs
       const {gdbS, gdbC} = calcGdbPrices(updated);
-      return {...base, ...updated, gdbS, gdbC};
+      return {...base, ...updated, gdbS, gdbC, savedAt: Date.now()};   // v23.11 — tampon de persistance
     });
   },[]);
+
+  // v23.11 — Persistance de l'état du portefeuille après un trade (modèle « état matérialisé »).
+  // On NE rejoue PAS l'historique : on persiste l'état muté tel quel, tamponné par savedAt.
+  // L'effet ne persiste que quand savedAt change (= un trade) ; refresh/boot ne le déclenchent pas.
+  const _lastPersistedTrade = useRef(null);
+  useEffect(()=>{
+    const stamp = live && live.savedAt;
+    if(!stamp || _lastPersistedTrade.current === stamp) return;
+    _lastPersistedTrade.current = stamp;
+    try {
+      if(live.crypto)    saveBase('gdb_crypto',    {...live.crypto,    savedAt: stamp});
+      if(live.stocks)    saveBase('gdb_stocks',    {...live.stocks,    savedAt: stamp});
+      if(live.bank)      saveBase('gdb_bank',      {...live.bank,      savedAt: stamp});
+      if(live.portfolio) saveBase('gdb_portfolio', {...live.portfolio, savedAt: stamp, date: live.date});
+      console.info("[positions] état persisté après trade (savedAt="+stamp+")");
+    } catch(e){ console.warn("[positions] persistance échouée:", e && e.message); }
+  }, [live]);
 
   const delTxn=useCallback(async id=>{
     const next=txns.filter(t=>t.id!==id);setTxns(next);await save(SK.txns,next);

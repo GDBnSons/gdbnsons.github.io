@@ -519,3 +519,22 @@ v23.10   PHASE 3 (séries 3/3) — mensuelles gdb_cm / gdb_sm / gdb_tm
          Vérif : boot → console « [monthly] fusion CM/SM/TM (mois remplis : …) » ;
                  snapshot → kv/gdb_cm,gdb_sm,gdb_tm mis à jour ; NON-RÉGRESSION :
                  tableaux mensuels (PageData) + page Overview/Stats OK.
+
+v23.11   PHASE 3 (positions 1/2) — Write-side : persister l'état après un trade
+         Modèle « état matérialisé » (PAS de rejeu de l'historique des trades).
+         • applyTradeToEFF : les deux branches (achat/vente + dépôt/retrait)
+           tamponnent l'état résultant avec savedAt = Date.now(). Le CALCUL n'est
+           pas modifié (zone v22 préservée), on ajoute juste le tampon.
+         • Nouvel effet useEffect([live]) : quand savedAt change (= un trade), il
+           persiste les 4 bases de positions via saveBase — gdb_crypto, gdb_stocks,
+           gdb_bank, gdb_portfolio — chacune estampillée savedAt (miroir v9 + KV +
+           offline dirty). Refresh / boot ne déclenchent PAS la persistance.
+         ⚠ Read-side inchangé pour l'instant : le boot garde l'injection
+           « Portfolio KV plus récent ». En ligne, un trade poussé en KV est donc
+           déjà rechargé au reload. La réconciliation fine local↔KV par savedAt
+           (offline + récence robuste) arrive en v23.12.
+         Conseil : faire un snapshot avant de déployer (état KV de repli).
+         Vérif : faire un achat → console « [positions] état persisté après trade
+                 (savedAt=…) » + saveBase gdb_crypto/stocks/bank/portfolio KV OK ;
+                 onglet Data → ces 4 bases reflètent le trade ; RELOAD en ligne →
+                 le trade est toujours là dans le portefeuille.

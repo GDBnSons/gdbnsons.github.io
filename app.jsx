@@ -716,7 +716,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.09";
+const APP_VERSION = "v23.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -974,6 +974,30 @@ function unionSeriesByDate(a, b){
   (a||[]).forEach(function(r){ if(Array.isArray(r) && r[0]!=null) map.set(r[0], r); });
   (b||[]).forEach(function(r){ if(Array.isArray(r) && r[0]!=null) map.set(r[0], r); });
   return Array.from(map.values()).sort(function(x,y){ return (x[0]||"").localeCompare(y[0]||""); });
+}
+
+// Phase 3 (v23.10) — fusion des séries MENSUELLES (objets {année:{bom,eom,pnl,…}}).
+// Union par année ; pour une année présente des deux côtés, on garde la plus
+// COMPLÈTE (le plus de mois renseignés non-null) ; égalité → `b` (KV) prioritaire.
+function monthsFilled(yObj){
+  if(!yObj || typeof yObj!=="object") return 0;
+  const arr = yObj.eom || yObj.pnl || yObj.bom || [];
+  return (arr||[]).reduce(function(n,v){ return n + (v!=null?1:0); }, 0);
+}
+function totalFilled(obj){
+  if(!obj || typeof obj!=="object") return 0;
+  return Object.keys(obj).reduce(function(n,y){ return n + monthsFilled(obj[y]); }, 0);
+}
+function unionMonthlyByYear(a, b){
+  const out={};
+  const years=new Set([].concat(Object.keys(a||{}), Object.keys(b||{})));
+  years.forEach(function(y){
+    const ya=(a||{})[y], yb=(b||{})[y];
+    if(ya && !yb){ out[y]=ya; return; }
+    if(yb && !ya){ out[y]=yb; return; }
+    out[y] = (monthsFilled(yb) > monthsFilled(ya)) ? yb : (monthsFilled(ya) > monthsFilled(yb) ? ya : yb);
+  });
+  return out;
 }
 
 async function save(k, v){
@@ -6580,9 +6604,9 @@ function App(){
       if(kv.gdb_gdbs)  setLiveGDBS(_mergeArrays(GDBS, kv.gdb_gdbs));
       if(kv.gdb_gc)    setLiveGC(_mergeArrays(GC_FULL, kv.gdb_gc));
       if(kv.gdb_gsb)   setLiveGSB(_mergeArrays(GS_B100_EXT, kv.gdb_gsb));
-      if(kv.gdb_cm)    setLiveCM(kv.gdb_cm);
-      if(kv.gdb_sm)    setLiveSM(kv.gdb_sm);
-      if(kv.gdb_tm)    setLiveTM(kv.gdb_tm);
+      if(kv.gdb_cm)    setLiveCM(unionMonthlyByYear(CRYPTO_MONTHLY, kv.gdb_cm));
+      if(kv.gdb_sm)    setLiveSM(unionMonthlyByYear(STOCKS_MONTHLY, kv.gdb_sm));
+      if(kv.gdb_tm)    setLiveTM(unionMonthlyByYear(TOTAL_MONTHLY, kv.gdb_tm));
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
@@ -6718,15 +6742,23 @@ function App(){
             console.info("[series] fusion GC="+mergedGC.length+" · GSB="+mergedGSB.length+" · BENCH="+mergedBench.length);
           } catch(e){ console.warn("[series] réconciliation GC/GSB/BENCH échouée:", e && e.message); }
 
-          if(kvIsNewer){
-            // Restent en « remplacement si KV plus récent » : monthly cm/sm/tm (v23.10)
-            if(kvCM)   setLiveCM(kvCM);
-            if(kvSM)   setLiveSM(kvSM);
-            if(kvTM)   setLiveTM(kvTM);
-            console.info("Bases KV chargées ("+kvLastDate+" > "+buildLastDate+")");
-          } else {
-            console.info("Build plus récent que KV ("+buildLastDate+" >= "+kvLastDate+") — bases locales conservées");
-          }
+          // Phase 3 v23.10 — mensuelles CM/SM/TM : union par année (build ∪ miroir v9 ∪ KV).
+          try {
+            const recM = function(buildC, lsKey, kvVal){
+              const merged = unionMonthlyByYear(unionMonthlyByYear(buildC, lsv9Get(lsKey)), kvVal);
+              lsv9Set(lsKey, merged);
+              if(totalFilled(merged) > totalFilled(kvVal)){ saveBase(lsKey, merged); }
+              return merged;
+            };
+            const mCM = recM(CRYPTO_MONTHLY, 'gdb_cm', kvCM); setLiveCM(mCM);
+            const mSM = recM(STOCKS_MONTHLY, 'gdb_sm', kvSM); setLiveSM(mSM);
+            const mTM = recM(TOTAL_MONTHLY,  'gdb_tm', kvTM); setLiveTM(mTM);
+            console.info("[monthly] fusion CM/SM/TM (mois remplis : "+totalFilled(mCM)+"/"+totalFilled(mSM)+"/"+totalFilled(mTM)+")");
+          } catch(e){ console.warn("[monthly] réconciliation CM/SM/TM échouée:", e && e.message); }
+
+          // Diagnostic récence (plus aucune série n'est remplacée en bloc ici)
+          if(kvIsNewer) console.info("Bases KV plus récentes ("+kvLastDate+" > "+buildLastDate+")");
+          else          console.info("Build plus récent que KV ("+buildLastDate+" >= "+kvLastDate+")");
 
           // YF_MAP : toujours merger (nouveaux tickers ajoutés par l'utilisateur)
           if(kvYF && typeof kvYF === "object"){
@@ -7110,6 +7142,9 @@ function App(){
       saveBase('gdb_gc',   newGC);                          // Phase 3 v23.09
       saveBase('gdb_gsb',  newGSB);                         // Phase 3 v23.09
       saveBase('gdb_bench', newBench || liveBench || BENCH_IDX); // Phase 3 v23.09
+      saveBase('gdb_cm', newCM);   // Phase 3 v23.10 — mensuelles
+      saveBase('gdb_sm', newSM);   // Phase 3 v23.10
+      saveBase('gdb_tm', newTM);   // Phase 3 v23.10
       uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 

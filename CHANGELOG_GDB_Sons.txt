@@ -499,3 +499,23 @@ v23.09   PHASE 3 (séries 2/3) — gdb_gc + gdb_gsb + gdb_bench en fusion par da
                  snapshot → kv/gdb_gc, kv/gdb_gsb, kv/gdb_bench mis à jour ;
                  offline snapshot → dirty → reload online → flush + fusion ;
                  NON-RÉGRESSION : pages GDB / comparaison (courbes GC/GSB/BENCH) OK.
+
+v23.10   PHASE 3 (séries 3/3) — mensuelles gdb_cm / gdb_sm / gdb_tm
+         Objets {année:{bom,eom,pct,pnl,inv,m,…}} recalculés en entier à chaque
+         snapshot. Fusion adaptée (pas une fusion par date) :
+         • unionMonthlyByYear : union des années ; pour une année des deux côtés,
+           on garde la PLUS COMPLÈTE (le plus de mois non-null) ; égalité → KV.
+           + helpers monthsFilled / totalFilled.
+         • doSnapUpload câblé : saveBase('gdb_cm'/'gdb_sm'/'gdb_tm') (miroir v9 +
+           KV + offline dirty).
+         • Boot : 1er effet → merge par année (au lieu de remplacement brut) ;
+           2e effet → union complète build ∪ miroir v9 ∪ KV + re-push si le local
+           est plus complet. Retrait du dernier remplacement-en-bloc (kvIsNewer ne
+           fait plus que logguer la récence).
+         → FIN des séries : DD, GDBS, GC, GSB, BENCH, snapshots, txns, CM/SM/TM
+           sont désormais tous persistés local+cloud avec fusion sans perte.
+         Reste : positions/portefeuille + application des trades (zone de calcul,
+         traitée en dernier avec filet).
+         Vérif : boot → console « [monthly] fusion CM/SM/TM (mois remplis : …) » ;
+                 snapshot → kv/gdb_cm,gdb_sm,gdb_tm mis à jour ; NON-RÉGRESSION :
+                 tableaux mensuels (PageData) + page Overview/Stats OK.

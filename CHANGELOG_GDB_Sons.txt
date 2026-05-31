@@ -590,3 +590,21 @@ v23.15   FIX — Contrepartie Cash Dip (KuCoin) : montant correct + découvert a
          tous le négatif (aucun clamp dans les chemins de trade).
          Vérifié hors-app : achat 2 ETH @2000$ via KuCoin → KUCOIN 0$ → -4000$
          (stocks + portfolio), valEUR -3440.
+
+v23.16   PHASE 3 (positions 2/2) — Read-side : injection de l'état le plus récent
+         Au boot, les positions sont injectées depuis la source la PLUS RÉCENTE
+         entre le miroir local v9 et KV, par savedAt (estampillé à chaque trade).
+         • Sélection : localFresher = (savedAt local > KV) ET 4 bases locales
+           présentes → injecte local ; sinon KV. Égalité → KV. Modèle "état
+           matérialisé", injection EN BLOC, AUCUN rejeu de l'historique des trades.
+         • Condition d'injection inchangée (date portefeuille > build) → pas de
+           régression sur les chargements legacy/snapshot.
+         • savedAt retiré de l'état injecté pour ne pas re-déclencher la
+           persistance write-side (pas de boucle).
+         → FIN du chantier bases : txns, snapshots, séries (dd/gdbs/gc/gsb/bench),
+           mensuelles (cm/sm/tm) ET positions (crypto/stocks/bank/portfolio) sont
+           tous persistés local+cloud avec réconciliation sans perte / par récence.
+         Vérifié : sélection local/KV correcte (offline→local, online→KV, égalité→KV,
+         local incomplet→KV). Reste hors-bases : bug du module VENTE (à traiter).
+         Vérif app : trade → reload en ligne → trade conservé ; console
+         « [positions] injection KV|LOCAL v9 (savedAt …) ».

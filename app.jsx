@@ -744,7 +744,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.15";
+const APP_VERSION = "v23.16";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6796,34 +6796,43 @@ function App(){
             Object.assign(YF_MAP, kvYF);
           }
 
-          // Portfolio KV : injecter dans live si disponible et plus récent que le build
-          if(kvPort && kvCryp && kvStk && kvBank){
-            const kvPortDate = kvPort.date || null;
+          // Portfolio : injecter l'état matérialisé le plus RÉCENT entre local (miroir v9) et KV.
+          // v23.16 — read-side "état matérialisé" : récence par savedAt (estampillé à chaque trade),
+          // injection EN BLOC (pas de fusion champ par champ), aucun rejeu de l'historique.
+          const lCryp=lsv9Get('gdb_crypto'), lStk=lsv9Get('gdb_stocks'), lBank=lsv9Get('gdb_bank'), lPort=lsv9Get('gdb_portfolio');
+          const localSavedAt = Math.max((lCryp&&lCryp.savedAt)||0,(lStk&&lStk.savedAt)||0,(lBank&&lBank.savedAt)||0,(lPort&&lPort.savedAt)||0);
+          const kvSavedAt    = Math.max((kvCryp&&kvCryp.savedAt)||0,(kvStk&&kvStk.savedAt)||0,(kvBank&&kvBank.savedAt)||0,(kvPort&&kvPort.savedAt)||0);
+          const localFresher = localSavedAt > kvSavedAt && lPort && lCryp && lStk && lBank;
+          const pCryp = localFresher ? lCryp : kvCryp;
+          const pStk  = localFresher ? lStk  : kvStk;
+          const pBank = localFresher ? lBank : kvBank;
+          const pPort = localFresher ? lPort : kvPort;
+          if(pPort && pCryp && pStk && pBank){
+            const pPortDate = pPort.date || null;
             const buildDate  = CURRENT.date || DD[DD.length-1]?.[0];
-            if(kvPortDate && kvPortDate > buildDate){
-              console.info("Portfolio KV plus récent ("+kvPortDate+") — injection dans live");
-              const usdEur  = kvBank.totalEUR && kvStk.total && kvCryp.total
-                ? (CURRENT.usdEur) : CURRENT.usdEur;
+            if(pPortDate && pPortDate > buildDate){
+              console.info("[positions] injection "+(localFresher?"LOCAL v9":"KV")+" (savedAt local="+localSavedAt+" / KV="+kvSavedAt+", date="+pPortDate+")");
+              const usdEur  = CURRENT.usdEur;
               const eurUsd  = 1/usdEur;
-              const bankUSD = Math.round((kvBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
-              const cryptoT = kvCryp.total || kvCryp.items.reduce((s,x)=>s+(x.val||0),0);
-              const stocksT = kvStk.total  || kvStk.items.reduce((s,x)=>s+(x.val||0),0);
+              const bankUSD = Math.round((pBank.totalEUR||CURRENT.bank.totalEUR)*eurUsd);
+              const cryptoT = pCryp.total || pCryp.items.reduce((s,x)=>s+(x.val||0),0);
+              const stocksT = pStk.total  || pStk.items.reduce((s,x)=>s+(x.val||0),0);
               const totalUSD = cryptoT + stocksT + bankUSD;
               const totalEUR = Math.round(totalUSD * usdEur);
-              const newLiveFromKV = {
+              const newLivePos = {
                 ...CURRENT,
-                date:     kvPortDate,
+                date:     pPortDate,
                 totalUSD, totalEUR, usdEur, eurUsd,
-                crypto:   {...CURRENT.crypto, ...kvCryp, date: kvPortDate},
-                stocks:   {...CURRENT.stocks, ...kvStk,  date: kvPortDate},
-                bank:     {...CURRENT.bank,   ...kvBank, date: kvPortDate},
-                portfolio:{...kvPort},
-                _fromSnapshot: kvPortDate,
+                crypto:   {...CURRENT.crypto, ...pCryp, date: pPortDate},
+                stocks:   {...CURRENT.stocks, ...pStk,  date: pPortDate},
+                bank:     {...CURRENT.bank,   ...pBank, date: pPortDate},
+                portfolio:{...pPort},
+                _fromSnapshot: pPortDate,
               };
-              // Recalculer GDB.C et GDB.S depuis les nouvelles positions
-              const {gdbS: kgS, gdbC: kgC} = calcGdbPrices(newLiveFromKV);
-              setLive({...newLiveFromKV, gdbS: kgS, gdbC: kgC});
-              setRefreshedAt("snapshot "+kvPortDate);
+              delete newLivePos.savedAt;   // ne pas re-déclencher la persistance write-side
+              const {gdbS: kgS, gdbC: kgC} = calcGdbPrices(newLivePos);
+              setLive({...newLivePos, gdbS: kgS, gdbC: kgC});
+              setRefreshedAt(localFresher ? "local v9" : ("snapshot "+pPortDate));
             }
           }
         }

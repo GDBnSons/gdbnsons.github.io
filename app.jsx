@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.25";
+const APP_VERSION = "v23.26";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2474,7 +2474,10 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   const src = EFF||CURRENT;
 
   // Valeurs live depuis EFF (ou CURRENT si pas encore refreshé)
-  const {gdbC: gcLive, gdbS: gsLive} = calcGdbPrices(src);
+  // v23.25 — point "aujourd'hui" du chart : lire EFF.gdbS/gdbC (valeur officielle posée
+  // au boot/refresh/trade) et non calcGdbPrices(src) qui recalcule sur prix périmés.
+  const gcLive = src.gdbC || calcGdbPrices(src).gdbC;
+  const gsLive = src.gdbS || calcGdbPrices(src).gdbS;
   const portTodayEUR = src.totalEUR;
   const portTodayUSD = src.totalUSD;
   const portToday = eur ? portTodayEUR : portTodayUSD;
@@ -2842,7 +2845,10 @@ function PerfStrip({eur, EFF}){
   };
   // GDB prices depuis _GDBS
   const _gdbs26 = _GDBS.filter(r=>r[0]>='2026-01-01');
-  const {gdbS: _gsT, gdbC: _gcT} = calcGdbPrices(EFF||CURRENT);
+  // v23.25 — lire EFF.gdbS/gdbC (valeur officielle posée au boot/refresh/trade),
+  // PAS calcGdbPrices(EFF) qui recalcule sur des prix périmés au boot local.
+  const _gsT = (EFF||CURRENT).gdbS || CURRENT.gdbS;
+  const _gcT = (EFF||CURRENT).gdbC || CURRENT.gdbC;
   const gcPrice = eur ? (_gcT * (EFF||CURRENT).usdEur).toFixed(2) : _gcT.toFixed(2);
   const gsPrice = eur ? (_gsT * (EFF||CURRENT).usdEur).toFixed(2) : _gsT.toFixed(2);
   const gcCur = eur ? "€" : "$";
@@ -3469,7 +3475,9 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
   const inv = 94064 * (EFF||CURRENT).usdEur;
   const gcCur = eur ? "€" : "$";
   // GDB prices depuis GDBS (dernier point non-null) — cohérent avec onglet GDB
-  const {gdbS: _gsTov, gdbC: _gcTov} = calcGdbPrices(EFF||CURRENT);
+  // v23.25 — lire EFF.gdbS/gdbC (valeur officielle), pas calcGdbPrices(EFF)
+  const _gsTov = (EFF||CURRENT).gdbS || CURRENT.gdbS;
+  const _gcTov = (EFF||CURRENT).gdbC || CURRENT.gdbC;
   const gcPrice = eur ? (_gcTov * (EFF||CURRENT).usdEur).toFixed(2) : _gcTov.toFixed(2);
   const gsPrice = eur ? (_gsTov * (EFF||CURRENT).usdEur).toFixed(2) : _gsTov.toFixed(2);
 
@@ -3673,8 +3681,8 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           const ds=t.toISOString().slice(0,10);
           return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[5]?r:null),null);
         };
-        const _gcNow2 = calcGdbPrices(_ov_src).gdbC;
-        const _gsNow2 = calcGdbPrices(_ov_src).gdbS;
+        const _gcNow2 = _ov_src.gdbC || calcGdbPrices(_ov_src).gdbC;
+        const _gsNow2 = _ov_src.gdbS || calcGdbPrices(_ov_src).gdbS;
         const _gcPerf = d => {
           const r=_ov_gdbsAt(d); if(!r||!r[2]) return null;
           if(eur){ const dd=_ov_ddAt(d); const ref=dd?dd[5]:usdEurNow2; return parseFloat(((_gcNow2*usdEurNow2)/(r[2]*ref)-1).toFixed(4)); }
@@ -4166,7 +4174,11 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
       const curMI2  = nowNC2.getMonth();
       const curMonLabel = MONTHS_FR_LOCAL[curMI2];
       const existingM   = result.m || [];
-      const monthExists = existingM.includes(curMonLabel);
+      // v23.26 — le mois "existe déjà" s'il a un BOM réel posé (ligne créée),
+      // PAS si son label figure dans m[] (qui contient toujours les 12 mois →
+      // includes() était toujours vrai → on tombait dans la branche update qui
+      // ne pose jamais le BOM, d'où BOM/P&L/% vides au changement de mois).
+      const monthExists = result.bom?.[curMI2] != null;
       if(!monthExists && eomVal){
         const prevEOM = [...(result.eom||[])].filter(v=>v!=null).slice(-1)[0] || eomVal;
         const inv     = result.inv?.[curMI2] || 0;
@@ -4211,6 +4223,13 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
             .reduce((s, x) => s + (x.val || 0), 0) * usdEur
         ) : null;
         _applyLiveEOM(liveEUR);
+      }
+      if(category==="total"){
+        // v23.26 — Total = valeur live du portefeuille total en € (crypto + stocks + banque)
+        const liveEUR = EFF ? Math.round(EFF.totalEUR || (EFF.totalUSD||0) * (src?.usdEur || 0.86)) : null;
+        const ddRows  = _DD_ST.filter(r=>r[0]&&r[0].startsWith(curYYMM)&&r[2]!=null);
+        const ddEUR   = ddRows.length ? ddRows[ddRows.length-1][2] : null;
+        _applyLiveEOM(liveEUR || ddEUR);
       }
     }
     return result;

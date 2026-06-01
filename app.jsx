@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.23";
+const APP_VERSION = "v23.24";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6627,6 +6627,16 @@ function App(){
         gdbS: lastGDBSRow?.[1] || CURRENT.gdbS,
         gdbC: lastGDBSRow?.[2] || CURRENT.gdbC,
       }));
+      // v23.24 — aligner live.gdbS/gdbC sur la base GDBS locale fraîche.
+      // Sans ça, le dernier point du chart utilise live.gdbS/gdbC = build figé
+      // alors que la base GDBS locale (lsv9) a les vraies valeurs du snapshot.
+      if(lastGDBSRow){
+        setLive(prev => prev ? {
+          ...prev,
+          gdbS: lastGDBSRow[1] || prev.gdbS,
+          gdbC: lastGDBSRow[2] || prev.gdbC,
+        } : prev);
+      }
       try {
         const res=await fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(8000)});
         if(res.ok){

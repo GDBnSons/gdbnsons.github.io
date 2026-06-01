@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.24";
+const APP_VERSION = "v23.24b";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6878,7 +6878,15 @@ function App(){
               };
               delete newLivePos.savedAt;   // ne pas re-déclencher la persistance write-side
               const {gdbS: kgS, gdbC: kgC} = calcGdbPrices(newLivePos);
-              setLive({...newLivePos, gdbS: kgS, gdbC: kgC});
+              // v23.24 — au boot sans refresh, les positions injectées ont des prix
+              // périmés (dernier trade, pas les prix Yahoo actuels) → calcGdbPrices
+              // donnerait des valeurs erronées. On préfère la base GDBS locale
+              // (dernier snapshot validé). Le refresh recalculera avec les vrais prix.
+              const _injGDBS  = lsv9Get('gdb_gdbs');
+              const _injLastG = _injGDBS && _injGDBS.length>0 ? _injGDBS[_injGDBS.length-1] : null;
+              const gdbSFinal = (_injLastG && _injLastG[1]) || kgS;
+              const gdbCFinal = (_injLastG && _injLastG[2]) || kgC;
+              setLive({...newLivePos, gdbS: gdbSFinal, gdbC: gdbCFinal});
               setRefreshedAt(localFresher ? "local v9" : ("snapshot "+pPortDate));
             }
           }

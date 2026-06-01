@@ -92,14 +92,19 @@ function makeTFCuts(){
 const GDB_S_NB_PARTS = 11942;  // col AK onglet Chart
 const GDB_C_NB_PARTS = 5610;   // col P onglet Chart
 function calcGdbPrices(src){
-  // GDB.S = Indices + Picking + Or + Cash plateforme (EURO/USD/STRC)
-  // → tout sauf KuCoin (absent du portfolio, val=0)
+  // v23.21 — KuCoin appartient au fonds GDB.C (et non GDB.S). Un transfert
+  // crypto→KuCoin (vente crypto, contrepartie KuCoin) reste interne à GDB.C
+  // → n'impacte NI GDB.C NI GDB.S.
+  const kucoinUSD = (src.stocks.items.find(x=>x.t==="KUCOIN")?.val) || 0;
+  // GDB.S = tous les stocks SAUF KuCoin (Indices + Picking + Or + Cash EURO/USD/STRC)
   const gdbSfondsUSD = src.stocks.items
-    .reduce((s,x)=>s+x.val, 0);  // tous les stocks incl. Cash (EURO+USD+STRC)
+    .filter(x=>x.t!=="KUCOIN")
+    .reduce((s,x)=>s+x.val, 0);
   const gdbS = parseFloat((gdbSfondsUSD / GDB_S_NB_PARTS).toFixed(4));
-  // GDB.C = crypto (BTC) + KuCoin (0$)
-  const gdbC = parseFloat((src.crypto.total / GDB_C_NB_PARTS).toFixed(4));
-  return {gdbS, gdbC, gdbSfondsUSD};
+  // GDB.C = crypto + KuCoin
+  const gdbCfondsUSD = src.crypto.total + kucoinUSD;
+  const gdbC = parseFloat((gdbCfondsUSD / GDB_C_NB_PARTS).toFixed(4));
+  return {gdbS, gdbC, gdbSfondsUSD, gdbCfondsUSD};
 }
 const CHART_MONTHLY=[
   {d:"2020-03",w:12965,t:null,btc:6403,gc:null,gs:null,pnl:0,inv:13000},
@@ -745,7 +750,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.20";
+const APP_VERSION = "v23.21";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4845,9 +4850,9 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liv
 
   const gsYTD = gsPerf(dytd);
 
-  const {gdbS: gcS_calc, gdbC: gcC_calc, gdbSfondsUSD} = calcGdbPrices(src);
+  const {gdbS: gcS_calc, gdbC: gcC_calc, gdbSfondsUSD, gdbCfondsUSD} = calcGdbPrices(src);
   const gcQty   = GDB_C_NB_PARTS;
-  const gcFonds = Math.round(src.crypto.total);
+  const gcFonds = Math.round(gdbCfondsUSD != null ? gdbCfondsUSD : src.crypto.total);
   const gsQty   = GDB_S_NB_PARTS;
   const gsFonds = Math.round(gdbSfondsUSD || (src.stocks.items.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+x.val,0) + (src.stocks.items.find(x=>x.t==="EURO")?.val||0)));
 

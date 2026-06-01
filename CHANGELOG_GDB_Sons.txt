@@ -663,3 +663,16 @@ v23.20   LOT 4 — Module Vente : catégorie correcte + décrément/suppression 
            ligne supprimée de crypto.items ET portfolio.items.
          Vérifié hors-app : vente partielle/totale ETH (suppression des deux côtés),
          parité stocks (AAPL), non-régression achat BTC, contrepartie bancaire OK.
+
+v23.21   FIX calcul — KuCoin rattaché au fonds GDB.C (et non GDB.S)
+         calcGdbPrices comptait KuCoin dans GDB.S (somme de tous les stocks.items,
+         KUCOIN inclus) et l'excluait de GDB.C (crypto.total seul). Avec KuCoin
+         désormais mouvementable, une vente crypto→KuCoin (transfert interne GDB.C)
+         faisait baisser GDB.C et monter GDB.S à tort — visible sur les cours live,
+         le chart, et figé dans la base GDBS au snapshot suivant.
+         • GDB.S = stocks.items SAUF KUCOIN. GDB.C = crypto.total + KUCOIN.val.
+         • calcGdbPrices renvoie aussi gdbCfondsUSD ; gcFonds (détail) l'utilise.
+         Source unique : corrige live + snapshot + chart d'un coup.
+         Vérifié hors-app : vente crypto→KuCoin → ΔGDB.C = 0 ET ΔGDB.S = 0 ;
+         vente action→IBKR → ΔGDB.C = 0 (crypto intacte).
+         NB : décale le plan — Lot 5 → v23.22, Lot 6 → v23.23, Lot 7 → v23.24.

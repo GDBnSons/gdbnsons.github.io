@@ -744,7 +744,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.17";
+const APP_VERSION = "v23.18";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6466,12 +6466,19 @@ function App(){
   const[chosenSource,setChosenSource]=useState("local"); // "local" | "cloudflare"
   // localData initialisé avec liveDD (peut inclure des snapshots précédents)
   const[localData,setLocalData]=useState(()=>{
-    const _dd = DD;
+    // v23.18 — refléter les données LOCALES fraîches (miroir v9) plutôt que le build figé.
+    let _dd = DD, _gdbs = GDBS;
+    try{
+      const lvDD = lsv9Get('gdb_dd'); const lvGB = lsv9Get('gdb_gdbs');
+      if(Array.isArray(lvDD) && lvDD.length) _dd = lvDD;
+      if(Array.isArray(lvGB) && lvGB.length) _gdbs = lvGB;
+    }catch(e){}
     const lastRow = _dd.length>0 ? _dd[_dd.length-1] : null;
     const lastDate = lastRow ? lastRow[0] : CURRENT.date;
-    const totalEUR = lastRow && lastRow[0] > CURRENT.date ? lastRow[2] : CURRENT.totalEUR;
-    const totalUSD = lastRow && lastRow[0] > CURRENT.date ? Math.round(totalEUR / (lastRow[5]||CURRENT.usdEur)) : CURRENT.totalUSD;
-    const lastGDBS = GDBS.length>0 ? GDBS[GDBS.length-1] : null;
+    const fresher = lastRow && lastRow[0] > CURRENT.date;
+    const totalEUR = fresher ? lastRow[2] : CURRENT.totalEUR;
+    const totalUSD = fresher ? Math.round(totalEUR / (lastRow[5]||CURRENT.usdEur)) : CURRENT.totalUSD;
+    const lastGDBS = _gdbs.length>0 ? _gdbs[_gdbs.length-1] : null;
     return {
       totalUSD, totalEUR,
       date: lastDate,
@@ -6592,13 +6599,20 @@ function App(){
     (async()=>{
       // Phase 1 v23.01 — migration unique v8→v9 (idempotente, sans effet visible)
       migrateV8toV9();
-      // Date locale = dernière ligne de liveDD (plus récente que CURRENT.date si snapshots précédents)
-      const _localDD = liveDD || DD;
-      const localLastDate = _localDD.length>0 ? _localDD[_localDD.length-1][0] : CURRENT.date;
-      const localLastGDBS = (liveGDBS||GDBS);
+      // v23.18 — données LOCALES fraîches depuis le miroir v9 (gdb_dd/gdb_gdbs),
+      // et non le build figé ni liveDD (encore au build à ce stade). Total inclus.
+      const _localDD   = (lsv9Get('gdb_dd')   && lsv9Get('gdb_dd').length)   ? lsv9Get('gdb_dd')   : (liveDD||DD);
+      const localLastGDBS = (lsv9Get('gdb_gdbs') && lsv9Get('gdb_gdbs').length) ? lsv9Get('gdb_gdbs') : (liveGDBS||GDBS);
+      const _lastDD    = _localDD.length>0 ? _localDD[_localDD.length-1] : null;
+      const localLastDate = _lastDD ? _lastDD[0] : CURRENT.date;
       const lastGDBSRow = localLastGDBS.length>0 ? localLastGDBS[localLastGDBS.length-1] : null;
+      const _fresher  = _lastDD && _lastDD[0] > CURRENT.date;
+      const lTotalEUR = _fresher ? _lastDD[2] : CURRENT.totalEUR;
+      const lTotalUSD = _fresher ? Math.round(lTotalEUR / (_lastDD[5]||CURRENT.usdEur)) : CURRENT.totalUSD;
       setLocalData(prev=>({
         ...prev,
+        totalUSD: lTotalUSD,
+        totalEUR: lTotalEUR,
         date: localLastDate,
         gdbS: lastGDBSRow?.[1] || CURRENT.gdbS,
         gdbC: lastGDBSRow?.[2] || CURRENT.gdbC,

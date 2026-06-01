@@ -619,3 +619,14 @@ v23.17   LOT 1 — Affichages (3 corrections, aucune logique de calcul touchée)
            les tableaux d'objets.
          • Onglet Data / vue locale : passe de 5 à 100 lignes affichées, avec
            en-tête dynamique "{affichées} / {total} lignes".
+
+v23.18   LOT 2 — Écran de démarrage : carte "Base locale" reflète les données fraîches
+         Avant : la carte locale lisait les constantes build (DD/GDBS figées au
+         17 mai) → total/date du build, jamais à jour, divergence avec la carte KV.
+         • localData (useState initial ET effet de préchargement) lit désormais le
+           MIROIR v9 : lsv9Get('gdb_dd') / lsv9Get('gdb_gdbs') (fallback build).
+         • Le TOTAL (€/$) est aussi mis à jour (l'effet ne mettait à jour que
+           date/GDB.S/GDB.C avant) → la carte locale affiche le dernier snapshot local.
+         Résultat : après un snapshot, la carte "Base locale" et la carte
+         "Cloudflare KV" affichent la même date et les mêmes totaux.
+         Aucune logique de calcul/trade touchée.

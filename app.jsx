@@ -744,7 +744,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.18";
+const APP_VERSION = "v23.19";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7212,7 +7212,13 @@ function App(){
       saveBase('gdb_cm', newCM);   // Phase 3 v23.10 — mensuelles
       saveBase('gdb_sm', newSM);   // Phase 3 v23.10
       saveBase('gdb_tm', newTM);   // Phase 3 v23.10
-      uploadLog.push("✓ Snapshots journaliers ("+next.length+" points)");
+      // v23.19 — positions aussi en local-first (miroir v9 + cloud best-effort)
+      const _srcPos = EFF || CURRENT;
+      saveBase('gdb_portfolio', _srcPos.portfolio || CURRENT.portfolio);
+      saveBase('gdb_crypto',    _srcPos.crypto    || CURRENT.crypto);
+      saveBase('gdb_stocks',    _srcPos.stocks    || CURRENT.stocks);
+      saveBase('gdb_bank',      _srcPos.bank      || CURRENT.bank);
+      uploadLog.push("✓ Bases locales enregistrées — snapshots, séries, positions ("+next.length+" points)");
     } catch(e){ uploadErrors.push("✗ Snapshots : "+e.message); }
 
     // 2+3. Sauvegarder toutes les bases en un seul appel /write-bases (avec retry)
@@ -7304,6 +7310,17 @@ function App(){
 
     setSnapResult(prev=>({...prev, pendingUpload:false, uploadLog, uploadErrors, uploadDone:true}));
   },[snapResult, txns, EFF]);
+
+  // v23.19 — Snapshot unifié : dès qu'un snapshot est calculé (addSnap → pendingUpload),
+  // on persiste en local ET on tente le cloud automatiquement, en une seule action.
+  // Le local réussit toujours ; seul l'envoi cloud peut figurer en erreur (offline).
+  const _snapAutoRef = useRef(null);
+  useEffect(()=>{
+    if(snapResult && snapResult.pendingUpload && !snapResult.uploadDone && _snapAutoRef.current !== snapResult){
+      _snapAutoRef.current = snapResult;
+      doSnapUpload();
+    }
+  }, [snapResult, doSnapUpload]);
 
   const addTxn=useCallback(async t=>{
     const next=[t,...txns];setTxns(next);
@@ -7709,7 +7726,7 @@ function App(){
             {/* ── Cloudflare KV ── */}
             {snapResult.uploadDone ? (
               <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
-                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>☁️ Cloudflare KV</div>
+                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>💾 Enregistrement (local + cloud)</div>
                 {(snapResult.uploadLog||[]).map((l,i)=>(
                   <div key={i} style={{fontSize:11,color:l.startsWith("✓")?C.green:C.red,fontFamily:"monospace",marginBottom:3}}>{l}</div>
                 ))}
@@ -7719,24 +7736,18 @@ function App(){
               </div>
             ) : snapResult.pendingUpload ? (
               <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
-                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>☁️ Cloudflare KV</div>
-                <div style={{fontSize:11,color:C.gray}}>En attente d'envoi…</div>
+                <div style={{fontSize:10,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>💾 Enregistrement</div>
+                <div style={{fontSize:11,color:C.gray}}>Enregistré en local — envoi cloud en cours…</div>
               </div>
             ) : null}
 
             {/* Boutons */}
             {snapResult.pendingUpload&&!snapResult.uploadDone&&(
-              <button onClick={doSnapUpload} style={{
-                width:"100%",padding:"12px 0",borderRadius:10,marginBottom:8,
-                background:C.green,border:"none",color:"#000",fontSize:13,fontWeight:800,cursor:"pointer",
-              }}>☁︎ Envoyer sur Cloudflare</button>
-            )}
-            {snapResult.pendingUpload&&!snapResult.uploadDone&&(
               <button onClick={()=>setSnapResult(null)} style={{
                 width:"100%",padding:"10px 0",borderRadius:10,
                 background:"transparent",border:`1px solid ${C.border}`,
                 color:C.gray,fontSize:12,cursor:"pointer",
-              }}>Ignorer — fermer</button>
+              }}>Fermer</button>
             )}
             {snapResult.uploadDone&&(
               <button onClick={()=>setSnapResult(null)} style={{

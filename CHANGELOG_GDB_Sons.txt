@@ -647,3 +647,19 @@ v23.19   LOT 3 — Snapshot unifié (une seule action : local immédiat + cloud 
            « Enregistré en local — envoi cloud en cours… ».
          Résultat : offline → snapshot enregistré localement + erreur uniquement
          sur la ligne cloud, comme demandé.
+
+v23.20   LOT 4 — Module Vente : catégorie correcte + décrément/suppression crypto
+         Cause commune : le sélecteur de VENTE ne définissait pas form.cat (resté
+         "Picking" par défaut). → txn mal catégorisée ET applyTrade ne routait pas
+         les ventes crypto (isCryptoTrade testait cat==="Crypto" ; seul BTC passait
+         via le fallback ticker).
+         • Catégorie : dérivée de l'actif vendu au submit (resolvedCat depuis
+           portfolio.items) + le sélecteur de vente fixe aussi form.cat (cohérence UI).
+           → les ventes sont enregistrées dans la bonne catégorie (point 5).
+         • Décrément crypto + suppression à qty 0 (point 6) : le filtre crypto
+           (qty>0) passait AVANT le calcul de zeroTickers → une crypto soldée n'était
+           pas retirée de portfolio.items. Filtre déplacé APRÈS zeroTickers, comme
+           pour les stocks. Désormais : vente partielle → décrément ; vente totale →
+           ligne supprimée de crypto.items ET portfolio.items.
+         Vérifié hors-app : vente partielle/totale ETH (suppression des deux côtés),
+         parité stocks (AAPL), non-régression achat BTC, contrepartie bancaire OK.

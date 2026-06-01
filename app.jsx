@@ -478,8 +478,6 @@ function applyTrade(trade, currentEFF){
       });
     }
   }
-  // Supprimer crypto à qty=0
-  cryptoItems = cryptoItems.filter(x => x.qty > 0);
   /* ── Mise à jour contrepartie bancaire ── */
   let bank = {...src.bank, breakdown: {...src.bank.breakdown}};
   if(bankAccount && bankAccount !== "Aucune"){
@@ -555,6 +553,9 @@ function applyTrade(trade, currentEFF){
     ...cryptoItems.filter(x=>x.qty<=0).map(x=>x.t),
   ]);
   stocksItems = stocksItems.filter(x => x.cat==="Cash" || x.qty > 0);
+  // v23.20 — filtre crypto APRÈS zeroTickers (symétrie avec les stocks) : ainsi une crypto
+  // soldée (qty 0) est bien captée dans zeroTickers et retirée de portfolio.items.
+  cryptoItems = cryptoItems.filter(x => x.qty > 0);
 
   /* ── Ajout du nouveau ticker dans YF_MAP si achat nouveau ticker ── */
   if(isBuy && idx < 0 && ticker.toUpperCase() !== "BTC"){
@@ -744,7 +745,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.19";
+const APP_VERSION = "v23.20";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5178,7 +5179,15 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
         }).catch(()=>{});
       }
     }
-    const trade={...form, ticker:resolvedTicker, qty:parseFloat(form.qty),
+    // v23.20 — catégorie d'une VENTE = catégorie réelle de l'actif vendu.
+    // Sinon form.cat reste "Picking" → txn mal classée ET applyTrade ne route pas
+    // la crypto (isCryptoTrade testait cat==="Crypto"). On la dérive du portefeuille.
+    let resolvedCat = form.cat;
+    if(form.side==="SELL"){
+      const heldItem = src.portfolio?.items?.find(x=>x.t===resolvedTicker);
+      if(heldItem && heldItem.cat) resolvedCat = heldItem.cat;
+    }
+    const trade={...form, cat:resolvedCat, ticker:resolvedTicker, qty:parseFloat(form.qty),
       price:priceUSD, priceRaw:parseFloat(form.price), currency:form.currency,
       id:uid(), bankAccount:form.bank||"Aucune"};
     onAdd(trade);
@@ -5289,7 +5298,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 const item = src.portfolio?.items?.find(x=>x.t===v);
                 const livePrice = item?.live ? String(item.live) : "";
                 const cur = item?.live && (YF_MAP[v]||v).match(/\.(PA|MI|AS|BR|DE|F|L)$/) ? "EUR" : "USD";
-                setForm({...form,ticker:v,price:livePrice,currency:cur});
+                const cat = item ? (item.cat||"Picking") : form.cat;   // v23.20 — catégorie réelle de l'actif vendu
+                setForm({...form,ticker:v,price:livePrice,currency:cur,cat});
               }}
                 options={(src.portfolio&&src.portfolio.items?src.portfolio.items.filter(x=>x.cat!=="Cash Matelas"&&x.qty>0):[]).map(x=>x.t)}/>
             ) : (<>

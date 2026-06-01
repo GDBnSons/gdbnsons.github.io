@@ -309,7 +309,9 @@ let YF_MAP = {
   BTC:"BTC-USD", ETH:"ETH-USD", SOL:"SOL-USD", BNB:"BNB-USD",
   XRP:"XRP-USD", ADA:"ADA-USD", DOGE:"DOGE-USD", DOT:"DOT-USD",
   AVAX:"AVAX-USD", MATIC:"MATIC-USD", LINK:"LINK-USD", UNI:"UNI-USD",
-  LTC:"LTC-USD", ATOM:"ATOM-USD", HYPE:"HYPE-USD",
+  LTC:"LTC-USD", ATOM:"ATOM-USD", HYPE:"HYPE-USD", TAO:"TAO-USD",
+  // Taux de change
+  EURUSD:"EURUSD=X",
 };
 
 /* Ticker → CoinGecko ID mapping (catégorie Crypto) */
@@ -570,6 +572,7 @@ function applyTrade(trade, currentEFF){
       // Heuristique simple — l'utilisateur peut ajuster manuellement
       YF_MAP[ticker] = ticker;
       console.info(`Nouveau ticker ${ticker} ajouté à YF_MAP`);
+      saveBase('gdb_yfmap', {...YF_MAP});  // v23.22 — persister immédiatement (pas seulement au snapshot)
     }
   }
 
@@ -629,15 +632,11 @@ function applyTrade(trade, currentEFF){
 async function fetchAllPrices(){
   const results = {errors: []};
 
-  /* BTC + EUR/USD */
-  try {
-    const cg = await fetchCoinGecko();
-    if(cg.btcUSD) results.BTC = cg.btcUSD;
-    if(cg.ethUSD) results.ETH = cg.ethUSD;
-    if(cg.eurUSD) results.EURUSD = cg.eurUSD;
-  } catch(e) { results.errors.push("BTC/EUR"); }
+  // v23.22 — BTC, ETH, toutes les cryptos ET le taux EUR/USD sont dans YF_MAP
+  // (BTC-USD, ETH-USD…, EURUSD=X) et fetché via Yahoo comme les actions.
+  // Coingecko n'est plus nécessaire.
 
-  /* Stocks in parallel (max 3 at a time to avoid rate limits) */
+  /* Stocks + crypto + taux de change — en parallel (max 3 à la fois) */
   const tickers = Object.entries(YF_MAP);
   for(let i=0; i<tickers.length; i+=3){
     const batch = tickers.slice(i, i+3);
@@ -689,15 +688,18 @@ function applyPrices(prices, usdEur, effSrc){
     return {...item, live: newLive, val: newVal, pnl: newPnl, pct: newPct};
   });
   const stocksTotal = stocksItems.reduce((s,x)=>s+x.val, 0);
-  /* BTC — quantité depuis src live */
-  const btcSrc  = src.crypto.items[0];
-  const btcLive = prices.BTC || btcSrc.live;
-  const btcQty  = btcSrc.qty;
-  const btcPa   = btcSrc.pa;
-  const btcVal  = Math.round(btcQty * btcLive);
-  const btcPnl  = Math.round(btcVal - btcPa * btcQty);
-  const cryptoItems = [{...btcSrc, live:btcLive, val:btcVal, pnl:btcPnl, pct:btcPnl/(btcPa*btcQty)}];
-  const cryptoTotal = btcVal;
+  /* Cryptos — mise à jour générique (BTC, ETH, SOL… tout ce qui est dans src.crypto.items)
+     prices[item.t] est fourni par Yahoo via YF_MAP (ex. BTC→"BTC-USD"). */
+  const cryptoItems = src.crypto.items.map(item => {
+    const newLive = prices[item.t] || item.live;
+    const newVal  = Math.round(item.qty * newLive);
+    const investi = (item.pa || newLive) * item.qty;
+    const newPnl  = Math.round(newVal - investi);
+    const newPct  = investi > 0 ? newPnl / investi : 0;
+    return {...item, live: newLive, val: newVal, pnl: newPnl, pct: newPct};
+  });
+  const cryptoTotal = cryptoItems.reduce((s,x)=>s+x.val, 0);
+  const btcLive = (cryptoItems.find(x=>x.t==="BTC")?.live) || prices.BTC || src.btcPrice;
 
   /* GDB.C et GDB.S */
   const tmpEFF = {
@@ -750,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.21";
+const APP_VERSION = "v23.22";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

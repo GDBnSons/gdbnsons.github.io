@@ -676,3 +676,17 @@ v23.21   FIX calcul — KuCoin rattaché au fonds GDB.C (et non GDB.S)
          Vérifié hors-app : vente crypto→KuCoin → ΔGDB.C = 0 ET ΔGDB.S = 0 ;
          vente action→IBKR → ΔGDB.C = 0 (crypto intacte).
          NB : décale le plan — Lot 5 → v23.22, Lot 6 → v23.23, Lot 7 → v23.24.
+
+v23.22   LOT 5 — Refresh des prix : cryptos via Yahoo + généralisation + nouveaux tickers
+         1. Coingecko retiré de fetchAllPrices (BTC, ETH, toutes les cryptos et le
+            taux EUR/USD sont dans YF_MAP avec leurs symboles Yahoo et fetché dans
+            la même boucle que les actions). Coingecko restait en doublon ; désormais
+            source unique = Yahoo Finance.
+         2. applyPrices — crypto générique : la reconstruction BTC-only
+            (src.crypto.items[0] → cryptoItems=[{BTC}]) est remplacée par une boucle
+            sur TOUS les src.crypto.items. ETH, SOL, DOGE, TAO etc. voient leur prix
+            mis à jour au refresh (plus de perte de ligne).
+         3. YF_MAP build : ajout TAO:"TAO-USD" et EURUSD:"EURUSD=X" (taux de change).
+         4. Nouveaux tickers : saveBase('gdb_yfmap') immédiatement quand un ticker
+            est ajouté à YF_MAP dans applyTrade. Plus besoin de snapshoter pour
+            que le ticker soit fetché au prochain boot.

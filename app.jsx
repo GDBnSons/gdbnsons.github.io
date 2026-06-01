@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.24b";
+const APP_VERSION = "v23.25";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6666,18 +6666,17 @@ function App(){
   function applyStartChoice(useKV){
     setStartScreen(false);
     setChosenSource(useKV ? "cloudflare" : "local");
+    // v23.25 — helper partagé par les deux branches (cloud et local)
+    const _mergeArrays = (base, kv) => {
+      if(!kv || !kv.length) return base;
+      const map = {};
+      base.forEach(r=>{ if(r[0]) map[r[0]] = r; });
+      kv.forEach(r=>{ if(r[0]) map[r[0]] = r; }); // kv écrase si même date
+      return Object.values(map).sort((a,b)=>a[0].localeCompare(b[0]));
+    };
     if(useKV&&kvData_snap?.raw){
       const kv=kvData_snap.raw;
       // Fusionner la base hardcodée avec les données KV pour combler les trous
-      // Le Worker ne stocke que les lignes ajoutées par snapshot — la base hardcodée
-      // couvre l'historique jusqu'au 17 mai 2026. On fusionne les deux.
-      const _mergeArrays = (base, live) => {
-        if(!live || !live.length) return base;
-        const map = {};
-        base.forEach(r=>{ if(r[0]) map[r[0]] = r; });
-        live.forEach(r=>{ if(r[0]) map[r[0]] = r; }); // live écrase si même date
-        return Object.values(map).sort((a,b)=>a[0].localeCompare(b[0]));
-      };
       if(kv.gdb_dd)    setLiveDD(_mergeArrays(DD, kv.gdb_dd));
       if(kv.gdb_gdbs)  setLiveGDBS(_mergeArrays(GDBS, kv.gdb_gdbs));
       if(kv.gdb_gc)    setLiveGC(_mergeArrays(GC_FULL, kv.gdb_gc));
@@ -6709,6 +6708,26 @@ function App(){
         const{gdbS,gdbC}=calcGdbPrices(newLive);
         setLive({...newLive,gdbS,gdbC});
         setRefreshedAt("cloudflare "+kvPort.date);
+      }
+    } else {
+      // v23.25 — boot LOCAL : calquer exactement le boot cloud en lisant lsv9 au lieu de KV.
+      // C'est l'endroit correct (applyStartChoice, post-boot-effects) pour fixer live.gdbS/gdbC.
+      const lvDD   = lsv9Get('gdb_dd');
+      const lvGDBS = lsv9Get('gdb_gdbs');
+      const lvGC   = lsv9Get('gdb_gc');
+      const lvGSB  = lsv9Get('gdb_gsb');
+      if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
+      if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
+      if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
+      if(lvGSB)  setLiveGSB(_mergeArrays(GS_B100_EXT, lvGSB));
+      // Aligner live.gdbS/gdbC sur le dernier snapshot local (même logique que le cloud)
+      const lastLocalGDBS = lvGDBS && lvGDBS.length>0 ? lvGDBS[lvGDBS.length-1] : null;
+      if(lastLocalGDBS && lastLocalGDBS[1]){
+        setLive(prev => ({
+          ...(prev || CURRENT),
+          gdbS: lastLocalGDBS[1],
+          gdbC: lastLocalGDBS[2] || (prev||CURRENT).gdbC,
+        }));
       }
     }
   }

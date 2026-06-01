@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.22";
+const APP_VERSION = "v23.23";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6553,18 +6553,11 @@ function App(){
             return last && last[0]===todayStr ? [...b.slice(0,-1), row] : [...b, row];
           });
         }
-        if(gdbSCalc && gdbCCalc){
-          setLiveGDBS(d => {
-            const last = d[d.length-1];
-            const row = [todayStr, gdbSCalc, gdbCCalc];
-            return last && last[0]===todayStr ? [...d.slice(0,-1), row] : [...d, row];
-          });
-          setLiveGC(d => {
-            const last = d[d.length-1];
-            const row = [todayStr, gdbCCalc];
-            return last && last[0]===todayStr ? [...d.slice(0,-1), row] : [...d, row];
-          });
-        }
+        // v23.23 — setLiveGDBS / setLiveGC retirés du refresh.
+        // Les séries GDB.S/GDB.C ne se mettent à jour QUE via les snapshots (contrôle
+        // utilisateur). Cela évite que les dépôts/retraits ou les trades KuCoin
+        // « polluent » la série des prix de fond avec des événements non-marché.
+        // Les cartes live (live.gdbS / live.gdbC) restent à jour via calcGdbPrices.
 
         return {
           ...srcEFF,

@@ -608,3 +608,14 @@ v23.16   PHASE 3 (positions 2/2) — Read-side : injection de l'état le plus r�
          local incomplet→KV). Reste hors-bases : bug du module VENTE (à traiter).
          Vérif app : trade → reload en ligne → trade conservé ; console
          « [positions] injection KV|LOCAL v9 (savedAt …) ».
+
+v23.17   LOT 1 — Affichages (3 corrections, aucune logique de calcul touchée)
+         • Onglet Portfolio : la catégorie crypto s'appelle "Crypto" (au lieu de
+           "Bitcoin"). (n:"Bitcoin" → "Crypto", ligne ~3302)
+         • Onglet Data / vue Cloudflare KV : les bases positions (portfolio/crypto/
+           stocks/bank) n'affichent plus "[object Object]" dans la colonne items.
+           Nouveau formateur fmtKvVal : tableaux → "N élt(s): tk1, tk2…", objets →
+           JSON tronqué, scalaires → tels quels. Utilisé pour les lignes objets ET
+           les tableaux d'objets.
+         • Onglet Data / vue locale : passe de 5 à 100 lignes affichées, avec
+           en-tête dynamique "{affichées} / {total} lignes".

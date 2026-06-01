@@ -744,7 +744,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.16";
+const APP_VERSION = "v23.17";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3299,7 +3299,7 @@ function buildSections(L){
 
   return [
     {
-      key:"bitcoin", n:"Bitcoin", icon:"₿", color:C.btc,
+      key:"bitcoin", n:"Crypto", icon:"₿", color:C.btc,
       totalUSD: cryptoUSD,
       totalEUR: Math.round(cryptoUSD * usdEur),
       pct: pct(cryptoUSD),
@@ -5930,6 +5930,20 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
   ];
 
+  // v23.17 — rendu lisible des valeurs KV (évite "[object Object]" pour les tableaux/objets)
+  function fmtKvVal(v){
+    if(v==null) return "";
+    if(Array.isArray(v)){
+      var preview=v.slice(0,6).map(function(x){
+        if(x && typeof x==="object") return x.t||x.d||x.date||JSON.stringify(x).slice(0,18);
+        return String(x);
+      }).join(", ");
+      return v.length+" élt(s): "+preview+(v.length>6?"…":"");
+    }
+    if(typeof v==="object") return JSON.stringify(v).slice(0,120);
+    return String(v);
+  }
+
   function doDelete(keys, all) {
     setDeleting(all ? "all" : keys[0]);
     setDelMsg(null);
@@ -5968,12 +5982,11 @@ function CloudKeyList({data, onRefresh}){
           return db.localeCompare(da); // décroissant
         });
         if(Array.isArray(sorted[0])){ headers=meta&&meta.cols ? meta.cols : sorted[0].map(function(_,i){return "Col "+(i+1);}); rows=sorted; }
-        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return r[h]!=null?String(r[h]):"—";}); }); }
+        else if(typeof sorted[0]==="object"){ headers=Object.keys(sorted[0]); rows=sorted.map(function(r){return headers.map(function(h){return fmtKvVal(r[h]);}); }); }
       }
     } else if(val && typeof val==="object"){
       var entries=Object.entries(val);
-      if(entries.length>0 && typeof entries[0][1]==="object"){ headers=["Cle","Valeur (JSON)"]; rows=entries.map(function(e){return[e[0],JSON.stringify(e[1]).slice(0,100)];}); }
-      else { headers=["Cle","Valeur"]; rows=entries.map(function(e){return[e[0],String(e[1])]}); }
+      headers=["Clé","Valeur"]; rows=entries.map(function(e){return[e[0], fmtKvVal(e[1])];});
     }
     var filtered = search ? rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});}) : rows;
 
@@ -6335,7 +6348,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
                   {isOpen && previewDB && (
                     <div style={{marginBottom:8,borderRadius:8,overflow:"hidden",border:"1px solid "+C.border+"66"}}>
                       <div style={{fontSize:9,color:C.gray,padding:"5px 8px",background:C.bg3,borderBottom:"1px solid "+C.border+"44"}}>
-                        {previewDB.desc} — 5 premières lignes
+                        {previewDB.desc} — {Math.min(100, previewDB.rows.length)} / {previewDB.rows.length} lignes
                       </div>
                       <div style={{overflowX:"auto"}}>
                         <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
@@ -6347,7 +6360,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
                             </tr>
                           </thead>
                           <tbody>
-                            {previewDB.rows.slice(0,5).map(function(row,ri){return(
+                            {previewDB.rows.slice(0,100).map(function(row,ri){return(
                               <tr key={ri} style={{background:ri%2===0?"transparent":C.bg2+"55"}}>
                                 {row.map(function(cell,ci){return(
                                   <td key={ci} style={{padding:"4px 7px",color:ci===0?C.btc:C.text,fontFamily:ci===0?"monospace":"inherit",whiteSpace:"nowrap"}}>{cell}</td>

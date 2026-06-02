@@ -90,6 +90,7 @@ function makeTFCuts(){
 /* ─── DATA ──────────────────────────────────────────────── */
 /* ─── FONDS GDB ──────────────────────────────────────────── */
 const GDB_S_NB_PARTS = 11942;  // col AK onglet Chart
+const fmtQty = q => (q==null?0:q).toLocaleString("fr-FR",{maximumFractionDigits:2}); // v24 : 2 décimales max
 const GDB_C_NB_PARTS = 5610;   // col P onglet Chart
 function calcGdbPrices(src){
   // v23.21 — KuCoin appartient au fonds GDB.C (et non GDB.S). Un transfert
@@ -752,7 +753,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.27";
+const APP_VERSION = "v24.00";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1746,7 +1747,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:1000,
-      background:`rgba(0,0,0,${Math.max(0, 0.75 - dragY/300)})`,
+      background:`rgba(0,0,0,${Math.max(0, 0.94 - dragY/300)})`,
       display:"flex", alignItems:"flex-end",
     }} onClick={onClose}>
       <div
@@ -3320,7 +3321,7 @@ function buildSections(L){
       items: src.crypto.items.map(x=>({
         ticker: x.t, icon: TICKER_ICONS[x.t]||"₿",
         label: ({BTC:"Bitcoin",ETH:"Ethereum",SOL:"Solana",DOGE:"Dogecoin",TAO:"Bittensor"}[x.t]) || x.t,
-        detail: `${x.qty} ${x.t} · $${(x.live||0).toLocaleString("fr-FR")}`,
+        detail: `${fmtQty(x.qty)} ${x.t} · $${(x.live||0).toLocaleString("fr-FR")}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
         pa: x.pa, live: x.live,
@@ -3334,7 +3335,7 @@ function buildSections(L){
       pct: pct(indicesUSD),
       items: src.stocks.items.filter(x=>x.cat==="Indices").map(x=>({
         ticker: x.t, icon: TICKER_ICONS[x.t]||"📈", label: x.t,
-        detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
+        detail: `${fmtQty(x.qty)} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
         pa: x.pa, live: x.live,
@@ -3349,7 +3350,7 @@ function buildSections(L){
       items: src.stocks.items.filter(x=>x.cat==="Picking").map(x=>({
         ticker: x.t, icon: TICKER_ICONS[x.t]||"🎯",
         label: x.t,
-        detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
+        detail: `${fmtQty(x.qty)} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
         pa: x.pa, live: x.live,
@@ -3363,7 +3364,7 @@ function buildSections(L){
       pct: pct(orUSD),
       items: src.stocks.items.filter(x=>x.cat==="Or").map(x=>({
         ticker: x.t, icon: TICKER_ICONS[x.t]||"🥇", label:"Gold ETF",
-        detail: `${x.qty} parts · $${x.live.toFixed(2)}`,
+        detail: `${fmtQty(x.qty)} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
         pa: x.pa, live: x.live,
@@ -7662,7 +7663,7 @@ function App(){
           }}>{hidden?"🙈":"👁"}</button>
           <button onClick={()=>setShowTheme(true)} title="Thème" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.purple}`,background:C.purple+"1A",
+            border:`1.5px solid #fff`,background:C.purple+"1A",
             cursor:"pointer",fontSize:14,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>🎨</button>

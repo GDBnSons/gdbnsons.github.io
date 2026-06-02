@@ -752,7 +752,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v23.26";
+const APP_VERSION = "v23.27";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4140,10 +4140,16 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
     const row = _DD_ST.reduceRight((a,r)=>a!=null?a:(r[0]<=dateStr&&r[5]?r:null),null);
     return row ? row[5] : (src?.usdEur || 0.86);
   };
-  // Taux BOM = 1er du mois (YYYY-MM-01)
+  // Taux BOM = frontière avec le mois précédent (= dernier jour du mois mi-1).
+  // v23.27 — BOM(mi) doit utiliser le MÊME taux que EOM(mi-1) puisque c'est la même
+  // valeur figée à la même frontière. Sinon BOM(M+1)$ ≠ EOM(M)$ (décalage 1 jour de FX).
   const bomRate = (year, mi) => {
     const pad = m => String(m+1).padStart(2,"0");
-    return usdEurAtDate(`${year}-${pad(mi)}-01`);
+    if(mi > 0){
+      const prevLast = new Date(parseInt(year), mi, 0).getDate(); // dernier jour du mois mi-1
+      return usdEurAtDate(`${year}-${pad(mi-1)}-${prevLast}`);
+    }
+    return usdEurAtDate(`${year}-01-01`);
   };
   // Taux EOM = dernier jour du mois (approx fin du mois)
   const eomRate = (year, mi) => {
@@ -4203,6 +4209,34 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
     const curYear = String(nowNC.getFullYear());
     const curMI   = nowNC.getMonth();
     const curYYMM = `${curYear}-${String(curMI+1).padStart(2,"0")}`;
+
+    // v23.27 — EOM des mois RÉVOLUS de l'année courante = base DD (source de vérité).
+    // Les valeurs const mensuelles ont dérivé (incohérentes : crypto+stocks+bank ≠ total).
+    //   crypto = DD col1 (cryptoEUR) ; total = DD col2 (totalEUR) ;
+    //   stocks = GDB.S(col4) × GDB_S_NB_PARTS × usdEur(col5) — tout en €.
+    if(year === curYear){
+      const ddLastOfMonth = (mi) => {
+        const ym = `${year}-${String(mi+1).padStart(2,"0")}`;
+        let last = null;
+        for(const r of _DD_ST){ if(r[0] && r[0].startsWith(ym) && r[2]!=null) last = r; }
+        return last;
+      };
+      result.eom = [...(result.eom||[])];
+      for(let mi=0; mi<curMI; mi++){
+        const r = ddLastOfMonth(mi);
+        if(!r) continue;
+        let eomEUR = null;
+        if(category==="crypto")      eomEUR = r[1];
+        else if(category==="total")  eomEUR = r[2];
+        else if(category==="stocks") eomEUR = (r[4]!=null && r[5]!=null) ? Math.round(r[4]*GDB_S_NB_PARTS*r[5]) : null;
+        if(eomEUR!=null) result.eom[mi] = eomEUR;
+      }
+      // re-chaîner BOM = EOM du mois précédent (même frontière)
+      result.bom = [...(result.bom||[])];
+      for(let mi=1; mi<curMI; mi++){
+        if(result.eom[mi-1]!=null) result.bom[mi] = result.eom[mi-1];
+      }
+    }
 
     if(year === curYear && curMI < 12){
       if(category==="crypto"){

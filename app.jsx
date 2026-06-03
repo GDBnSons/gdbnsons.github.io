@@ -753,7 +753,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v24.04";
+const APP_VERSION = "v24.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2415,7 +2415,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                         <div style={{display:"flex",gap:8,marginTop:2}}>
                           {item.qty!=null&&(
                             <span style={{fontSize:10,color:C.gray}}>
-                              <b style={{color:C.text3}}>{item.qty}</b> parts
+                              <b style={{color:C.text3}}>{fmtQty(item.qty)}</b> parts
                             </span>
                           )}
                           {item.pa!=null&&item.pa!==false&&(
@@ -6780,7 +6780,25 @@ function App(){
       if(lvGSB)  setLiveGSB(_mergeArrays(GS_B100_EXT, lvGSB));
       // Aligner live.gdbS/gdbC sur le dernier snapshot local (même logique que le cloud)
       const lastLocalGDBS = lvGDBS && lvGDBS.length>0 ? lvGDBS[lvGDBS.length-1] : null;
-      if(lastLocalGDBS && lastLocalGDBS[1]){
+      // v24.05 — injecter aussi les POSITIONS locales (crypto/stocks/bank), comme le boot
+      // cloud le fait depuis KV. Sans ça, les prix affichés (ex. BTC) restaient sur le
+      // build au lieu de la dernière valeur enregistrée localement.
+      const lvPort=lsv9Get('gdb_portfolio'), lvCryp=lsv9Get('gdb_crypto'), lvStk=lsv9Get('gdb_stocks'), lvBank=lsv9Get('gdb_bank');
+      if(lvPort && lvCryp && lvStk && lvBank){
+        const uE=CURRENT.usdEur, eU=1/uE;
+        const cryptoT=lvCryp.total||(lvCryp.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const stocksT=lvStk.total||(lvStk.items||[]).reduce((s,x)=>s+(x.val||0),0);
+        const bankUSD=Math.round((lvBank.totalEUR||0)*eU);
+        const totalUSD=cryptoT+stocksT+bankUSD;
+        const newLive={...CURRENT,date:lvPort.date||CURRENT.date,totalUSD,totalEUR:Math.round(totalUSD*uE),usdEur:uE,eurUsd:eU,
+          crypto:{...CURRENT.crypto,...lvCryp},stocks:{...CURRENT.stocks,...lvStk},bank:{...CURRENT.bank,...lvBank},
+          portfolio:{...lvPort},_fromSnapshot:lvPort.date};
+        // gdbS/gdbC : base GDBS locale (snapshot validé) prioritaire sur le calcul prix-positions
+        const gS=(lastLocalGDBS && lastLocalGDBS[1]) || calcGdbPrices(newLive).gdbS;
+        const gC=(lastLocalGDBS && lastLocalGDBS[2]) || calcGdbPrices(newLive).gdbC;
+        setLive({...newLive, gdbS:gS, gdbC:gC});
+        setRefreshedAt("local "+(lvPort.date||""));
+      } else if(lastLocalGDBS && lastLocalGDBS[1]){
         setLive(prev => ({
           ...(prev || CURRENT),
           gdbS: lastLocalGDBS[1],

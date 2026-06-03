@@ -769,7 +769,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.03";
+const APP_VERSION = "v25.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5210,13 +5210,13 @@ function YahooTickerSearch({onSelect}){
   );
 }
 
-function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
+function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders}){
   const[mode,setMode]=useState("trade");
   const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   const[showNew,setShowNew]=useState(false);
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
-  const[invest,setInvest]=useState({date:today(),holder:"FLO",io:"IN",fonds:"GDB.C",montant:"",bank:"BCI"});
+  const[invest,setInvest]=useState({date:today(),holder:"FLO",io:"IN",fonds:"GDB.C",montant:"",bank:"BCI",newHolder:""});
   const[confirmInv,setConfirmInv]=useState(false);
   const[done,setDone]=useState(null); // {type, montant, bank} après succès
   const src = EFF||CURRENT;
@@ -5684,8 +5684,9 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                 ))}
               </div>
             </div>
-            <div><FS label="Investisseur" value={invest.holder} onChange={v=>setInvest({...invest,holder:v})} options={["FLO","GB"]}/></div>
+            <div><FS label="Investisseur" value={invest.holder} onChange={v=>setInvest({...invest,holder:v})} options={[...(holders&&holders.length?holders:["FLO","GB"]),"+ Nouveau"]}/></div>
             <div><FS label="Fonds" value={invest.fonds} onChange={v=>setInvest({...invest,fonds:v})} options={["GDB.C","GDB.S"]}/></div>
+            {invest.holder==="+ Nouveau" && <div style={{gridColumn:"1/-1"}}><FI label="Nom du nouvel investisseur" value={invest.newHolder||""} onChange={v=>setInvest({...invest,newHolder:v.toUpperCase()})} placeholder="Initiales / nom"/></div>}
             <div style={{gridColumn:"1/-1"}}><FI label="Montant €" type="number" value={invest.montant} onChange={v=>setInvest({...invest,montant:v})} placeholder="0"/></div>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={invest.date} onChange={v=>setInvest({...invest,date:v})}/></div>
             <div style={{gridColumn:"1/-1"}}><FS label={invest.io==="IN"?"Depuis (Cash Matelas)":"Vers (Cash Matelas)"} value={invest.bank} onChange={v=>setInvest({...invest,bank:v})} options={Object.keys((src.bank&&src.bank.breakdown)||{BCI:0,Bourso:0,DeBlock:0})}/></div>
@@ -5710,7 +5711,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
           })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <Btn label="Annuler" onClick={onClose} color={C.gray} outline/>
-            <Btn label={invest.io==="IN"?"Investir":"Désinvestir"} onClick={()=>{ if((parseFloat(invest.montant)||0)>0) setConfirmInv(true); }} color={invest.io==="IN"?C.green:C.red}/>
+            <Btn label={invest.io==="IN"?"Investir":"Désinvestir"} onClick={()=>{ const h=invest.holder==="+ Nouveau"?(invest.newHolder||"").trim():invest.holder; if((parseFloat(invest.montant)||0)>0 && h) setConfirmInv(true); }} color={invest.io==="IN"?C.green:C.red}/>
           </div>
 
           {/* Écran de validation */}
@@ -5726,7 +5727,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                   <div style={{textAlign:"center",marginBottom:20}}>
                     <div style={{fontSize:36,marginBottom:8}}>{isIn?"📈":"📉"}</div>
                     <div style={{fontSize:16,fontWeight:800,color:C.text}}>Confirmer {isIn?"l'investissement":"le désinvestissement"}</div>
-                    <div style={{fontSize:13,color:C.text3,marginTop:4}}>{invest.fonds} · {invest.holder}</div>
+                    <div style={{fontSize:13,color:C.text3,marginTop:4}}>{invest.fonds} · {invest.holder==="+ Nouveau"?(invest.newHolder||"").trim():invest.holder}</div>
                   </div>
                   <div style={{background:col+"15",border:`1px solid ${col}40`,borderRadius:12,padding:"16px",textAlign:"center",marginBottom:16}}>
                     <div style={{fontSize:32,fontWeight:900,color:col,letterSpacing:-1}}>{isIn?"+":"-"}{fmt(montant)}</div>
@@ -6627,6 +6628,11 @@ function App(){
   const[liveInv,setLiveInv]=useState(INV_SEED);
   // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
   const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
+  // v25.04 — liste des investisseurs connus (depuis la DB gdb_inv), grandit avec les nouveaux.
+  const invHolders = React.useMemo(function(){
+    const set=[]; (liveInv||[]).forEach(function(m){ if(m && m.holder && set.indexOf(m.holder)<0) set.push(m.holder); });
+    return set.length ? set : ["FLO","GB"];
+  }, [liveInv]);
   // Version counter pour forcer re-render après sync ICON_DB (variable module non-reactive)
   const[iconDbVersion,setIconDbVersion]=useState(0);
   const bumpIconDb = () => setIconDbVersion(v=>v+1);
@@ -7925,7 +7931,7 @@ function App(){
           <div style={{fontSize:9,color:C.text3,marginTop:4,textAlign:"right"}}>Appuie pour fermer</div>
         </div>
       )}
-      {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF}/>}
+      {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF} holders={invHolders}/>}
       {showGistDiag&&(
         <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowGistDiag(false)}>

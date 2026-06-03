@@ -753,7 +753,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v24.05";
+const APP_VERSION = "v25.00";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -837,11 +837,15 @@ function lsWriteIcons(db){ try{ localStorage.setItem(LS_ICONS_KEY,JSON.stringify
 ═══════════════════════════════════════════════════════════ */
 const LS_V9_KEY = "gdb_sons_v9";
 // Mêmes noms que les clés KV (cf. Worker /read & /write-bases ALLOWED)
+// v25.00 Phase 1 — Base des mouvements d'investissement dans les fonds (GDB.S / GDB.C).
+// Chaque ligne = {id,date,fonds,holder,io,shares,vps,montant}. Source de verite des parts (option B).
+const INV_SEED = [{"id":"invseed_001","date":"2020-03-26","fonds":"GDB.C","holder":"FLO","io":"IN","shares":1300,"vps":10,"montant":13000},{"id":"invseed_002","date":"2021-05-17","fonds":"GDB.C","holder":"FLO","io":"IN","shares":99.38,"vps":40.25,"montant":4000.04},{"id":"invseed_003","date":"2021-06-01","fonds":"GDB.C","holder":"FLO","io":"IN","shares":71.48,"vps":27.98,"montant":2000.01},{"id":"invseed_004","date":"2021-06-30","fonds":"GDB.C","holder":"FLO","io":"IN","shares":164.64,"vps":24.295,"montant":3999.93},{"id":"invseed_005","date":"2021-07-05","fonds":"GDB.C","holder":"FLO","io":"IN","shares":171.03,"vps":23.39,"montant":4000.39},{"id":"invseed_006","date":"2021-10-06","fonds":"GDB.C","holder":"FLO","io":"IN","shares":106.14,"vps":47.11,"montant":5000.26},{"id":"invseed_007","date":"2021-10-15","fonds":"GDB.C","holder":"FLO","io":"IN","shares":102.8,"vps":48.64,"montant":5000.19},{"id":"invseed_008","date":"2021-12-09","fonds":"GDB.C","holder":"FLO","io":"IN","shares":81.47,"vps":61.375,"montant":5000.22},{"id":"invseed_009","date":"2021-12-14","fonds":"GDB.C","holder":"FLO","io":"IN","shares":141.84,"vps":56.4,"montant":7999.78},{"id":"invseed_010","date":"2022-01-12","fonds":"GDB.C","holder":"FLO","io":"IN","shares":37.2,"vps":53.76,"montant":1999.87},{"id":"invseed_011","date":"2022-01-29","fonds":"GDB.C","holder":"FLO","io":"IN","shares":88.37,"vps":45.26,"montant":3999.63},{"id":"invseed_012","date":"2022-02-11","fonds":"GDB.C","holder":"FLO","io":"IN","shares":76.58,"vps":52.23,"montant":3999.77},{"id":"invseed_013","date":"2022-08-12","fonds":"GDB.C","holder":"FLO","io":"IN","shares":596.93,"vps":11.727,"montant":7000.2},{"id":"invseed_014","date":"2022-08-25","fonds":"GDB.C","holder":"FLO","io":"IN","shares":95.88,"vps":10.43,"montant":1000.03},{"id":"invseed_015","date":"2022-09-24","fonds":"GDB.C","holder":"FLO","io":"IN","shares":637.27,"vps":9.4153,"montant":6000.09},{"id":"invseed_016","date":"2022-11-15","fonds":"GDB.C","holder":"FLO","io":"IN","shares":122.9,"vps":8.14,"montant":1000.41},{"id":"invseed_017","date":"2022-12-22","fonds":"GDB.C","holder":"FLO","io":"IN","shares":121.37,"vps":8.24,"montant":1000.09},{"id":"invseed_018","date":"2022-12-29","fonds":"GDB.C","holder":"FLO","io":"IN","shares":246.96,"vps":8.099,"montant":2000.13},{"id":"invseed_019","date":"2023-01-22","fonds":"GDB.C","holder":"FLO","io":"IN","shares":179.4,"vps":11.15,"montant":2000.31},{"id":"invseed_020","date":"2024-08-13","fonds":"GDB.C","holder":"FLO","io":"IN","shares":110.83,"vps":18.0448,"montant":1999.91},{"id":"invseed_021","date":"2024-08-14","fonds":"GDB.C","holder":"FLO","io":"IN","shares":165.18,"vps":18.1627,"montant":3000.11},{"id":"invseed_022","date":"2024-09-04","fonds":"GDB.C","holder":"FLO","io":"IN","shares":283.2,"vps":17.655,"montant":4999.9},{"id":"invseed_023","date":"2024-11-21","fonds":"GDB.C","holder":"FLO","io":"OUT","shares":-52.93,"vps":39.7275,"montant":-2102.78},{"id":"invseed_024","date":"2024-11-23","fonds":"GDB.C","holder":"FLO","io":"OUT","shares":-45.18,"vps":41.9857,"montant":-1896.91},{"id":"invseed_025","date":"2024-12-15","fonds":"GDB.C","holder":"GB","io":"IN","shares":86,"vps":47.26,"montant":4064.36},{"id":"invseed_026","date":"2025-06-20","fonds":"GDB.C","holder":"FLO","io":"OUT","shares":-45,"vps":41.55,"montant":-1869.75},{"id":"invseed_027","date":"2025-07-17","fonds":"GDB.C","holder":"FLO","io":"OUT","shares":-65,"vps":47.97934,"montant":-3118.66},{"id":"invseed_028","date":"2025-08-15","fonds":"GDB.S","holder":"FLO","io":"IN","shares":4824.5,"vps":10,"montant":48245},{"id":"invseed_029","date":"2025-10-04","fonds":"GDB.C","holder":"GB","io":"OUT","shares":-86,"vps":53.33,"montant":-4586.38},{"id":"invseed_030","date":"2025-10-04","fonds":"GDB.C","holder":"FLO","io":"IN","shares":86,"vps":53.33,"montant":4586.38},{"id":"invseed_031","date":"2025-10-15","fonds":"GDB.S","holder":"FLO","io":"IN","shares":4945,"vps":10,"montant":49450},{"id":"invseed_032","date":"2026-01-28","fonds":"GDB.S","holder":"FLO","io":"IN","shares":2155,"vps":10.35,"montant":22305},{"id":"invseed_033","date":"2026-02-04","fonds":"GDB.C","holder":"FLO","io":"IN","shares":71.479628,"vps":27.98,"montant":2000},{"id":"invseed_034","date":"2026-02-05","fonds":"GDB.C","holder":"FLO","io":"IN","shares":299.962505,"vps":26.67,"montant":8000},{"id":"invseed_035","date":"2026-02-08","fonds":"GDB.C","holder":"FLO","io":"IN","shares":75.081463,"vps":26.637734,"montant":2000},{"id":"invseed_036","date":"2026-02-11","fonds":"GDB.C","holder":"FLO","io":"IN","shares":79.744817,"vps":25.08,"montant":2000},{"id":"invseed_037","date":"2026-02-21","fonds":"GDB.C","holder":"FLO","io":"IN","shares":106.713232,"vps":25.77,"montant":2750},{"id":"invseed_038","date":"2026-03-04","fonds":"GDB.C","holder":"FLO","io":"IN","shares":126.115638,"vps":25.77,"montant":3250}];
 const LSV9_KEYS = [
   "gdb_snapshots","gdb_txns","gdb_dd","gdb_gdbs","gdb_gc","gdb_gsb",
   "gdb_cm","gdb_sm","gdb_tm","gdb_bench",
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
+  "gdb_inv",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -6489,6 +6493,7 @@ function App(){
   const[liveCM,setLiveCM]=useState(CRYPTO_MONTHLY);
   const[liveSM,setLiveSM]=useState(STOCKS_MONTHLY);
   const[liveTM,setLiveTM]=useState(TOTAL_MONTHLY);
+  const[liveInv,setLiveInv]=useState(INV_SEED);
   // Version counter pour forcer re-render après sync ICON_DB (variable module non-reactive)
   const[iconDbVersion,setIconDbVersion]=useState(0);
   const bumpIconDb = () => setIconDbVersion(v=>v+1);
@@ -6742,6 +6747,7 @@ function App(){
       if(kv.gdb_cm)    setLiveCM(unionMonthlyByYear(CRYPTO_MONTHLY, kv.gdb_cm));
       if(kv.gdb_sm)    setLiveSM(unionMonthlyByYear(STOCKS_MONTHLY, kv.gdb_sm));
       if(kv.gdb_tm)    setLiveTM(unionMonthlyByYear(TOTAL_MONTHLY, kv.gdb_tm));
+      if(kv.gdb_inv)   setLiveInv(unionTxnsById(INV_SEED, kv.gdb_inv));
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
@@ -6774,6 +6780,7 @@ function App(){
       const lvGDBS = lsv9Get('gdb_gdbs');
       const lvGC   = lsv9Get('gdb_gc');
       const lvGSB  = lsv9Get('gdb_gsb');
+      const lvInv  = lsv9Get('gdb_inv'); if(lvInv) setLiveInv(unionTxnsById(INV_SEED, lvInv));
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -6928,6 +6935,23 @@ function App(){
             const mTM = recM(TOTAL_MONTHLY,  'gdb_tm', kvTM); setLiveTM(mTM);
             console.info("[monthly] fusion CM/SM/TM (mois remplis : "+totalFilled(mCM)+"/"+totalFilled(mSM)+"/"+totalFilled(mTM)+")");
           } catch(e){ console.warn("[monthly] réconciliation CM/SM/TM échouée:", e && e.message); }
+
+          // v25.00 Phase 1 — reconciliation de la base investissements gdb_inv (union par id).
+          // Recupere un mouvement offline (local, pas en KV) ET un mouvement dun autre appareil.
+          try{
+            const kvInv = Array.isArray(kvData.gdb_inv) ? kvData.gdb_inv : [];
+            const localInv = lsv9Get('gdb_inv') || INV_SEED;
+            const mergedInv = unionTxnsById(localInv, kvInv);
+            if(mergedInv.length !== localInv.length || mergedInv.length !== kvInv.length){
+              setLiveInv(mergedInv);
+              lsv9Set('gdb_inv', mergedInv);
+              console.info("[inv] fusion local("+localInv.length+") + KV("+kvInv.length+") = "+mergedInv.length+" mvt(s)");
+            }
+            if(mergedInv.length > kvInv.length){
+              saveBase('gdb_inv', mergedInv);
+              console.info("[inv] re-push KV : "+(mergedInv.length - kvInv.length)+" mvt(s) local/seed manquant(s)");
+            }
+          }catch(e){ console.warn("[inv] reconciliation:", e && e.message); }
 
           // Diagnostic récence (plus aucune série n'est remplacée en bloc ici)
           if(kvIsNewer) console.info("Bases KV plus récentes ("+kvLastDate+" > "+buildLastDate+")");

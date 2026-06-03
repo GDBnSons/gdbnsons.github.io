@@ -92,6 +92,22 @@ function makeTFCuts(){
 const GDB_S_NB_PARTS = 11942;  // col AK onglet Chart
 const fmtQty = q => (q==null?0:q).toLocaleString("fr-FR",{maximumFractionDigits:2}); // v24 : 2 décimales max
 const GDB_C_NB_PARTS = 5610;   // col P onglet Chart
+// v25.01 Phase 2a (option B) — parts dynamiques depuis la base gdb_inv.
+// FUND_PARTS = cumul des mouvements DB (total courant). Initialise aux totaux du seed,
+// recalcule au boot/ajout depuis liveInv. calcGdbPrices divise par ces parts.
+// Les constantes 5610/11942 ci-dessus restent UNIQUEMENT pour la reconstruction EOM
+// Stats (v23.27), qui inverse des cours enregistres avec ces parts (B-mid traitera ca).
+let FUND_PARTS = { S: 11924.5, C: 5637.837283 };
+function cumulFundParts(invArr){
+  let S = 0, C = 0;
+  (invArr || []).forEach(function(m){
+    if(m && typeof m.shares === "number"){
+      if(m.fonds === "GDB.S") S += m.shares;
+      else if(m.fonds === "GDB.C") C += m.shares;
+    }
+  });
+  return { S: Math.round(S*1e6)/1e6, C: Math.round(C*1e6)/1e6 };
+}
 function calcGdbPrices(src){
   // v23.21 — KuCoin appartient au fonds GDB.C (et non GDB.S). Un transfert
   // crypto→KuCoin (vente crypto, contrepartie KuCoin) reste interne à GDB.C
@@ -101,10 +117,10 @@ function calcGdbPrices(src){
   const gdbSfondsUSD = src.stocks.items
     .filter(x=>x.t!=="KUCOIN")
     .reduce((s,x)=>s+x.val, 0);
-  const gdbS = parseFloat((gdbSfondsUSD / GDB_S_NB_PARTS).toFixed(4));
+  const gdbS = parseFloat((gdbSfondsUSD / FUND_PARTS.S).toFixed(4));
   // GDB.C = crypto + KuCoin
   const gdbCfondsUSD = src.crypto.total + kucoinUSD;
-  const gdbC = parseFloat((gdbCfondsUSD / GDB_C_NB_PARTS).toFixed(4));
+  const gdbC = parseFloat((gdbCfondsUSD / FUND_PARTS.C).toFixed(4));
   return {gdbS, gdbC, gdbSfondsUSD, gdbCfondsUSD};
 }
 const CHART_MONTHLY=[
@@ -753,7 +769,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.00";
+const APP_VERSION = "v25.01";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4915,9 +4931,9 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liv
   const gsYTD = gsPerf(dytd);
 
   const {gdbS: gcS_calc, gdbC: gcC_calc, gdbSfondsUSD, gdbCfondsUSD} = calcGdbPrices(src);
-  const gcQty   = GDB_C_NB_PARTS;
+  const gcQty   = FUND_PARTS.C;
   const gcFonds = Math.round(gdbCfondsUSD != null ? gdbCfondsUSD : src.crypto.total);
-  const gsQty   = GDB_S_NB_PARTS;
+  const gsQty   = FUND_PARTS.S;
   const gsFonds = Math.round(gdbSfondsUSD || (src.stocks.items.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+x.val,0) + (src.stocks.items.find(x=>x.t==="EURO")?.val||0)));
 
 
@@ -6747,7 +6763,7 @@ function App(){
       if(kv.gdb_cm)    setLiveCM(unionMonthlyByYear(CRYPTO_MONTHLY, kv.gdb_cm));
       if(kv.gdb_sm)    setLiveSM(unionMonthlyByYear(STOCKS_MONTHLY, kv.gdb_sm));
       if(kv.gdb_tm)    setLiveTM(unionMonthlyByYear(TOTAL_MONTHLY, kv.gdb_tm));
-      if(kv.gdb_inv)   setLiveInv(unionTxnsById(INV_SEED, kv.gdb_inv));
+      if(kv.gdb_inv)   { const _mi=unionTxnsById(INV_SEED, kv.gdb_inv); setLiveInv(_mi); FUND_PARTS=cumulFundParts(_mi); }
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
@@ -6780,7 +6796,7 @@ function App(){
       const lvGDBS = lsv9Get('gdb_gdbs');
       const lvGC   = lsv9Get('gdb_gc');
       const lvGSB  = lsv9Get('gdb_gsb');
-      const lvInv  = lsv9Get('gdb_inv'); if(lvInv) setLiveInv(unionTxnsById(INV_SEED, lvInv));
+      const lvInv  = lsv9Get('gdb_inv'); if(lvInv){ const _mi2=unionTxnsById(INV_SEED, lvInv); setLiveInv(_mi2); FUND_PARTS=cumulFundParts(_mi2); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -6942,6 +6958,7 @@ function App(){
             const kvInv = Array.isArray(kvData.gdb_inv) ? kvData.gdb_inv : [];
             const localInv = lsv9Get('gdb_inv') || INV_SEED;
             const mergedInv = unionTxnsById(localInv, kvInv);
+            FUND_PARTS = cumulFundParts(mergedInv);   // v25.01 — parts live = cumul DB
             if(mergedInv.length !== localInv.length || mergedInv.length !== kvInv.length){
               setLiveInv(mergedInv);
               lsv9Set('gdb_inv', mergedInv);

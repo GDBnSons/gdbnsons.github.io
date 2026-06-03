@@ -769,7 +769,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.01";
+const APP_VERSION = "v25.03";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5216,6 +5216,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
   const[showNew,setShowNew]=useState(false);
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
+  const[invest,setInvest]=useState({date:today(),holder:"FLO",io:"IN",fonds:"GDB.C",montant:"",bank:"BCI"});
+  const[confirmInv,setConfirmInv]=useState(false);
   const[done,setDone]=useState(null); // {type, montant, bank} après succès
   const src = EFF||CURRENT;
 
@@ -5343,7 +5345,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
         <>
       {/* Sélecteur mode */}
       <div style={{display:"flex",gap:6,marginBottom:14,background:C.bg2,borderRadius:10,padding:4}}>
-        {[["trade","↕ Achat / Vente"],["depot","🏦 Dépôt"]].map(([k,l])=>(
+        {[["trade","↕ Achat / Vente"],["depot","🏦 Dépôt"],["invest","📈 Investir"]].map(([k,l])=>(
           <button key={k} onClick={()=>setMode(k)} style={{
             flex:1,padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:700,
             border:"none",cursor:"pointer",
@@ -5542,7 +5544,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
             <Btn label={form.side==="BUY"?"Acheter":"Vendre"} onClick={submit} color={form.side==="BUY"?C.green:C.red}/>
           </div>
         </>
-      ) : (
+      ) : mode==="depot" ? (
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={depot.date} onChange={v=>setDepot({...depot,date:v})}/></div>
@@ -5660,6 +5662,96 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF}){
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <Btn label="← Modifier" onClick={()=>setConfirm(false)} color={C.gray} outline/>
                     <Btn label={isRetrait?"✓ Retirer":"✓ Déposer"} onClick={()=>{setConfirm(false);submitDepot();}} color={col}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      ) : (
+        <>
+          {/* Formulaire Investir / Désinvestir (Phase 3 — aperçu, action en Phase 4) */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:6}}>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{display:"flex",gap:6,background:C.bg2,borderRadius:8,padding:3,marginBottom:6}}>
+                {[["IN","➕ Investir"],["OUT","➖ Désinvestir"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setInvest({...invest,io:k})} style={{
+                    flex:1,padding:"7px 0",borderRadius:6,fontSize:12,fontWeight:700,
+                    border:"none",cursor:"pointer",
+                    background:invest.io===k?(k==="IN"?C.green:C.red):"transparent",
+                    color:invest.io===k?"#fff":C.gray,
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div><FS label="Investisseur" value={invest.holder} onChange={v=>setInvest({...invest,holder:v})} options={["FLO","GB"]}/></div>
+            <div><FS label="Fonds" value={invest.fonds} onChange={v=>setInvest({...invest,fonds:v})} options={["GDB.C","GDB.S"]}/></div>
+            <div style={{gridColumn:"1/-1"}}><FI label="Montant €" type="number" value={invest.montant} onChange={v=>setInvest({...invest,montant:v})} placeholder="0"/></div>
+            <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={invest.date} onChange={v=>setInvest({...invest,date:v})}/></div>
+            <div style={{gridColumn:"1/-1"}}><FS label={invest.io==="IN"?"Depuis (Cash Matelas)":"Vers (Cash Matelas)"} value={invest.bank} onChange={v=>setInvest({...invest,bank:v})} options={Object.keys((src.bank&&src.bank.breakdown)||{BCI:0,Bourso:0,DeBlock:0})}/></div>
+          </div>
+          {(()=>{
+            const coursEur=(invest.fonds==="GDB.C"?(src.gdbC||0):(src.gdbS||0))*(src.usdEur||1);
+            const montantNum=parseFloat(invest.montant)||0;
+            const shares=coursEur>0?montantNum/coursEur:0;
+            const isIn=invest.io==="IN";
+            return(
+              <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:13}}>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}>
+                  <span style={{color:C.text2}}>Cours {invest.fonds} du jour</span>
+                  <b style={{color:C.text}}>€{coursEur.toFixed(4)}</b>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px solid ${C.border}`}}>
+                  <span style={{color:C.text2}}>Parts {isIn?"créées":"détruites"}</span>
+                  <b style={{color:isIn?C.green:C.red}}>{isIn?"+":"-"}{fmtQty(shares)}</b>
+                </div>
+              </div>
+            );
+          })()}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <Btn label="Annuler" onClick={onClose} color={C.gray} outline/>
+            <Btn label={invest.io==="IN"?"Investir":"Désinvestir"} onClick={()=>{ if((parseFloat(invest.montant)||0)>0) setConfirmInv(true); }} color={invest.io==="IN"?C.green:C.red}/>
+          </div>
+
+          {/* Écran de validation */}
+          {confirmInv&&(()=>{
+            const isIn=invest.io==="IN";
+            const montant=parseFloat(invest.montant||0);
+            const coursEur=(invest.fonds==="GDB.C"?(src.gdbC||0):(src.gdbS||0))*(src.usdEur||1);
+            const shares=coursEur>0?montant/coursEur:0;
+            const col=isIn?C.green:C.red;
+            return(
+              <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setConfirmInv(false)}>
+                <div onClick={e=>e.stopPropagation()} style={{background:C.bg1,borderRadius:"20px 20px 0 0",padding:"24px 20px 36px",width:"100%",maxWidth:430,border:`1px solid ${C.border}`}}>
+                  <div style={{textAlign:"center",marginBottom:20}}>
+                    <div style={{fontSize:36,marginBottom:8}}>{isIn?"📈":"📉"}</div>
+                    <div style={{fontSize:16,fontWeight:800,color:C.text}}>Confirmer {isIn?"l'investissement":"le désinvestissement"}</div>
+                    <div style={{fontSize:13,color:C.text3,marginTop:4}}>{invest.fonds} · {invest.holder}</div>
+                  </div>
+                  <div style={{background:col+"15",border:`1px solid ${col}40`,borderRadius:12,padding:"16px",textAlign:"center",marginBottom:16}}>
+                    <div style={{fontSize:32,fontWeight:900,color:col,letterSpacing:-1}}>{isIn?"+":"-"}{fmt(montant)}</div>
+                    <div style={{fontSize:11,color:C.text3,marginTop:2}}>{invest.date}</div>
+                  </div>
+                  <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",marginBottom:16}}>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0"}}>
+                      <span style={{fontSize:12,color:C.text2}}>Cours du jour</span>
+                      <span style={{fontSize:12,color:C.text}}>€{coursEur.toFixed(4)}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:`1px solid ${C.border}`}}>
+                      <span style={{fontSize:12,fontWeight:700,color:C.text2}}>Parts {isIn?"créées":"détruites"}</span>
+                      <span style={{fontSize:13,fontWeight:800,color:col}}>{isIn?"+":"-"}{fmtQty(shares)}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:`1px solid ${C.border}`}}>
+                      <span style={{fontSize:12,color:C.text2}}>{isIn?"Depuis":"Vers"} (Cash Matelas)</span>
+                      <span style={{fontSize:12,fontWeight:700,color:C.teal}}>{invest.bank}</span>
+                    </div>
+                  </div>
+                  <div style={{background:C.btc+"15",border:`1px solid ${C.btc}44`,borderRadius:8,padding:"8px 12px",marginBottom:14,fontSize:11,color:C.text3,textAlign:"center"}}>
+                    Aperçu — l'enregistrement réel sera actif en Phase 4.
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <Btn label="← Modifier" onClick={()=>setConfirmInv(false)} color={C.gray} outline/>
+                    <Btn label={isIn?"✓ Investir":"✓ Désinvestir"} onClick={()=>{setConfirmInv(false);onClose();}} color={col}/>
                   </div>
                 </div>
               </div>
@@ -6497,6 +6589,29 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
 }
 
 
+// v25.02 Phase 2b (B-mid) — recompute RUNTIME des points de cours GDB.C post-Chart depuis le
+// cumul DB. Le KV ecrase le build (unionSeriesByDate priorise KV), donc on recalcule apres merge,
+// de facon deterministe : cours$(date) = cryptoEUR(date) / (usdEur(date) × parts_cumul_C(date)).
+// Borne a (CUT, END] = fenetre historique ou KuCoin=0 (END = derniere date build GC_FULL).
+function recomputeGcFromDB(gcArr, ddArr, invArr){
+  if(!Array.isArray(gcArr) || !gcArr.length) return gcArr;
+  const CUT = "2026-01-12";
+  const END = (GC_FULL.length ? GC_FULL[GC_FULL.length-1][0] : "2026-05-17");
+  const dd = (Array.isArray(ddArr) && ddArr.length) ? ddArr : DD;
+  const ce = {}, ue = {};
+  dd.forEach(function(r){ ce[r[0]] = r[1]; ue[r[0]] = r[5]; });
+  const movs = ((Array.isArray(invArr) && invArr.length) ? invArr : INV_SEED)
+    .filter(function(m){ return m && m.fonds === "GDB.C"; })
+    .slice().sort(function(a,b){ return (a.date||"").localeCompare(b.date||""); });
+  function cumC(d){ var s=0; for(var i=0;i<movs.length;i++){ if(movs[i].date<=d) s+=movs[i].shares; else break; } return s; }
+  return gcArr.map(function(r){
+    const d = r[0];
+    if(d <= CUT || d > END) return r;
+    const c = ce[d], u = ue[d], p = cumC(d);
+    if(c==null || u==null || !p) return r;
+    return [d, parseFloat((c/(u*p)).toFixed(4))].concat(r.slice(2));
+  });
+}
 function App(){
   const[tab,setTab]=useState(0);
   const[chartData,setChartData]=useState(CHART_MONTHLY);
@@ -6510,6 +6625,8 @@ function App(){
   const[liveSM,setLiveSM]=useState(STOCKS_MONTHLY);
   const[liveTM,setLiveTM]=useState(TOTAL_MONTHLY);
   const[liveInv,setLiveInv]=useState(INV_SEED);
+  // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
+  const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
   // Version counter pour forcer re-render après sync ICON_DB (variable module non-reactive)
   const[iconDbVersion,setIconDbVersion]=useState(0);
   const bumpIconDb = () => setIconDbVersion(v=>v+1);
@@ -7756,12 +7873,12 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={liveGC} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT}/>}
-        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC} liveDD={liveDD}/>}
+        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
-          liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveGSB={liveGSB}
+          liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench}/> }
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>

@@ -772,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.09";
+const APP_VERSION = "v25.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1266,9 +1266,12 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
         {sliced.map((s,si)=>{
           const pts=s.vals.map((v,i)=>v!=null?`${px(i)},${py(v)}`:null).filter(Boolean).join(" ");
           return(
-            <polyline key={si} points={pts} fill="none" stroke={s.color}
-              strokeWidth={hover!=null&&si===0?2.8:s.bold?2.2:1.5}
-              opacity={hover!=null&&si>0?.45:.92}/>
+            <g key={si}>
+              {s.area&&pts&&<polygon points={`0,${h+3} ${pts} ${W},${h+3}`} fill={s.color+"22"} stroke="none"/>}
+              <polyline points={pts} fill="none" stroke={s.color}
+                strokeWidth={hover!=null&&si===0?2.8:s.bold?2.2:1.5}
+                opacity={hover!=null&&si>0?.45:.92}/>
+            </g>
           );
         })}
 
@@ -4899,6 +4902,7 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, 
 function FondDetailModal({fond, EFF, liveInv, liveDD, liveGC, eur, onClose}){
   const isC = fond==="GDB.C";
   const color = isC ? C.btc : C.red;
+  const [fs,setFs] = useState(false);
   const src = EFF||CURRENT;
   const usdEur = src.usdEur||0.86;
   const cours$ = isC ? src.gdbC : src.gdbS;
@@ -4932,16 +4936,11 @@ function FondDetailModal({fond, EFF, liveInv, liveDD, liveGC, eur, onClose}){
     const ue = p.ue!=null ? p.ue : usdEur;
     dates.push(p.d); invested.push(cumM); value.push((p.c||0)*ue*cumS);
   });
-  // SVG
-  const W=340, H=180, PAD=6;
-  const n = dates.length;
-  const allV = value.concat(invested);
-  const maxY = (allV.reduce(function(m,v){return v>m?v:m;}, 1)) * 1.08 || 1;
-  const xAt = function(i){ return PAD + (n>1? i/(n-1):0)*(W-2*PAD); };
-  const yAt = function(v){ return H-PAD - (Math.max(0,v)/maxY)*(H-2*PAD); };
-  const lineP = function(arr){ return arr.map(function(v,i){ return (i?"L":"M")+xAt(i).toFixed(1)+" "+yAt(v).toFixed(1); }).join(" "); };
-  const areaP = function(arr){ return n? lineP(arr)+" L"+xAt(n-1).toFixed(1)+" "+(H-PAD)+" L"+xAt(0).toFixed(1)+" "+(H-PAD)+" Z" : ""; };
   const fmtE = function(v){ return "\u20ac"+Math.round(v).toLocaleString("fr-FR"); };
+  const chartSeries = [
+    {vals:invested, color:C.blue, label:"Investi cumulé", area:true},
+    {vals:value,    color:color,  label:"Valeur du fonds"},
+  ];
 
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:650,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
@@ -4982,22 +4981,23 @@ function FondDetailModal({fond, EFF, liveInv, liveDD, liveGC, eur, onClose}){
             </div>
           );})}
         </div>
-        <div style={{background:C.bg2,borderRadius:12,padding:"12px 10px 8px"}}>
-          <div style={{display:"flex",gap:16,marginBottom:8,paddingLeft:4,fontSize:11}}>
-            <span style={{color:C.blue,fontWeight:700}}>● Investi cumulé</span>
-            <span style={{color:color,fontWeight:700}}>● Valeur du fonds</span>
-          </div>
-          <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}} preserveAspectRatio="none">
-            {n>1 && <path d={areaP(invested)} fill={C.blue+"22"} stroke="none"/>}
-            {n>1 && <path d={lineP(invested)} fill="none" stroke={C.blue} strokeWidth="1.6"/>}
-            {n>1 && <path d={lineP(value)} fill="none" stroke={color} strokeWidth="1.8"/>}
-          </svg>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,padding:"2px 4px 0"}}>
-            <span>{dates.length?dates[0]:""}</span>
-            <span>max {fmtE(maxY/1.08)}</span>
-            <span>{dates.length?dates[dates.length-1]:""}</span>
-          </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px",position:"relative"}}>
+          <button onClick={function(){setFs(true);}} title="Plein écran" style={{position:"absolute",top:8,right:8,zIndex:5,background:C.bg1,border:`1px solid ${C.border}`,borderRadius:8,padding:"3px 8px",fontSize:14,lineHeight:1,cursor:"pointer",color:C.text2}}>⛶</button>
+          <LineChart series={chartSeries} dates={dates} h={150} unit={"\u20ac"} defaultTF="ALL"/>
         </div>
+        {fs && (
+          <div onClick={function(){setFs(false);}} style={{position:"fixed",inset:0,zIndex:720,background:C.bg1,display:"flex",flexDirection:"column",padding:"14px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:15,fontWeight:800,color:color}}>{fond} · Investi vs Valeur</div>
+              <button onClick={function(){setFs(false);}} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 12px",fontSize:13,fontWeight:700,cursor:"pointer",color:C.text}}>✕</button>
+            </div>
+            <div onClick={function(e){e.stopPropagation();}} style={{flex:1,display:"flex",alignItems:"center",width:"100%"}}>
+              <div style={{width:"100%"}}>
+                <LineChart series={chartSeries} dates={dates} h={340} unit={"\u20ac"} legend={[{color:C.blue,label:"Investi cumulé"},{color:color,label:"Valeur du fonds"}]} defaultTF="ALL"/>
+              </div>
+            </div>
+          </div>
+        )}
         <div style={{marginTop:14}}><Btn label="Fermer" onClick={onClose} color={C.gray} outline full/></div>
       </div>
     </div>

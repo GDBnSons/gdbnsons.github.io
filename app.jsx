@@ -320,6 +320,47 @@ async function fetchYahoo(symbol){
   return null;
 }
 
+/* v26.03 Lot F — historique Yahoo (cours date) via worker /yahoo-chart, filtre sur la periode du trade */
+function ySymFor(ticker, src){
+  if(YF_MAP[ticker]) return YF_MAP[ticker];
+  if(src==="ibkr") return ticker;          // action : symbole tel quel (US) — EU a mapper
+  return ticker+"-USD";                      // crypto
+}
+function pickRange(fromDate){
+  var days=(Date.now()-new Date(fromDate).getTime())/864e5;
+  if(days<=28) return "1mo"; if(days<=88) return "3mo"; if(days<=180) return "6mo";
+  if(days<=360) return "1y"; if(days<=720) return "2y"; if(days<=1800) return "5y"; return "max";
+}
+async function fetchYahooHist(symbol, fromDate, toDate){
+  var range=pickRange(fromDate);
+  var out=[];
+  try{
+    var res=await fetch(`${CF_WORKER_URL}/yahoo-chart?symbol=${encodeURIComponent(symbol)}&interval=1d&range=${range}&no_logo=1`,
+      {headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(12000)});
+    if(res.ok){
+      var d=await res.json();
+      var candles=(d&&d.candles)||[];
+      out=candles.map(function(c){ return [new Date(c.t).toISOString().slice(0,10), c.c]; });
+    }
+  }catch(e){}
+  if(!out.length){ // fallback proxy public avec period1/period2
+    try{
+      var p1=Math.floor((new Date(fromDate).getTime())/1000)-7*86400;
+      var p2=Math.floor((new Date(toDate).getTime())/1000)+7*86400;
+      var u=`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&period1=${p1}&period2=${p2}`;
+      var r=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,{signal:AbortSignal.timeout(12000)});
+      var j=await r.json(); var raw=typeof j.contents==="string"?j.contents:JSON.stringify(j);
+      var dd=JSON.parse(raw); var rr=dd&&dd.chart&&dd.chart.result&&dd.chart.result[0];
+      if(rr){ var ts=rr.timestamp||[]; var cl=(rr.indicators&&rr.indicators.quote&&rr.indicators.quote[0]&&rr.indicators.quote[0].close)||[];
+        for(var i=0;i<ts.length;i++){ if(cl[i]!=null) out.push([new Date(ts[i]*1000).toISOString().slice(0,10), cl[i]]); } }
+    }catch(e){}
+  }
+  // filtre fenetre [from-7j, to+7j]
+  var lo=new Date(new Date(fromDate).getTime()-7*864e5).toISOString().slice(0,10);
+  var hi=new Date(new Date(toDate).getTime()+10*864e5).toISOString().slice(0,10);
+  return out.filter(function(p){ return p[0]>=lo && p[0]<=hi; });
+}
+
 /* Fetch BTC + ETH price and EUR/USD rate from CoinGecko */
 async function fetchCoinGecko(){
   const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,eur";
@@ -681,7 +722,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.02";
+const APP_VERSION = "v26.03";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1043,7 +1084,7 @@ function filterDB(tf){
 ═══════════════════════════════════════════════════════════ */
 const TFS=["1W","1M","MTD","YTD","1Y","2Y","ALL"];
 
-function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="€"}){
+function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="€",markers}){
   const svgRef=useRef(null);
   const[hover,setHover]=useState(null);
   const[tf,setTF]=useState(defaultTF);
@@ -1183,6 +1224,12 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
                 opacity={hover!=null&&si>0?.45:.92}/>
             </g>
           );
+        })}
+
+        {/* Markers Buy/Sell (Lot F) */}
+        {(markers||[]).map(function(m,mi){
+          if(m==null||m.i<0||m.i>=n||m.v==null) return null;
+          return (<circle key={"mk"+mi} cx={px(m.i)} cy={py(m.v)} r={4.5} fill={m.color} stroke={C.bg1} strokeWidth={1.6}/>);
         })}
 
         {/* Crosshair + dots */}
@@ -6353,11 +6400,11 @@ function computeClosedTrades(txns){
     rows.forEach(function(t){
       var q=+t.qty||0, v=+t.valueUSD||0;
       if(t.side==="BUY"){
-        if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0}; }
-        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++;
+        if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
+        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:+t.price||0,valueUSD:v});
       } else {
         if(!cyc) return;
-        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++;
+        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:+t.price||0,valueUSD:v});
         if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
         pos-=q;
         if(pos<=EPS*Math.max(1,cyc.buyQty)){
@@ -6366,7 +6413,7 @@ function computeClosedTrades(txns){
           closed.push({ticker:tk,src:cyc.src,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
             durationDays:dur, qty:cyc.buyQty,
             entryPrice:cyc.buyQty?cyc.buyVal/cyc.buyQty:0, exitPrice:cyc.sellQty?cyc.sellVal/cyc.sellQty:0,
-            investedUSD:inv, pnlUSD:pnl, pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell});
+            investedUSD:inv, pnlUSD:pnl, pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills});
           pos=0; cost=0; cyc=null;
         }
       }
@@ -6375,8 +6422,109 @@ function computeClosedTrades(txns){
   return {closed:closed};
 }
 
-function PageLegend({txns, liveFutures, hidden, eur, EFF}){
+// v26.03 Lot F — modal detail d'un trade + courbe Yahoo avec points Buy(vert)/Sell(rouge).
+function usdEurAt(date){
+  // €/$ a la date (depuis DD col5), plus proche sinon
+  if(!DD||!DD.length) return 0.92;
+  var best=DD[0][5], bd=DD[0][0];
+  for(var i=0;i<DD.length;i++){ if(DD[i][0]<=date){ best=DD[i][5]; bd=DD[i][0]; } else break; }
+  return best||0.92;
+}
+function TradeDetailModal({trade, kind, onClose}){
+  const isFut = kind==="futures";
+  const ticker = trade.ticker;
+  const src = isFut ? "crypto" : trade.src;
+  const dir = isFut ? trade.dir : null;
+  const entryDate = isFut ? trade.entryDate : trade.entryDate;
+  const exitDate  = isFut ? trade.exitDate  : trade.exitDate;
+  const pnlUSD = trade.pnlUSD;
+  const up = pnlUSD>=0;
+  const eurRate = usdEurAt(exitDate);
+  const pnlEUR = pnlUSD*eurRate;
+  const [hist,setHist]=useState(null); // null=loading, []=erreur/vide
+  const [err,setErr]=useState(false);
+  const ySym = ySymFor(ticker, src);
+  useEffect(function(){
+    let alive=true; setHist(null); setErr(false);
+    fetchYahooHist(ySym, entryDate, exitDate).then(function(pts){
+      if(!alive) return;
+      if(!pts||!pts.length){ setErr(true); setHist([]); } else setHist(pts);
+    }).catch(function(){ if(alive){ setErr(true); setHist([]); } });
+    return function(){ alive=false; };
+  }, [ySym, entryDate, exitDate]);
+
+  // fills -> markers
+  const fills = isFut
+    ? [{date:entryDate, side:(dir==="LONG"?"BUY":"SELL")}, {date:exitDate, side:(dir==="LONG"?"SELL":"BUY")}]
+    : (trade.fills||[]);
+  let chartSeries=[], chartDates=[], markers=[];
+  if(hist && hist.length){
+    chartDates = hist.map(function(p){return p[0];});
+    const closes = hist.map(function(p){return p[1];});
+    chartSeries = [{vals:closes, color:C.blue, label:"Cours", area:true}];
+    function nIdx(d){ for(var i=0;i<chartDates.length;i++){ if(chartDates[i]>=d) return i; } return chartDates.length-1; }
+    markers = fills.map(function(fl){
+      const i=nIdx(fl.date);
+      return {i:i, v:closes[i], color:(fl.side==="BUY"?C.green:C.red)};
+    });
+  }
+  const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
+  const fE = function(v){ return (v<0?"-":"")+Math.abs(Math.round(v)).toLocaleString("fr-FR")+" \u20ac"; };
+  const typeLabel = isFut ? ("Futures "+dir) : (src==="ibkr"?"Action (spot)":"Crypto (spot)");
+  const Info=function(props){ return (
+    <div style={{background:C.bg2,borderRadius:10,padding:"9px 11px"}}>
+      <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>{props.k}</div>
+      <div style={{fontSize:14,fontWeight:800,color:props.c||C.text,marginTop:2}}>{props.v}</div>
+    </div>
+  );};
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:680,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg1,borderRadius:"20px 20px 0 0",padding:"20px 16px 30px",width:"100%",maxWidth:460,maxHeight:"90vh",overflowY:"auto",border:`1px solid ${C.border}`}}>
+        {/* En-tete */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:900,color:C.text}}>{ticker}</div>
+            <div style={{fontSize:11,fontWeight:700,color:isFut?(dir==="LONG"?C.green:C.red):C.text3,marginTop:2}}>{typeLabel}{isFut?(" \u00b7 x"+trade.lev):""}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:20,fontWeight:900,color:up?C.green:C.red}}>{(up?"+":"")+fU(pnlUSD)}</div>
+            <div style={{fontSize:12,fontWeight:700,color:up?C.green:C.red}}>{(up?"+":"")+fE(pnlEUR)} {trade.pct!=null?("\u00b7 "+(up?"+":"")+trade.pct.toFixed(1)+"%"):""}</div>
+          </div>
+        </div>
+        {/* Infos */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:14}}>
+          <Info k="Entree" v={entryDate+" \u00b7 "+(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
+          <Info k="Sortie" v={exitDate+" \u00b7 "+(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
+          <Info k="Duree" v={trade.durationDays+" j"}/>
+          {isFut
+            ? <Info k="Notionnel / Marge" v={fU(trade.notionalUSD)+" / "+fU(trade.marginUSD)}/>
+            : <Info k="Quantite" v={(trade.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})}/>}
+          {isFut
+            ? <Info k="Funding / Frais" v={Math.round(trade.raw.fundingUSD)+" / "+Math.round(trade.raw.tradingFeesUSD)+" $"}/>
+            : <Info k="Capital investi" v={fU(trade.investedUSD)}/>}
+          <Info k={isFut?"Levier":"Operations"} v={isFut?("x"+trade.lev):(trade.nBuy+" achats / "+trade.nSell+" ventes")}/>
+        </div>
+        {/* Graphique Yahoo */}
+        <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px"}}>
+          <div style={{display:"flex",gap:16,marginBottom:6,paddingLeft:2,fontSize:11}}>
+            <span style={{color:C.blue,fontWeight:700}}>Cours Yahoo</span>
+            <span style={{color:C.green,fontWeight:700}}>\u25cf Buy</span>
+            <span style={{color:C.red,fontWeight:700}}>\u25cf Sell</span>
+          </div>
+          {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}\u2026</div>}
+          {hist!==null && hist.length>0 && <LineChart series={chartSeries} dates={chartDates} h={180} unit={""} hideTF={true} defaultTF="ALL" markers={markers}/>}
+          {hist!==null && hist.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:30}}>Cours indisponible pour {ySym}{err?" (a mapper)":""}.</div>}
+        </div>
+        <div style={{marginTop:14}}><Btn label="Fermer" onClick={onClose} color={C.gray} outline full/></div>
+      </div>
+    </div>
+  );
+}
+function PageLegend(
+{txns, liveFutures, hidden, eur, EFF}){
   const [board,setBoard]=useState("spot");
+  const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("pnl");
   const spot = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
   const fut = React.useMemo(function(){
@@ -6444,7 +6592,7 @@ function PageLegend({txns, liveFutures, hidden, eur, EFF}){
         {sorted.map(function(t,i){
           const up=t.pnlUSD>=0;
           return (
-            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`}}>
+            <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.text}}>
                   {t.ticker}
@@ -6461,6 +6609,7 @@ function PageLegend({txns, liveFutures, hidden, eur, EFF}){
         })}
         {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade clôturé.</div>}
       </div>
+      {sel && <TradeDetailModal trade={sel.trade} kind={sel.kind} onClose={function(){setSel(null);}}/>}
     </div>
   );
 }

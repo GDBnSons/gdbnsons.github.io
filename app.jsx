@@ -772,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.08";
+const APP_VERSION = "v25.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4811,7 +4811,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
    4. Graphique GDB.C cours + Graphique GDB.S cours
 ═══════════════════════════════════════════════════════════ */
 /* ── FondCard: récapitulatif d'un fonds ── */
-function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, perfAllTime}){
+function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, perfAllTime, onClick}){
   // label format: "GDB.C — CRYPTO" or "GDB.S — ACTIONS"
   const [titre, sousTitre] = label.split(" — ");
   // perfAllTime passé depuis PageGDB (corrigé €/$), fallback sur calcul local en €
@@ -4824,7 +4824,7 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, 
   const perfs3 = perfs.slice(0,3);
 
   return(
-    <div style={{
+    <div onClick={onClick} style={{
       background:C.bg1,
       borderRadius:C.radius||14,
       border:`1px solid ${C.border}`,
@@ -4833,6 +4833,7 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, 
       marginBottom:12,
       position:"relative",
       overflow:"hidden",
+      cursor:onClick?"pointer":"default",
     }}>
       {/* Halo décoratif */}
       <div style={{
@@ -4892,8 +4893,120 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, 
   );
 }
 
-function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liveDD}){
+// v25.09 Phase 5b — modal de detail d'un fonds (clic sur la FondCard).
+// Detention par investisseur, PRU + P&L (option A : base = capital net investi),
+// et graphe 2 courbes daily : investi cumule (bleu/aire) + valeur du fonds (orange C / rouge S).
+function FondDetailModal({fond, EFF, liveInv, liveDD, liveGC, eur, onClose}){
+  const isC = fond==="GDB.C";
+  const color = isC ? C.btc : C.red;
+  const src = EFF||CURRENT;
+  const usdEur = src.usdEur||0.86;
+  const cours$ = isC ? src.gdbC : src.gdbS;
+  const coursEur = cours$ * usdEur;
+  const inv = (liveInv||INV_SEED).filter(function(m){return m.fonds===fond;});
+  // Detention par investisseur (parts nettes)
+  const byH = {}; inv.forEach(function(m){ byH[m.holder]=(byH[m.holder]||0)+(m.shares||0); });
+  const totalParts = Object.keys(byH).reduce(function(a,h){return a+byH[h];},0);
+  const holders = Object.keys(byH).map(function(h){return {h:h, sh:byH[h], pct: totalParts?byH[h]/totalParts:0};})
+    .filter(function(x){return Math.abs(x.sh)>0.01;}).sort(function(a,b){return b.sh-a.sh;});
+  // Option A : base = capital net investi
+  const netInvested = inv.reduce(function(a,m){return a+(m.montant||0);},0);
+  const valueNow = coursEur * totalParts;
+  const pru = totalParts ? netInvested/totalParts : 0;
+  const pnl = valueNow - netInvested;
+  const pnlPct = netInvested ? pnl/netInvested : 0;
+  const pnlUp = pnl>=0;
+  // Serie quotidienne
+  const dd = liveDD || DD;
+  const ddU = {}; dd.forEach(function(r){ ddU[r[0]]=r[5]; });
+  const movs = inv.slice().sort(function(a,b){return (a.date||"").localeCompare(b.date||"");});
+  const start = movs.length ? movs[0].date : null;
+  let axis;
+  if(isC){ axis = (liveGC||GC_FULL).map(function(r){return {d:r[0], c:r[1], ue:ddU[r[0]]};}); }
+  else { axis = dd.filter(function(r){return r[4]!=null;}).map(function(r){return {d:r[0], c:r[4], ue:r[5]};}); }
+  if(start) axis = axis.filter(function(p){return p.d>=start;});
+  let pi=0, cumS=0, cumM=0;
+  const dates=[], invested=[], value=[];
+  axis.forEach(function(p){
+    while(pi<movs.length && movs[pi].date<=p.d){ cumS+=movs[pi].shares||0; cumM+=movs[pi].montant||0; pi++; }
+    const ue = p.ue!=null ? p.ue : usdEur;
+    dates.push(p.d); invested.push(cumM); value.push((p.c||0)*ue*cumS);
+  });
+  // SVG
+  const W=340, H=180, PAD=6;
+  const n = dates.length;
+  const allV = value.concat(invested);
+  const maxY = (allV.reduce(function(m,v){return v>m?v:m;}, 1)) * 1.08 || 1;
+  const xAt = function(i){ return PAD + (n>1? i/(n-1):0)*(W-2*PAD); };
+  const yAt = function(v){ return H-PAD - (Math.max(0,v)/maxY)*(H-2*PAD); };
+  const lineP = function(arr){ return arr.map(function(v,i){ return (i?"L":"M")+xAt(i).toFixed(1)+" "+yAt(v).toFixed(1); }).join(" "); };
+  const areaP = function(arr){ return n? lineP(arr)+" L"+xAt(n-1).toFixed(1)+" "+(H-PAD)+" L"+xAt(0).toFixed(1)+" "+(H-PAD)+" Z" : ""; };
+  const fmtE = function(v){ return "\u20ac"+Math.round(v).toLocaleString("fr-FR"); };
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:650,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg1,borderRadius:"20px 20px 0 0",padding:"22px 18px 32px",width:"100%",maxWidth:460,maxHeight:"88vh",overflowY:"auto",border:`1px solid ${C.border}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:900,color:color}}>{fond}</div>
+            <div style={{fontSize:12,color:C.text3,marginTop:2}}>{isC?"Crypto":"Actions"} · {Math.round(totalParts).toLocaleString("fr-FR")} parts</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:18,fontWeight:800,color:C.text}}>{fmtE(valueNow)}</div>
+            <div style={{fontSize:11,color:C.text3}}>cours {"\u20ac"}{coursEur.toFixed(4)}</div>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+          <div style={{background:(pnlUp?C.green:C.red)+"15",border:`1px solid ${(pnlUp?C.green:C.red)}40`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>P&L latent</div>
+            <div style={{fontSize:20,fontWeight:900,color:pnlUp?C.green:C.red}}>{pnlUp?"+":""}{fmtE(pnl)}</div>
+            <div style={{fontSize:12,fontWeight:700,color:pnlUp?C.green:C.red}}>{pnlUp?"+":""}{(pnlPct*100).toFixed(1)}%</div>
+          </div>
+          <div style={{background:C.bg2,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Investi net · PRU</div>
+            <div style={{fontSize:20,fontWeight:900,color:C.text}}>{fmtE(netInvested)}</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.text2}}>{pru.toFixed(2)} {"\u20ac"}/part</div>
+          </div>
+        </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
+          <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Détention</div>
+          {holders.map(function(x){return (
+            <div key={x.h} style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}>
+                <span style={{color:C.text,fontWeight:700}}>{x.h}</span>
+                <span style={{color:C.text2}}>{(x.pct*100).toFixed(1)}% · {Math.round(x.sh).toLocaleString("fr-FR")} parts</span>
+              </div>
+              <div style={{height:5,background:C.border,borderRadius:3,overflow:"hidden"}}>
+                <div style={{height:"100%",width:(Math.max(0,x.pct)*100).toFixed(1)+"%",background:color}}/>
+              </div>
+            </div>
+          );})}
+        </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"12px 10px 8px"}}>
+          <div style={{display:"flex",gap:16,marginBottom:8,paddingLeft:4,fontSize:11}}>
+            <span style={{color:C.blue,fontWeight:700}}>● Investi cumulé</span>
+            <span style={{color:color,fontWeight:700}}>● Valeur du fonds</span>
+          </div>
+          <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}} preserveAspectRatio="none">
+            {n>1 && <path d={areaP(invested)} fill={C.blue+"22"} stroke="none"/>}
+            {n>1 && <path d={lineP(invested)} fill="none" stroke={C.blue} strokeWidth="1.6"/>}
+            {n>1 && <path d={lineP(value)} fill="none" stroke={color} strokeWidth="1.8"/>}
+          </svg>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,padding:"2px 4px 0"}}>
+            <span>{dates.length?dates[0]:""}</span>
+            <span>max {fmtE(maxY/1.08)}</span>
+            <span>{dates.length?dates[dates.length-1]:""}</span>
+          </div>
+        </div>
+        <div style={{marginTop:14}}><Btn label="Fermer" onClick={onClose} color={C.gray} outline full/></div>
+      </div>
+    </div>
+  );
+}
+function PageGDB(
+{chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liveDD,liveInv}){
   const [benchTF, setBenchTF] = useState("YTD");
+  const [detailFond, setDetailFond] = useState(null);
   const src = EFF||CURRENT;
   const usdEurNow = src.usdEur;
   const _GDBS = liveGDBS || GDBS;
@@ -5026,12 +5139,13 @@ function PageGDB({chartData,hidden,EFF,eur,liveGSB,liveGDBS,liveBench,liveGC,liv
     <div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:4}}>
         <FondCard label="GDB.C — CRYPTO" cours={gcToday} qty={gcQty} fonds={gcFonds} color={C.btc} hidden={hidden}
-          eur={eur} usdEur={src.usdEur} perfAllTime={gcPerfAllTime}
+          eur={eur} usdEur={src.usdEur} perfAllTime={gcPerfAllTime} onClick={()=>setDetailFond("GDB.C")}
           perfs={[["1J",gcPerf(d1)],["1S",gcPerf(d7)],["1M",gcPerf(d30)],["YTD",gcPerf(dytd)],["ALL",gcPerfAllTime]]}/>
         <FondCard label="GDB.S — ACTIONS" cours={gsToday} qty={gsQty} fonds={gsFonds} color={C.blue} hidden={hidden}
-          eur={eur} usdEur={src.usdEur} perfAllTime={gsPerfAllTime}
+          eur={eur} usdEur={src.usdEur} perfAllTime={gsPerfAllTime} onClick={()=>setDetailFond("GDB.S")}
           perfs={[["1J",gsPerf(d1)],["1S",gsPerf(d7)],["1M",gsPerf(d30)],["YTD",gsYTD],["1Y*",gsYTD]]}/>
       </div>
+      {detailFond && <FondDetailModal fond={detailFond} EFF={EFF} liveInv={liveInv} liveDD={liveDD} liveGC={liveGC} eur={eur} onClose={()=>setDetailFond(null)}/>}
 
       <SH label="Comparaison — base 100 au départ de la période" color={C.gray}/>
       <GdbCompareChartGDB onTFChange={setBenchTF} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC}/>
@@ -8003,7 +8117,7 @@ function App(){
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
-        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD}/>}
+        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv}/> }

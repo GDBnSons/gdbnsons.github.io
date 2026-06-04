@@ -772,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.05";
+const APP_VERSION = "v25.06";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7642,23 +7642,43 @@ function App(){
     // 3. Positions
     setLive(prev=>{
       const b=prev||CURRENT;
-      const u=b.usdEur;
+      const u=b.usdEur||(b.eurUsd?1/b.eurUsd:0.8605);
+      const eurUsd=b.eurUsd||1/u;
       const deltaUSD=sign*(montantEUR/u);
+      const tgt=inv.fonds==="GDB.C"?"KUCOIN":"EURO";
+      // Injecter deltaUSD dans le cash-bucket du fonds. Robuste : recherche insensible a la
+      // casse, creation si absent, et NORMALISATION du ticker vers KUCOIN/EURO (calcGdbPrices
+      // lit ces tickers en exact -> sinon le fonds n'augmente pas et le cours derive).
       let stocksItems=b.stocks.items.map(i=>({...i}));
-      if(inv.fonds==="GDB.C"){
-        const ki=stocksItems.findIndex(x=>x.t==="KUCOIN");
-        if(ki>=0) stocksItems[ki]={...stocksItems[ki], val:(stocksItems[ki].val||0)+deltaUSD};
-      } else {
-        const ei=stocksItems.findIndex(x=>x.t==="EURO");
-        if(ei>=0){ const e={...stocksItems[ei]}; e.val=(e.val||0)+deltaUSD; e.qty=(e.qty||0)+sign*montantEUR; stocksItems[ei]=e; }
+      let fi=stocksItems.findIndex(x=>(x.t||"").toUpperCase()===tgt);
+      if(fi<0){
+        stocksItems.push(inv.fonds==="GDB.C"
+          ? {t:"KUCOIN",cat:"Cash",qty:0,pa:1,live:1,val:0,pnl:0,pct:0}
+          : {t:"EURO",cat:"Cash",qty:0,pa:1.17,live:eurUsd,val:0,pnl:0,pct:0});
+        fi=stocksItems.length-1;
       }
+      { const it={...stocksItems[fi]}; it.t=tgt; it.val=(it.val||0)+deltaUSD;
+        if(inv.fonds==="GDB.S"){ it.qty=(it.qty||0)+sign*montantEUR; } stocksItems[fi]=it; }
       let bank={...b.bank, breakdown:{...b.bank.breakdown}};
       let portfolioItems=b.portfolio&&b.portfolio.items;
+      // Tuile du bucket fonds dans portfolio.items (affichage KuCoin / EURO)
+      if(portfolioItems){
+        let seen=false;
+        portfolioItems=portfolioItems.map(it=>{
+          if((it.t||"").toUpperCase()!==tgt) return it;
+          seen=true; const nv=(it.val||0)+deltaUSD;
+          return inv.fonds==="GDB.S"
+            ? {...it, t:tgt, val:nv, qty:(it.qty||0)+sign*montantEUR, valEUR:(it.valEUR!=null?it.valEUR:0)+sign*montantEUR}
+            : {...it, t:tgt, val:nv, valEUR:Math.round(nv*u)};
+        });
+        if(!seen) portfolioItems=[...portfolioItems, inv.fonds==="GDB.C"
+          ? {t:"KUCOIN",cat:"Cash",qty:0,pa:1,live:1,val:deltaUSD,pnl:0,pct:0,valEUR:Math.round(deltaUSD*u)}
+          : {t:"EURO",cat:"Cash",qty:sign*montantEUR,pa:1.17,live:eurUsd,val:deltaUSD,pnl:0,pct:0,valEUR:sign*montantEUR}];
+      }
       if(inv.holder===INV_OWNER){
         bank.breakdown[inv.bank]=(bank.breakdown[inv.bank]||0)-sign*montantEUR;
         bank.totalEUR=Object.values(bank.breakdown).reduce((s,v)=>s+v,0);
         if(portfolioItems){
-          const eurUsd=b.eurUsd||1/u;
           portfolioItems=portfolioItems.map(it=>{
             if(it.cat!=="Cash Matelas"||it.t!==inv.bank) return it;
             const nv=(it.valEUR!=null?it.valEUR:it.qty)-sign*montantEUR;
@@ -7670,7 +7690,7 @@ function App(){
       const cashStocks =stocksItems.filter(x=>x.cat==="Cash").reduce((s,x)=>s+x.val,0);
       const bankUSD    =Math.round(bank.totalEUR/u);
       const totalUSD   =b.crypto.total+stocksTotal+bankUSD+cashStocks;
-      const updated={...b, stocks:{...b.stocks, items:stocksItems}, bank, totalUSD, totalEUR:Math.round(totalUSD*u),
+      const updated={...b, stocks:{...b.stocks, items:stocksItems, total:Math.round((b.stocks.total||0)+deltaUSD)}, bank, totalUSD, totalEUR:Math.round(totalUSD*u),
         ...(portfolioItems?{portfolio:{...b.portfolio, items:portfolioItems}}:{}), savedAt:Date.now()};
       const {gdbS,gdbC}=calcGdbPrices(updated);
       return {...updated, gdbS, gdbC};

@@ -772,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.06";
+const APP_VERSION = "v25.07";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4847,7 +4847,7 @@ function FondCard({label, cours, qty, fonds, color, perfs, hidden, eur, usdEur, 
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:8,color:C.gray,letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>Parts</div>
-          <div style={{fontSize:17,fontWeight:800,color:C.text}}>{msk(qty.toLocaleString("fr-FR"), hidden)}</div>
+          <div style={{fontSize:17,fontWeight:800,color:C.text}}>{msk(Math.round(qty).toLocaleString("fr-FR"), hidden)}</div>
         </div>
       </div>
 
@@ -6117,6 +6117,7 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_crypto",    label:"Crypto (positions)"},
     {key:"gdb_stocks",    label:"Stocks (positions)"},
     {key:"gdb_bank",      label:"Banque (cash matelas)"},
+    {key:"gdb_inv",       label:"Investissements (parts fonds)", cols:["Date","Fonds","Investisseur","Sens","Parts","Cours €","Montant €"]},
     {key:"gdb_yfmap",     label:"YF_MAP (tickers Yahoo)"},
     {key:"gdb_icons",     label:"Icônes personnalisées"},
     {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
@@ -6283,8 +6284,9 @@ function CloudKeyList({data, onRefresh}){
 }
 
 
-function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench}){
+function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv}){
   var _DD   = liveDD   || DD;
+  var _INV  = liveInv  || INV_SEED;
   var _GDBS = liveGDBS || GDBS;
   var _GC   = liveGC   || GC_FULL;
   var _GSB  = liveGSB  || GS_B100_EXT;
@@ -6445,6 +6447,14 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
       headers:["An","Mois","BOM","EOM","P&L","Inv","%"],
       rows: (function(){var out=[];Object.entries(_TM).forEach(function(e){var yr=e[0];var d=e[1];d.m.forEach(function(m,i){if(d.bom[i]==null)return;out.push([yr,m,fmt(d.bom[i]),fmt(d.eom[i]),fmtPnl(d.pnl[i]),(d.inv&&d.inv[i]!=null&&d.inv[i]!==0)?(d.inv[i]>0?"+":"")+d.inv[i].toLocaleString("fr-FR"):"—",fmtPct(d.pct[i])]);});});return out.reverse();})(),
     },
+    "INV": {
+      label:"INV — Investissements (parts fonds)",
+      desc:"Mouvements de parts dans les fonds GDB.C / GDB.S ("+_INV.length+" lignes)",
+      headers:["Date","Fonds","Investisseur","Sens","Parts","Cours €","Montant €"],
+      rows: _INV.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");}).map(function(m){
+        return[m.date, m.fonds, m.holder, m.io, fmtF(m.shares,2), fmtF(m.vps,2), fmt(Math.round(m.montant))];
+      }),
+    },
     "YF_MAP": {
       label:"YF_MAP — Tickers Yahoo Finance",
       desc:"Correspondance ticker interne -> symbole Yahoo ("+(Object.keys(YF_MAP).length)+" tickers)",
@@ -6492,6 +6502,7 @@ function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveG
     {name:"Transactions",dbKey:"TXNS",         count:(txns||[]).length,       last:(txns&&txns.length>0?txns[txns.length-1].date:"—")},
     {name:"Snapshots",   dbKey:"SNAPSHOTS",    count:(chartData||[]).length,  last:(chartData&&chartData.length>0?chartData[chartData.length-1].d:"—")},
     // Références
+    {name:"INV (parts)", dbKey:"INV",          count:_INV.length,             last:(_INV.length?_INV.map(function(m){return m.date||"";}).sort().reverse()[0]:"")},
     {name:"YF_MAP",      dbKey:"YF_MAP",       count:Object.keys(YF_MAP).length, last:"tickers"},
     {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS", count:Object.keys(ICON_DB).length, last:"icones"},
   ];
@@ -7972,7 +7983,7 @@ function App(){
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench}/> }
+          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv}/> }
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

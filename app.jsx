@@ -98,6 +98,9 @@ const GDB_C_NB_PARTS = 5610;   // col P onglet Chart
 // Les constantes 5610/11942 ci-dessus restent UNIQUEMENT pour la reconstruction EOM
 // Stats (v23.27), qui inverse des cours enregistres avec ces parts (B-mid traitera ca).
 let FUND_PARTS = { S: 11924.5, C: 5637.837283 };
+// v25.05 — proprietaire du portefeuille : seul un investissement a son nom debite/credite
+// le Cash Matelas (E1). Les co-investisseurs font grossir le fonds brut sans toucher au Matelas.
+const INV_OWNER = "FLO";
 function cumulFundParts(invArr){
   let S = 0, C = 0;
   (invArr || []).forEach(function(m){
@@ -769,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.04";
+const APP_VERSION = "v25.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5210,7 +5213,7 @@ function YahooTickerSearch({onSelect}){
   );
 }
 
-function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders}){
+function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestApplied}){
   const[mode,setMode]=useState("trade");
   const[form,setForm]=useState({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
   const[showNew,setShowNew]=useState(false);
@@ -5717,6 +5720,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders}){
           {/* Écran de validation */}
           {confirmInv&&(()=>{
             const isIn=invest.io==="IN";
+            const holderR=invest.holder==="+ Nouveau"?(invest.newHolder||"").trim().toUpperCase():invest.holder;
             const montant=parseFloat(invest.montant||0);
             const coursEur=(invest.fonds==="GDB.C"?(src.gdbC||0):(src.gdbS||0))*(src.usdEur||1);
             const shares=coursEur>0?montant/coursEur:0;
@@ -5727,7 +5731,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders}){
                   <div style={{textAlign:"center",marginBottom:20}}>
                     <div style={{fontSize:36,marginBottom:8}}>{isIn?"📈":"📉"}</div>
                     <div style={{fontSize:16,fontWeight:800,color:C.text}}>Confirmer {isIn?"l'investissement":"le désinvestissement"}</div>
-                    <div style={{fontSize:13,color:C.text3,marginTop:4}}>{invest.fonds} · {invest.holder==="+ Nouveau"?(invest.newHolder||"").trim():invest.holder}</div>
+                    <div style={{fontSize:13,color:C.text3,marginTop:4}}>{invest.fonds} · {holderR}</div>
                   </div>
                   <div style={{background:col+"15",border:`1px solid ${col}40`,borderRadius:12,padding:"16px",textAlign:"center",marginBottom:16}}>
                     <div style={{fontSize:32,fontWeight:900,color:col,letterSpacing:-1}}>{isIn?"+":"-"}{fmt(montant)}</div>
@@ -5748,11 +5752,11 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders}){
                     </div>
                   </div>
                   <div style={{background:C.btc+"15",border:`1px solid ${C.btc}44`,borderRadius:8,padding:"8px 12px",marginBottom:14,fontSize:11,color:C.text3,textAlign:"center"}}>
-                    Aperçu — l'enregistrement réel sera actif en Phase 4.
+                    {holderR===INV_OWNER ? ((isIn?"Débit":"Crédit")+" "+invest.bank+" → "+(isIn?"création":"destruction")+" de parts · cours inchangé") : ("Apport externe de "+holderR+" → fonds brut (sans Cash Matelas)")}
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <Btn label="← Modifier" onClick={()=>setConfirmInv(false)} color={C.gray} outline/>
-                    <Btn label={isIn?"✓ Investir":"✓ Désinvestir"} onClick={()=>{setConfirmInv(false);onClose();}} color={col}/>
+                    <Btn label={isIn?"✓ Investir":"✓ Désinvestir"} onClick={()=>{ onInvestApplied&&onInvestApplied({holder:holderR,io:invest.io,fonds:invest.fonds,montant:montant,date:invest.date,bank:invest.bank}); setConfirmInv(false); onClose(); }} color={col}/>
                   </div>
                 </div>
               </div>
@@ -7615,6 +7619,69 @@ function App(){
     saveBase('gdb_txns', next);               // Phase 2 — base canonique : miroir v9 local + KV gdb_txns
   },[txns]);
 
+  // v25.05 Phase 4 — applyInvestment : transfert Cash Matelas <-> fonds, creation/destruction
+  // de parts (cumul DB), conservation EXACTE du cours (deltaUSD=montant/usdEur, shares=deltaUSD/cours$).
+  // E1 : debit/credit Cash Matelas SEULEMENT si holder===INV_OWNER ; sinon apport externe (fonds brut).
+  const applyInvestment=useCallback(inv=>{
+    const base=live||CURRENT;
+    const ue=base.usdEur;
+    const cours$=inv.fonds==="GDB.C"?base.gdbC:base.gdbS;
+    const montantEUR=parseFloat(inv.montant)||0;
+    if(!cours$||cours$<=0||montantEUR<=0||!inv.holder) return;
+    const sign=inv.io==="IN"?1:-1;
+    const montantUSD=montantEUR/ue;
+    const shares=montantUSD/cours$;
+    const sharesSigned=sign*shares;
+    const coursEur=cours$*ue;
+    // 1. Ligne DB (montant signe comme le seed : negatif pour OUT)
+    const row={ id:uid(), date:inv.date, fonds:inv.fonds, holder:inv.holder, io:inv.io,
+      shares:parseFloat(sharesSigned.toFixed(6)), vps:parseFloat(coursEur.toFixed(6)), montant:parseFloat((sign*montantEUR).toFixed(2)) };
+    const newInv=[...(liveInv||INV_SEED), row];
+    // 2. FUND_PARTS sync (avant setLive : calcGdbPrices lira la nouvelle valeur)
+    FUND_PARTS=cumulFundParts(newInv);
+    // 3. Positions
+    setLive(prev=>{
+      const b=prev||CURRENT;
+      const u=b.usdEur;
+      const deltaUSD=sign*(montantEUR/u);
+      let stocksItems=b.stocks.items.map(i=>({...i}));
+      if(inv.fonds==="GDB.C"){
+        const ki=stocksItems.findIndex(x=>x.t==="KUCOIN");
+        if(ki>=0) stocksItems[ki]={...stocksItems[ki], val:(stocksItems[ki].val||0)+deltaUSD};
+      } else {
+        const ei=stocksItems.findIndex(x=>x.t==="EURO");
+        if(ei>=0){ const e={...stocksItems[ei]}; e.val=(e.val||0)+deltaUSD; e.qty=(e.qty||0)+sign*montantEUR; stocksItems[ei]=e; }
+      }
+      let bank={...b.bank, breakdown:{...b.bank.breakdown}};
+      let portfolioItems=b.portfolio&&b.portfolio.items;
+      if(inv.holder===INV_OWNER){
+        bank.breakdown[inv.bank]=(bank.breakdown[inv.bank]||0)-sign*montantEUR;
+        bank.totalEUR=Object.values(bank.breakdown).reduce((s,v)=>s+v,0);
+        if(portfolioItems){
+          const eurUsd=b.eurUsd||1/u;
+          portfolioItems=portfolioItems.map(it=>{
+            if(it.cat!=="Cash Matelas"||it.t!==inv.bank) return it;
+            const nv=(it.valEUR!=null?it.valEUR:it.qty)-sign*montantEUR;
+            return {...it, qty:nv, valEUR:nv, val:Math.round(nv*eurUsd), live:eurUsd};
+          });
+        }
+      }
+      const stocksTotal=stocksItems.filter(x=>x.cat!=="Cash").reduce((s,x)=>s+x.val,0);
+      const cashStocks =stocksItems.filter(x=>x.cat==="Cash").reduce((s,x)=>s+x.val,0);
+      const bankUSD    =Math.round(bank.totalEUR/u);
+      const totalUSD   =b.crypto.total+stocksTotal+bankUSD+cashStocks;
+      const updated={...b, stocks:{...b.stocks, items:stocksItems}, bank, totalUSD, totalEUR:Math.round(totalUSD*u),
+        ...(portfolioItems?{portfolio:{...b.portfolio, items:portfolioItems}}:{}), savedAt:Date.now()};
+      const {gdbS,gdbC}=calcGdbPrices(updated);
+      return {...updated, gdbS, gdbC};
+    });
+    // 4. Persister gdb_inv (local + cloud, dirty si offline)
+    setLiveInv(newInv);
+    lsv9Set('gdb_inv', newInv);
+    saveBase('gdb_inv', newInv);
+    console.info("[invest] "+inv.io+" "+inv.fonds+" "+inv.holder+" "+montantEUR+" -> "+sharesSigned.toFixed(4)+" parts | FUND_PARTS="+JSON.stringify(FUND_PARTS));
+  },[live, liveInv]);
+
   const applyTradeToEFF=useCallback(trade=>{
     setLive(prev=>{
       const base = prev||CURRENT;
@@ -7931,7 +7998,7 @@ function App(){
           <div style={{fontSize:9,color:C.text3,marginTop:4,textAlign:"right"}}>Appuie pour fermer</div>
         </div>
       )}
-      {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF} holders={invHolders}/>}
+      {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF} holders={invHolders} onInvestApplied={applyInvestment}/>}
       {showGistDiag&&(
         <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowGistDiag(false)}>

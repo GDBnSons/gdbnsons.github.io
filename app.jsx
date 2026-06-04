@@ -772,7 +772,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v25.07";
+const APP_VERSION = "v25.08";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4152,13 +4152,33 @@ const STOCKS_MONTHLY={"2025":{"bom":[null,null,null,null,null,null,null,0,48341,
 const TOTAL_MONTHLY={"2020":{"bom":[0,12965,14429,14730,13949,16500,16535,15207,16054,18626],"eom":[12965,14429,14730,13949,16500,16535,15207,16054,18626,17285],"pct":[-0.003,0.113,0.021,-0.053,0.183,0.002,-0.08,0.056,0.16,-0.072],"pnl":[-35,1464,301,-781,2551,35,-1328,847,2572,-1341],"inv":[13000,0,0,0,0,0,0,0,0,0],"m":["MAR","AVR","MAI","JUI","JUI","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":4285,"ttl_pct":0.33},"2021":{"bom":[17285,30597,37358,42551,47189,39158,36256,49652,75771,76626,121061,140020],"eom":[25813,37358,42551,47189,39158,36256,49652,75771,76626,121061,140020,131872],"pct":[0.493,0.221,0.139,0.109,-0.255,-0.227,0.259,0.526,0.011,0.449,0.157,-0.151],"pnl":[8528,6761,5193,4638,-12031,-8902,9396,26119,855,34435,18959,-21148],"inv":[0,0,0,0,4000,6000,4000,0,0,10000,0,13000],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":72803,"ttl_pct":4.212},"2022":{"bom":[131872,98434,124650,159265,128000,37596,23828,27864,30651,35864,37851,32712],"eom":[98434,124650,159265,128000,37596,23828,27864,30651,35864,37851,32712,34490],"pct":[-0.299,0.226,0.278,-0.196,-0.706,-0.366,0.169,-0.187,-0.026,0.055,-0.162,-0.037],"pnl":[-39437,22216,34615,-31265,-90404,-13768,4036,-5213,-787,1987,-6139,-1222],"inv":[6000,4000,0,0,0,0,0,8000,6000,0,1000,3000],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":-125381,"ttl_pct":-0.951},"2023":{"bom":[34490,50279,50302,61923,63601,59173,66269,63557,56367,58580,75272,81930],"eom":[50279,50302,61923,63601,59173,66269,63557,56367,58580,75272,81930,98690],"pct":[0.4,0,0.231,0.027,-0.07,0.12,-0.041,-0.113,0.039,0.285,0.088,0.205],"pnl":[13789,23,11621,1679,-4429,7096,-2712,-7190,2213,16692,6658,16759],"inv":[2000,0,0,0,0,0,0,0,0,0,0,0],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":62199,"ttl_pct":1.803},"2024":{"bom":[98690,89589,123905,119928,92469,105076,90420,97266,83867,110732,129011,213753],"eom":[89589,123905,119928,92469,105076,90420,97266,83867,110732,129011,213753,203746],"pct":[-0.092,0.383,-0.032,-0.229,0.136,-0.139,0.076,-0.189,0.261,0.165,0.688,-0.066],"pnl":[-9101,34316,-3977,-27459,12607,-14656,6846,-18399,21865,18278,88742,-14071],"inv":[0,0,0,0,0,0,0,5000,5000,0,-4000,4064],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":94991,"ttl_pct":0.963},"2025":{"bom":[203746,206750,130783,128772,158746,201338,191284,247340,286444,291868,317634,275888],"eom":[206750,130783,128772,158746,201338,191284,247340,286444,291868,317634,275888,258208],"pct":[0.015,-0.367,-0.015,0.233,0.268,-0.041,0.309,-0.037,0.019,-0.081,-0.131,-0.064],"pnl":[3004,-75967,-2011,29975,42591,-8184,59183,-9141,5424,-23683,-41746,-17680],"inv":[0,0,0,0,0,-1870,-3127,48245,0,49449,0,0],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":-38235,"ttl_pct":-0.188},"2026":{"bom":[258208,273324,261257,270793,297793,null,null,null,null,null,null,null],"eom":[273324,261257,270793,297793,304581,null,null,null,null,null,null,null],"pct":[0.059,-0.044,0.037,0.1,0.023,null,null,null,null,null,null,null],"pnl":[-7187,-28818,6286,27000,6788,null,null,null,null,null,null,null],"inv":[22304,16750,3250,0,0,null,null,null,null,null,null,null],"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"ttl_pnl":4069}};
 const SEAS_CRYPTO={"m":["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"],"pct":[0.076,0.039,0.114,0.024,-0.101,-0.118,0.159,0.0,0.037,0.151,0.125,-0.036]};
 
-function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
+// v25.08 Phase 5 (D2) — Investi mensuel derive de gdb_inv : somme des montants signes
+// (IN +, OUT -) par mois calendaire et par fonds. Aligne sur le tableau m[] de l'annee
+// via l'index de depart (gere 2020 qui commence en MAR, evite la collision de label JUI/JUL).
+function deriveInvArray(category, year, mArr, invArr){
+  const MONTHS=["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
+  const want = category==="crypto" ? {"GDB.C":1} : category==="stocks" ? {"GDB.S":1} : {"GDB.C":1,"GDB.S":1};
+  const byMonth={};
+  (invArr||[]).forEach(function(m){
+    if(!m||!m.date||!want[m.fonds]) return;
+    const p=String(m.date).split("-"); if(p[0]!==String(year)) return;
+    const mi=parseInt(p[1],10)-1;
+    byMonth[mi]=(byMonth[mi]||0)+(m.montant||0);
+  });
+  const startMI = (mArr&&mArr.length) ? MONTHS.indexOf(mArr[0]) : 0;
+  const n = (mArr&&mArr.length) ? mArr.length : 12;
+  const out=[];
+  for(let i=0;i<n;i++){ const v=byMonth[startMI+i]; out.push(v?Math.round(v):0); }
+  return out;
+}
+function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveInv}){
   const[yr,setYr]=useState("2026");
   const[cat,setCat]=useState("total"); // crypto | stocks | total
   const[view,setView]=useState("bars"); // bars | table
 
   // ── Taux USD/EUR historique par date (lit liveDD ou DD global) ────────────
   const _DD_ST = liveDD || DD;
+  const _INV_ST = liveInv || INV_SEED;
   // Retourne le taux usdEur <= dateStr, ou taux actuel par défaut
   const usdEurAtDate = dateStr => {
     const row = _DD_ST.reduceRight((a,r)=>a!=null?a:(r[0]<=dateStr&&r[5]?r:null),null);
@@ -4197,6 +4217,9 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src}){
                 : TOTAL_MONTHLY[year];
     if(!base) return null;
     const result = {...base};
+    // v25.08 Phase 5 (D2) — colonne Investi derivee de gdb_inv (reproduit l'historique +
+    // integre les nouveaux investissements). Aligne sur result.m de l'annee.
+    result.inv = deriveInvArray(category, year, base.m, _INV_ST);
     // ── Fonction commune : applique la valeur live EOM pour le mois courant ──
     const _applyLiveEOM = (eomVal) => {
       const MONTHS_FR_LOCAL = ["JAN","FEV","MAR","AVR","MAI","JUI","JUL","AOU","SEP","OCT","NOV","DEC"];
@@ -7979,7 +8002,7 @@ function App(){
       <div style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
-        {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT}/>}
+        {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}

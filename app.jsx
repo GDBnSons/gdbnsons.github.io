@@ -681,7 +681,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.01";
+const APP_VERSION = "v26.02";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6129,8 +6129,8 @@ function SnapshotModal({onSave, onClose, EFF}){
 /* ═══════════════════════════════════════════════════════════
    ROOT APP
 ═══════════════════════════════════════════════════════════ */
-const TABS=["Home","Portfolio","Stats","GDB","Data"];
-const ICONS=["◎","◑","▲","◈","⬡"];
+const TABS=["Home","Portfolio","Stats","GDB","Data","Legend"];
+const ICONS=["◎","◑","▲","◈","⬡","♛"];
 
 /* ── Global API keys (from Power Query in Excel) ── */
 
@@ -6333,7 +6333,139 @@ function CloudKeyList({data, onRefresh}){
 }
 
 
-function PageData({EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex}){
+// v26.02 Lot C — reconstruction des trades clotures (round-trip par actif, cout moyen).
+// Un cycle = de la 1ere acquisition (position 0->+) au retour a ~0. PnL = ventes - achats.
+function computeClosedTrades(txns){
+  var STABLE={USDT:1,USDC:1,UST:1,DAI:1,BUSD:1,TUSD:1,FDUSD:1};
+  var EPS=1e-6;
+  var byT={};
+  (txns||[]).forEach(function(t){
+    if(!t||!t.ticker||STABLE[t.ticker]) return;
+    (byT[t.ticker]=byT[t.ticker]||[]).push(t);
+  });
+  var closed=[];
+  Object.keys(byT).forEach(function(tk){
+    var rows=byT[tk].slice().sort(function(a,b){
+      if(a.date!==b.date) return a.date<b.date?-1:1;
+      return (a.side==="BUY"?0:1)-(b.side==="BUY"?0:1);
+    });
+    var pos=0, cost=0, cyc=null;
+    rows.forEach(function(t){
+      var q=+t.qty||0, v=+t.valueUSD||0;
+      if(t.side==="BUY"){
+        if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0}; }
+        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++;
+      } else {
+        if(!cyc) return;
+        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++;
+        if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
+        pos-=q;
+        if(pos<=EPS*Math.max(1,cyc.buyQty)){
+          var pnl=cyc.sellVal-cyc.buyVal, inv=cyc.buyVal;
+          var dur=Math.round((new Date(cyc.lastSell)-new Date(cyc.entryDate))/864e5);
+          closed.push({ticker:tk,src:cyc.src,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
+            durationDays:dur, qty:cyc.buyQty,
+            entryPrice:cyc.buyQty?cyc.buyVal/cyc.buyQty:0, exitPrice:cyc.sellQty?cyc.sellVal/cyc.sellQty:0,
+            investedUSD:inv, pnlUSD:pnl, pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell});
+          pos=0; cost=0; cyc=null;
+        }
+      }
+    });
+  });
+  return {closed:closed};
+}
+
+function PageLegend({txns, liveFutures, hidden, eur, EFF}){
+  const [board,setBoard]=useState("spot");
+  const [sortK,setSortK]=useState("pnl");
+  const spot = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
+  const fut = React.useMemo(function(){
+    return (liveFutures||SEED_FUTURES).map(function(t){
+      return {ticker:t.ticker, dir:t.dir, entryDate:t.openDate, exitDate:t.closeDate, durationDays:t.durationDays,
+        pnlUSD:t.realizedPnlUSD, pct:t.pctOnMargin, lev:t.leverage, marginUSD:t.marginUSD, notionalUSD:t.entryNotionalUSD, raw:t};
+    });
+  }, [liveFutures]);
+  const list = board==="spot" ? spot : fut;
+  const sorted = list.slice().sort(function(a,b){
+    if(sortK==="pnl") return b.pnlUSD-a.pnlUSD;
+    if(sortK==="pct") return (b.pct==null?-1e12:b.pct)-(a.pct==null?-1e12:a.pct);
+    return b.durationDays-a.durationDays;
+  });
+  const tot = list.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
+  const wins = list.filter(function(t){return t.pnlUSD>0;}).length;
+  const best = list.length?Math.max.apply(null,list.map(function(t){return t.pnlUSD;})):0;
+  const worst = list.length?Math.min.apply(null,list.map(function(t){return t.pnlUSD;})):0;
+  const winRate = list.length?Math.round(wins/list.length*100):0;
+  const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
+  const Tab=function(props){ return (
+    <button onClick={props.onClick} style={{flex:1,padding:"8px 0",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,
+      background:props.active?C.btc:C.bg2, color:props.active?"#000":C.text2}}>{props.label}</button>
+  );};
+  const Sort=function(props){ return (
+    <button onClick={props.onClick} style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${props.active?C.btc:C.border}`,cursor:"pointer",
+      fontSize:11,fontWeight:700,background:props.active?C.btc+"22":"transparent",color:props.active?C.btc:C.text3}}>{props.label}</button>
+  );};
+  return (
+    <div style={{padding:"8px 14px 96px"}}>
+      <div style={{fontSize:22,fontWeight:900,color:C.text,marginBottom:2}}>Legend</div>
+      <div style={{fontSize:12,color:C.text3,marginBottom:14}}>Trades cloturés · {board==="spot"?"Spot (crypto + actions)":"Futures"}</div>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <Tab label="Spot" active={board==="spot"} onClick={function(){setBoard("spot");}}/>
+        <Tab label="Futures" active={board==="futures"} onClick={function(){setBoard("futures");}}/>
+      </div>
+      {/* Stats globales */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+        <div style={{background:(tot>=0?C.green:C.red)+"15",border:`1px solid ${(tot>=0?C.green:C.red)}40`,borderRadius:12,padding:"11px 13px"}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>P&L total</div>
+          <div style={{fontSize:19,fontWeight:900,color:tot>=0?C.green:C.red}}>{msk(fU(tot),hidden)}</div>
+        </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Win rate</div>
+          <div style={{fontSize:19,fontWeight:900,color:C.text}}>{winRate}% <span style={{fontSize:11,color:C.text3,fontWeight:600}}>({wins}/{list.length})</span></div>
+        </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Meilleur</div>
+          <div style={{fontSize:15,fontWeight:800,color:C.green}}>{msk(fU(best),hidden)}</div>
+        </div>
+        <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Pire</div>
+          <div style={{fontSize:15,fontWeight:800,color:C.red}}>{msk(fU(worst),hidden)}</div>
+        </div>
+      </div>
+      {/* Tri */}
+      <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+        <span style={{fontSize:11,color:C.text3}}>Trier :</span>
+        <Sort label="P&L" active={sortK==="pnl"} onClick={function(){setSortK("pnl");}}/>
+        <Sort label="%" active={sortK==="pct"} onClick={function(){setSortK("pct");}}/>
+        <Sort label="Durée" active={sortK==="dur"} onClick={function(){setSortK("dur");}}/>
+      </div>
+      {/* Liste */}
+      <div>
+        {sorted.map(function(t,i){
+          const up=t.pnlUSD>=0;
+          return (
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.text}}>
+                  {t.ticker}
+                  {board==="futures" && <span style={{marginLeft:7,fontSize:10,fontWeight:700,color:t.dir==="LONG"?C.green:C.red}}>{t.dir} x{t.lev}</span>}
+                </div>
+                <div style={{fontSize:10,color:C.text3,marginTop:2}}>{t.entryDate} → {t.exitDate} · {t.durationDays}j</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
+                <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%")}</div>
+              </div>
+            </div>
+          );
+        })}
+        {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade clôturé.</div>}
+      </div>
+    </div>
+  );
+}
+function PageData(
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -8072,6 +8204,7 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
+        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/> }

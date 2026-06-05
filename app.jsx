@@ -526,7 +526,7 @@ function applyTrade(trade, currentEFF){
   /* ── Suppression des items à quantité zéro ── */
   // On mémorise les tickers à zéro AVANT de les supprimer
   const zeroTickers = new Set([
-    ...stocksItems.filter(x=>x.qty<=0 && x.cat!=="Cash").map(x=>x.t),
+    ...stocksItems.filter(x=>x.qty<=0 && ["EURO","USD","KUCOIN"].indexOf((x.t||"").toUpperCase())<0).map(x=>x.t),
     ...cryptoItems.filter(x=>x.qty<=0).map(x=>x.t),
   ]);
   stocksItems = stocksItems.filter(x => ["EURO","USD","KUCOIN"].indexOf((x.t||"").toUpperCase())>=0 || x.qty > 0);
@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.09";
+const APP_VERSION = "v26.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

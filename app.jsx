@@ -529,7 +529,7 @@ function applyTrade(trade, currentEFF){
     ...stocksItems.filter(x=>x.qty<=0 && x.cat!=="Cash").map(x=>x.t),
     ...cryptoItems.filter(x=>x.qty<=0).map(x=>x.t),
   ]);
-  stocksItems = stocksItems.filter(x => x.cat==="Cash" || x.qty > 0);
+  stocksItems = stocksItems.filter(x => ["EURO","USD","KUCOIN"].indexOf((x.t||"").toUpperCase())>=0 || x.qty > 0);
   // v23.20 — filtre crypto APRÈS zeroTickers (symétrie avec les stocks) : ainsi une crypto
   // soldée (qty 0) est bien captée dans zeroTickers et retirée de portfolio.items.
   cryptoItems = cryptoItems.filter(x => x.qty > 0);
@@ -611,6 +611,7 @@ async function fetchAllPrices(){
   for(let i=0; i<tickers.length; i+=3){
     const batch = tickers.slice(i, i+3);
     await Promise.all(batch.map(async([key, sym])=>{
+      if(key==="EURUSD") return;  // retire du refresh Yahoo (buggait a chaque refresh)
       try {
         const price = await fetchYahoo(sym);
         if(price != null) results[key] = price;
@@ -722,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.05";
+const APP_VERSION = "v26.08";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3969,7 +3970,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                             </div>
                             <div style={{textAlign:"right"}}>
                               <div style={{fontSize:10,fontWeight:800,color:selSec.color}}>{pct.toFixed(1)}%</div>
-                              <div style={{fontSize:9,color:clr(pnl)}}>{pnl>=0?"+":""}{cur2+fmtK(Math.abs(cvD(pnl)))}</div>
+                              <div style={{fontSize:9,color:C.text3,fontWeight:600}}>{cur2+fmtK(cvD(valUSD))}</div>
                             </div>
                           </div>
                         );
@@ -5109,24 +5110,9 @@ function PageGDB(
       </div>
       {detailFond && <FondDetailModal fond={detailFond} EFF={EFF} liveInv={liveInv} liveDD={liveDD} liveGC={liveGC} eur={eur} onClose={()=>setDetailFond(null)}/>}
 
-      <SH label="Comparaison — base 100 au départ de la période" color={C.gray}/>
+      <SH label="Comparaison à base 100 au départ de la période" color={C.gray}/>
       <GdbCompareChartGDB onTFChange={setBenchTF} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={liveGC}/>
-
-      <SH label={`Benchmark — ${benchTF}`} color={C.gray}/>
-      <div style={crd()}>
-        {bench.map((b,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<bench.length-1?`1px solid ${C.border}`:"none"}}>
-            <span style={{fontSize:13,width:20}}>{b.ic}</span>
-            <span style={{fontSize:12,flex:1,color:C.text2,fontWeight:600}}>{b.n}</span>
-            <div style={{width:80,height:5,background:C.bg3,borderRadius:3,position:"relative",overflow:"hidden"}}>
-              {b.v!=null&&<div style={{position:"absolute",left:b.v<0?Math.max(50+b.v*200,0)+"%":"50%",top:0,height:"100%",width:Math.min(Math.abs(b.v)*200,50)+"%",background:b.color,borderRadius:3}}/>}
-            </div>
-            <span style={{fontSize:12,fontWeight:800,color:b.v!=null?clr(b.v):C.gray,width:52,textAlign:"right"}}>
-              {b.v!=null?fmtP(b.v):"—"}
-            </span>
-          </div>
-        ))}
-      </div>
+      {/* Liste benchmark en barres retiree a la demande — v26.08 */}
     </div>
   );
 }

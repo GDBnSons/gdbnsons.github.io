@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.10";
+const APP_VERSION = "v27.00";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6565,6 +6565,7 @@ function PageLegend(
   const best = list.length?Math.max.apply(null,list.map(function(t){return t.pnlUSD;})):0;
   const worst = list.length?Math.min.apply(null,list.map(function(t){return t.pnlUSD;})):0;
   const winRate = list.length?Math.round(wins/list.length*100):0;
+  const avgDur = list.length?Math.round(list.reduce(function(a,t){return a+(t.durationDays||0);},0)/list.length):0;
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
   const Tab=function(props){ return (
     <button onClick={props.onClick} style={{flex:1,padding:"8px 0",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,
@@ -6599,6 +6600,10 @@ function PageLegend(
         <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Pire</div>
           <div style={{fontSize:15,fontWeight:800,color:C.red}}>{msk(fU(worst),hidden)}</div>
+        </div>
+        <div style={{gridColumn:"1 / -1",background:C.bg2,borderRadius:12,padding:"11px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Durée moyenne de trade</div>
+          <div style={{fontSize:16,fontWeight:800,color:C.text}}>{avgDur} jour{avgDur>1?"s":""}</div>
         </div>
       </div>
       {/* Tri */}
@@ -8180,6 +8185,14 @@ function App(){
       console.info("[positions] état persisté après trade (savedAt="+stamp+")");
     } catch(e){ console.warn("[positions] persistance échouée:", e && e.message); }
   }, [live]);
+
+  // Splash : on le retire seulement quand l'app est prete (anime jusqu'au bout du chargement).
+  useEffect(()=>{
+    if(!ready) return;
+    if(typeof window!=="undefined" && window.__hideLoader){ window.__hideLoader(); return; }
+    const l=(typeof document!=="undefined")&&document.getElementById("loader");
+    if(l){ l.style.opacity="0"; setTimeout(function(){ l.style.display="none"; }, 500); }
+  }, [ready]);
 
   const delTxn=useCallback(async id=>{
     const next=txns.filter(t=>t.id!==id);setTxns(next);await save(SK.txns,next);

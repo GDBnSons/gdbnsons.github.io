@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.08";
+const APP_VERSION = "v26.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3403,17 +3403,18 @@ function buildSections(L){
         } else {
           out.push({ticker:"EURO",icon:"💶",label:"IBKR Euro",detail:"€2 240 en cash IBKR",valUSD:2603,valEUR:2240,pnl:0,pct:0,pa:"1.1700",live:eurUsd.toFixed(4),qty:2240,investi:2621});
         }
-        // STRC
-        if(strcItem){
-          out.push({
-            ticker:"STRC", icon:TICKER_ICONS["STRC"]||"₿", label:"Strike (STRC)",
-            detail:`${strcItem.qty} actions × $${(strcItem.live||0).toFixed(2)}`,
-            valUSD:strcItem.val, valEUR:Math.round((strcItem.val||0)*usdEur),
-            pnl:strcItem.pnl||0, pct:strcItem.pct||0,
-            pa:(strcItem.pa||0).toFixed(2), live:(strcItem.live||0).toFixed(2),
-            qty:strcItem.qty, investi:(strcItem.pa||0)*strcItem.qty,
+        // Tous les autres instruments en categorie Cash (STRC, JPY, ^TNX, ...) -> actifs normaux
+        allItems.filter(function(x){return x.cat==="Cash" && ["USD","EURO","KUCOIN"].indexOf((x.t||"").toUpperCase())<0 && x.qty>0;})
+          .forEach(function(it){
+            out.push({
+              ticker: it.t, icon: TICKER_ICONS[it.t]||"💵", label: it.t,
+              detail: fmtQty(it.qty)+" parts · $"+(it.live||0).toFixed(2),
+              valUSD: it.val, valEUR: Math.round((it.val||0)*usdEur),
+              pnl: it.pnl||0, pct: it.pct||0,
+              pa: it.pa||0, live: it.live||0,
+              qty: it.qty, investi: (it.pa||0)*(it.qty||0),
+            });
           });
-        }
         // KuCoin
         // KuCoin — wallet crypto, peut être à 0 ou négatif
         const kucoinItem = allItems.find(x=>x.t==="KUCOIN") || src.stocks.items?.find(x=>x.t==="KUCOIN");

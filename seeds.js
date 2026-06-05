@@ -88,7 +88,7 @@ var SEED_TXNS=[
   {id:"s6",date:"2026-01-22",side:"SELL",ticker:"ETH",qty:1,price:3000,note:"Swap BTC"},
   {id:"s7",date:"2026-01-20",side:"SELL",ticker:"HYPE",qty:325,price:23.25,note:"Sortie HYPE"},
 ];
-var YF_MAP = {
+var YF_MAP = {"RMS":"RMS.PA","GRIFFAIN":"GRIFFAIN-USD","TRUMP":"OFFICIAL-TRUMP-USD","MELANIA":"MELANIA-OFFICIAL-USD","1000BONK":"BONK-USD","PUMP":"PUMP36507-USD","WLFI":"WLFI33251-USD","AVIOm":"AVIO.MI","USUAL":"USUAL-USD","ASTER":"ASTER36341-USD","TARA":"TARA-USD","GLCH":"GLCH-USD","LSS":"LSS-USD",
   // Stocks & ETF
   QQQ:"QQQ", AIA:"AIA", JEDI:"JEDI.L", ROBO:"ROBO",
   XLE:"XLE", OIH:"OIH", AVIO:"AVIO.MI", AI:"AI.PA", DJT:"DJT",

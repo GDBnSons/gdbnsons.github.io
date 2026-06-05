@@ -722,7 +722,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v26.03";
+const APP_VERSION = "v26.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1195,6 +1195,11 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
               </div>
             );
           })}
+          {(markers||[]).filter(function(m){return m && Math.abs(m.i-hover.i)<=1;}).map(function(m,mi){
+            return (<div key={"mt"+mi} style={{display:"flex",justifyContent:"space-between",gap:14,marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
+              <span style={{fontSize:10,fontWeight:800,color:m.color}}>{m.side==="BUY"?"Achat":"Vente"}{m.qtyTxt?(" "+m.qtyTxt):""}</span>
+              <span style={{fontSize:11,fontWeight:800,color:m.color}}>{m.amtTxt||""}</span></div>);
+          })}
         </div>
       )}
 
@@ -1229,7 +1234,7 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
         {/* Markers Buy/Sell (Lot F) */}
         {(markers||[]).map(function(m,mi){
           if(m==null||m.i<0||m.i>=n||m.v==null) return null;
-          return (<circle key={"mk"+mi} cx={px(m.i)} cy={py(m.v)} r={4.5} fill={m.color} stroke={C.bg1} strokeWidth={1.6}/>);
+          return (<circle key={"mk"+mi} cx={px(m.i)} cy={py(m.v)} r={m.r||4.5} fill={m.color} stroke={C.bg1} strokeWidth={1.4}/>);
         })}
 
         {/* Crosshair + dots */}
@@ -6401,10 +6406,10 @@ function computeClosedTrades(txns){
       var q=+t.qty||0, v=+t.valueUSD||0;
       if(t.side==="BUY"){
         if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
-        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:+t.price||0,valueUSD:v});
+        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:+t.price||0,valueUSD:v,fee:(+t.fee||0)+(+t.commission||0)});
       } else {
         if(!cyc) return;
-        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:+t.price||0,valueUSD:v});
+        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:+t.price||0,valueUSD:v,fee:(+t.fee||0)+(+t.commission||0)});
         if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
         pos-=q;
         if(pos<=EPS*Math.max(1,cyc.buyQty)){
@@ -6422,6 +6427,13 @@ function computeClosedTrades(txns){
   return {closed:closed};
 }
 
+var INDEX_ETF={SPY:1,QQQ:1,DIA:1,IWM:1,VOO:1,VTI:1,GDX:1,GDXJ:1,XLE:1,XLF:1,XLK:1,XLV:1,XLI:1,OIH:1,PALL:1,PPLT:1,GLD:1,GLDM:1,SLV:1,USO:1,TLT:1,HYG:1,SOXX:1,SMH:1,ARKK:1,EEM:1,KWEB:1,XBI:1,IBB:1,PFF:1,SPXL:1,TQQQ:1,SQQQ:1,VXX:1,UVXY:1};
+function assetClass(ticker, src, isFut){
+  if(isFut || src==="crypto") return {label:"Crypto", color:C.btc};
+  if(INDEX_ETF[ticker]) return {label:"Indices", color:(C.teal||"#14b8a6")};
+  return {label:"Actions", color:C.blue};
+}
+// v26.04 — tag + markers tailles/tooltip + annexe
 // v26.03 Lot F — modal detail d'un trade + courbe Yahoo avec points Buy(vert)/Sell(rouge).
 function usdEurAt(date){
   // €/$ a la date (depuis DD col5), plus proche sinon
@@ -6430,7 +6442,7 @@ function usdEurAt(date){
   for(var i=0;i<DD.length;i++){ if(DD[i][0]<=date){ best=DD[i][5]; bd=DD[i][0]; } else break; }
   return best||0.92;
 }
-function TradeDetailModal({trade, kind, onClose}){
+function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const isFut = kind==="futures";
   const ticker = trade.ticker;
   const src = isFut ? "crypto" : trade.src;
@@ -6455,17 +6467,34 @@ function TradeDetailModal({trade, kind, onClose}){
 
   // fills -> markers
   const fills = isFut
-    ? [{date:entryDate, side:(dir==="LONG"?"BUY":"SELL")}, {date:exitDate, side:(dir==="LONG"?"SELL":"BUY")}]
+    ? [{date:entryDate, side:(dir==="LONG"?"BUY":"SELL"), valueUSD:trade.notionalUSD, qty:""},
+       {date:exitDate,  side:(dir==="LONG"?"SELL":"BUY"), valueUSD:trade.notionalUSD, qty:""}]
     : (trade.fills||[]);
+  // Annexe IBKR reliee au trade (dividendes / frais dans la fenetre)
+  var annexDivs=0, annexFees=0;
+  if(src==="ibkr"){
+    (liveIbkrAnnex||[]).forEach(function(a){
+      if(a && a.ticker===ticker && a.date>=entryDate && a.date<=exitDate){
+        if(/Dividend|Lieu/i.test(a.type)) annexDivs += (a.valueUSD||0);
+        else annexFees += (a.valueUSD||0);
+      }
+    });
+  }
+  var tradeFees = (fills||[]).reduce(function(a,fl){ return a+(fl.fee||0); }, 0);
   let chartSeries=[], chartDates=[], markers=[];
   if(hist && hist.length){
     chartDates = hist.map(function(p){return p[0];});
     const closes = hist.map(function(p){return p[1];});
     chartSeries = [{vals:closes, color:C.blue, label:"Cours", area:true}];
     function nIdx(d){ for(var i=0;i<chartDates.length;i++){ if(chartDates[i]>=d) return i; } return chartDates.length-1; }
+    const maxV = Math.max.apply(null, fills.map(function(fl){return fl.valueUSD||0;}).concat([1]));
     markers = fills.map(function(fl){
       const i=nIdx(fl.date);
-      return {i:i, v:closes[i], color:(fl.side==="BUY"?C.green:C.red)};
+      const val=fl.valueUSD||0;
+      const r=3 + 5*Math.sqrt(Math.min(1, maxV?val/maxV:0));
+      return {i:i, v:closes[i], color:(fl.side==="BUY"?C.green:C.red), r:r, side:fl.side,
+        qtyTxt:(fl.qty!=null && fl.qty!=="" ? Number(fl.qty).toLocaleString("fr-FR",{maximumFractionDigits:4}) : ""),
+        amtTxt:(val ? "$"+Math.round(val).toLocaleString("fr-FR") : "")};
     });
   }
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
@@ -6485,7 +6514,10 @@ function TradeDetailModal({trade, kind, onClose}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
           <div>
             <div style={{fontSize:20,fontWeight:900,color:C.text}}>{ticker}</div>
-            <div style={{fontSize:11,fontWeight:700,color:isFut?(dir==="LONG"?C.green:C.red):C.text3,marginTop:2}}>{typeLabel}{isFut?(" \u00b7 x"+trade.lev):""}</div>
+            <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3}}>
+              {(function(){var cl=assetClass(ticker,src,isFut);return <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:cl.color+"22",color:cl.color}}>{cl.label}</span>;})()}
+              <span style={{fontSize:11,fontWeight:700,color:isFut?(dir==="LONG"?C.green:C.red):C.text3}}>{typeLabel}{isFut?(" \u00b7 x"+trade.lev):""}</span>
+            </div>
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:20,fontWeight:900,color:up?C.green:C.red}}>{(up?"+":"")+fU(pnlUSD)}</div>
@@ -6504,6 +6536,8 @@ function TradeDetailModal({trade, kind, onClose}){
             ? <Info k="Funding / Frais" v={Math.round(trade.raw.fundingUSD)+" / "+Math.round(trade.raw.tradingFeesUSD)+" $"}/>
             : <Info k="Capital investi" v={fU(trade.investedUSD)}/>}
           <Info k={isFut?"Levier":"Operations"} v={isFut?("x"+trade.lev):(trade.nBuy+" achats / "+trade.nSell+" ventes")}/>
+          {!isFut && src==="ibkr" && <Info k="Commissions" v={fU(Math.abs(tradeFees)+Math.abs(annexFees))}/>}
+          {!isFut && src==="ibkr" && annexDivs>0 && <Info k="Dividendes recus" v={"+"+fU(annexDivs)} c={C.green}/>}
         </div>
         {/* Graphique Yahoo */}
         <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px"}}>
@@ -6522,7 +6556,7 @@ function TradeDetailModal({trade, kind, onClose}){
   );
 }
 function PageLegend(
-{txns, liveFutures, hidden, eur, EFF}){
+{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex}){
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("pnl");
@@ -6591,12 +6625,14 @@ function PageLegend(
       <div>
         {sorted.map(function(t,i){
           const up=t.pnlUSD>=0;
+          const cls=assetClass(t.ticker,t.src,board==="futures");
           return (
             <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.text}}>
-                  {t.ticker}
-                  {board==="futures" && <span style={{marginLeft:7,fontSize:10,fontWeight:700,color:t.dir==="LONG"?C.green:C.red}}>{t.dir} x{t.lev}</span>}
+                <div style={{fontSize:14,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                  <span>{t.ticker}</span>
+                  <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:cls.color+"22",color:cls.color}}>{cls.label}</span>
+                  {board==="futures" && <span style={{fontSize:10,fontWeight:700,color:t.dir==="LONG"?C.green:C.red}}>{t.dir} x{t.lev}</span>}
                 </div>
                 <div style={{fontSize:10,color:C.text3,marginTop:2}}>{t.entryDate} → {t.exitDate} · {t.durationDays}j</div>
               </div>
@@ -6609,7 +6645,7 @@ function PageLegend(
         })}
         {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade clôturé.</div>}
       </div>
-      {sel && <TradeDetailModal trade={sel.trade} kind={sel.kind} onClose={function(){setSel(null);}}/>}
+      {sel && <TradeDetailModal trade={sel.trade} kind={sel.kind} liveIbkrAnnex={liveIbkrAnnex} onClose={function(){setSel(null);}}/>}
     </div>
   );
 }
@@ -8353,7 +8389,7 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
-        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF}/>}
+        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/> }

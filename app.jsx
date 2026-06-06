@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.02";
+const APP_VERSION = "v27.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2074,7 +2074,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 {sel && (()=>{ const v=sel.val(f), col=ratioColor(v,sel); return (
                   <div style={{background:C.bg3,border:`1px solid ${col}66`,borderRadius:10,padding:"9px 11px",marginTop:4}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:3}}>
-                      <span style={{fontSize:11,fontWeight:800,color:C.text}}>{sel.lbl} \u00b7 {ratioFmt(v,sel)}</span>
+                      <span style={{fontSize:11,fontWeight:800,color:C.text}}>{sel.lbl} · {ratioFmt(v,sel)}</span>
                       <span style={{fontSize:10,fontWeight:700,color:col,textAlign:"right"}}>{ratioInterp(v,sel)}</span>
                     </div>
                     <div style={{fontSize:10,color:C.text2,lineHeight:1.45}}>{sel.expl}</div>
@@ -6600,7 +6600,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
             <span style={{color:C.green,fontWeight:700}}>\u25cf Buy</span>
             <span style={{color:C.red,fontWeight:700}}>\u25cf Sell</span>
           </div>
-          {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}\u2026</div>}
+          {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}…</div>}
           {hist!==null && hist.length>0 && <LineChart series={chartSeries} dates={chartDates} h={180} unit={""} hideTF={true} defaultTF="ALL" markers={markers}/>}
           {hist!==null && hist.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:30}}>Cours indisponible pour {ySym}{err?" (a mapper)":""}.</div>}
         </div>
@@ -7091,6 +7091,20 @@ function PageMarket({ eur=false }){
   }
   useEffect(function(){ load(false); },[]);
 
+  const [mov,setMov]=useState(null),[movL,setMovL]=useState(false),[movE,setMovE]=useState(null);
+  const [cal,setCal]=useState(null),[calL,setCalL]=useState(false),[calE,setCalE]=useState(null);
+  function loadSec(p,setD,setLd,setEr,noCache){
+    setLd(true); setEr(null);
+    fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(d&&d.error){setEr(String(d.error));} else {setD(d);} setLd(false); })
+      .catch(function(e){ setEr((e&&e.message)||"Erreur réseau"); setLd(false); });
+  }
+  useEffect(function(){
+    if(sub==="movers"   && mov===null && !movL) loadSec("/market/movers",setMov,setMovL,setMovE,false);
+    if(sub==="calendar" && cal===null && !calL) loadSec("/market/calendar",setCal,setCalL,setCalE,false);
+  },[sub]);
+
   const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
   const pctFmt=function(p){ return p==null?"\u2014":((p>0?"+":"")+p.toFixed(2)+"%"); };
   const fgColor=function(v){ return v==null?C.text3:(v<25?C.red:(v<45?C.orange:(v<55?C.text2:(v<75?C.green:C.teal)))); };
@@ -7098,7 +7112,7 @@ function PageMarket({ eur=false }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["pouls","Pouls"],["macro","Macro"],["secteurs","Secteurs"]];
+  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"]];
 
   function Gauge(props){
     var v=props.value;
@@ -7140,28 +7154,28 @@ function PageMarket({ eur=false }){
     <div style={{padding:"16px 14px 96px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
         <span style={{fontSize:20,fontWeight:800,color:C.text}}>Market</span>
-        <button onClick={function(){load(true);}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"6px 10px",color:C.text2,fontSize:11,fontWeight:600,cursor:"pointer"}}>\u21bb Rafra\u00eechir</button>
+        <button onClick={function(){load(true);}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"6px 10px",color:C.text2,fontSize:11,fontWeight:600,cursor:"pointer"}}>↻ Rafraîchir</button>
       </div>
 
-      <div style={{display:"flex",gap:6,marginBottom:14}}>
+      <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2}}>
         {SUBS.map(function(x){ var on=sub===x[0]; return (
-          <button key={x[0]} onClick={function(){setSub(x[0]);}} style={{flex:1,background:on?C.btc+"22":C.bg1,border:"1px solid "+(on?C.btc:C.border),borderRadius:10,padding:"8px 0",color:on?C.btc:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>
+          <button key={x[0]} onClick={function(){setSub(x[0]);}} style={{flexShrink:0,whiteSpace:"nowrap",background:on?C.btc+"22":C.bg1,border:"1px solid "+(on?C.btc:C.border),borderRadius:10,padding:"8px 14px",color:on?C.btc:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>
         );})}
       </div>
 
-      {loading && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement\u2026</div>}
-      {err && !loading && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>R\u00e9essayer</button></div>}
+      {loading && sub!=="movers" && sub!=="calendar" && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement…</div>}
+      {err && !loading && sub!=="movers" && sub!=="calendar" && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
 
       {mkt && !loading && sub==="pouls" && (function(){ var p=mkt.pulse||{}; return (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"flex",gap:10}}>
-            <Gauge title="Fear & Greed \u2014 Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
-            <Gauge title="Fear & Greed \u2014 March\u00e9" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>
+            <Gauge title="Fear & Greed — Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
+            <Gauge title="Fear & Greed — Marché" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Card label="Volatilit\u00e9 (VIX)" value={p.vix!=null?p.vix.toFixed(2):"\u2014"} sub={pctFmt(p.vixPct)} subColor={pctColor(p.vixPct)}/>
+            <Card label="Volatilité (VIX)" value={p.vix!=null?p.vix.toFixed(2):"\u2014"} sub={pctFmt(p.vixPct)} subColor={pctColor(p.vixPct)}/>
             <Card label="Dominance BTC" value={p.btcDominance!=null?p.btcDominance.toFixed(1)+"%":"\u2014"}/>
-            <Card span label="Cap. march\u00e9 crypto" value={bigMcap(p.cryptoMcap)} sub={pctFmt(p.cryptoMcapPct)} subColor={pctColor(p.cryptoMcapPct)}/>
+            <Card span label="Cap. marché crypto" value={bigMcap(p.cryptoMcap)} sub={pctFmt(p.cryptoMcapPct)} subColor={pctColor(p.cryptoMcapPct)}/>
           </div>
           <div>
             <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Indices</div>
@@ -7176,7 +7190,7 @@ function PageMarket({ eur=false }){
 
       {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
         <div>
-          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Performance sectorielle \u2014 du jour</div>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Performance sectorielle — du jour</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {ss.map(function(it){ var col=it.pct==null?C.text3:(it.pct>=0?C.green:C.red); return (
               <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{background:col+heatA(it.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",cursor:"pointer",display:"flex",flexDirection:"column",gap:2}}>
@@ -7207,9 +7221,98 @@ function PageMarket({ eur=false }){
               );})}
             </div>
           </div>
-          <div style={{fontSize:9,color:C.text3,lineHeight:1.5}}>M2 &amp; stress financier (FRED) \u00e0 venir \u2014 n\u00e9cessite une cl\u00e9 FRED gratuite.</div>
+          <div style={{fontSize:9,color:C.text3,lineHeight:1.5}}>M2 &amp; stress financier (FRED) à venir — nécessite une clé FRED gratuite.</div>
         </div>
       );})()}
+
+      {sub==="movers" && (function(){
+        if(movL) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
+        if(movE) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {movE}<button onClick={function(){loadSec("/market/movers",setMov,setMovL,setMovE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
+        if(!mov) return null;
+        var cr=mov.crypto||{}, st=mov.stocks||{};
+        function MList(props){ return (
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            {(props.items||[]).length===0 && <span style={{fontSize:9,color:C.text3}}>—</span>}
+            {(props.items||[]).map(function(it){ return (
+              <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:props.cat});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"6px 8px",cursor:"pointer"}}>
+                <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:72}}>{it.symbol}</span>
+                <span style={{fontSize:11,fontWeight:700,color:pctColor(it.pct),flexShrink:0}}>{pctFmt(it.pct)}</span>
+              </div>
+            );})}
+          </div>
+        ); }
+        function Block(props){ return (
+          <div>
+            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{props.title}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div><div style={{fontSize:9,fontWeight:700,color:C.green,marginBottom:4}}>▲ Hausses</div><MList items={props.gainers} cat={props.cat}/></div>
+              <div><div style={{fontSize:9,fontWeight:700,color:C.red,marginBottom:4}}>▼ Baisses</div><MList items={props.losers} cat={props.cat}/></div>
+            </div>
+          </div>
+        ); }
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <Block title="Crypto — 24 h" gainers={cr.gainers} losers={cr.losers} cat="Crypto"/>
+            <Block title="Actions US — jour" gainers={st.gainers} losers={st.losers} cat=""/>
+          </div>
+        );
+      })()}
+
+      {sub==="calendar" && (function(){
+        if(calL) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
+        if(calE) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {calE}<button onClick={function(){loadSec("/market/calendar",setCal,setCalL,setCalE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
+        if(!cal) return null;
+        var ev=cal.econ||[], ea=cal.earnings||[];
+        var impColor=function(l){ return l>=3?C.red:(l>=2?C.orange:C.text3); };
+        var impLbl=function(l){ return l>=3?"Fort":(l>=2?"Moyen":"Faible"); };
+        var fmtV=function(v){ return (v==null||v==="")?"—":String(v); };
+        var byDate={}; ev.forEach(function(e){ var d=(e.date||"").slice(0,10); (byDate[d]=byDate[d]||[]).push(e); });
+        var dates=Object.keys(byDate).sort();
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div>
+              <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Événements économiques</div>
+              {dates.length===0 && <div style={{fontSize:11,color:C.text3}}>Aucun événement sur la période.</div>}
+              {dates.map(function(d){ return (
+                <div key={d} style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.text2,marginBottom:5}}>{d}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {byDate[d].map(function(e,i){ return (
+                      <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderLeft:"3px solid "+impColor(e.impact),borderRadius:8,padding:"7px 10px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:11,fontWeight:600,color:C.text}}>{e.country?(e.country+" · "):""}{e.event}</span>
+                          <span style={{fontSize:8,fontWeight:700,color:impColor(e.impact),textTransform:"uppercase",flexShrink:0}}>{impLbl(e.impact)}</span>
+                        </div>
+                        <div style={{display:"flex",gap:12,marginTop:4}}>
+                          <span style={{fontSize:9,color:C.text3}}>Préc. <b style={{color:C.text2}}>{fmtV(e.previous)}{e.unit}</b></span>
+                          <span style={{fontSize:9,color:C.text3}}>Prév. <b style={{color:C.text2}}>{fmtV(e.estimate)}{e.unit}</b></span>
+                          <span style={{fontSize:9,color:C.text3}}>Réel <b style={{color:e.actual!=null?C.text:C.text3}}>{fmtV(e.actual)}{e.actual!=null?e.unit:""}</b></span>
+                        </div>
+                      </div>
+                    );})}
+                  </div>
+                </div>
+              );})}
+            </div>
+            {ea.length>0 && (
+              <div>
+                <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Résultats (earnings)</div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {ea.slice(0,30).map(function(e,i){ return (
+                    <div key={i} onClick={function(){setMt({ticker:e.symbol,cat:""});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",cursor:"pointer"}}>
+                      <span style={{fontSize:11,fontWeight:700,color:C.text}}>{e.symbol}</span>
+                      <span style={{display:"flex",gap:10,alignItems:"baseline"}}>
+                        <span style={{fontSize:9,color:C.text3}}>{(e.date||"").slice(0,10)}</span>
+                        <span style={{fontSize:10,color:C.text2}}>EPS prév. {e.epsEst!=null?e.epsEst:"—"}{e.eps!=null?(" / réel "+e.eps):""}</span>
+                      </span>
+                    </div>
+                  );})}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={0.86} onClose={function(){setMt(null);}}/>}
     </div>

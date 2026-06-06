@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.05";
+const APP_VERSION = "v27.06";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7093,6 +7093,7 @@ function PageMarket({ eur=false }){
 
   const [mov,setMov]=useState(null),[movL,setMovL]=useState(false),[movE,setMovE]=useState(null);
   const [cal,setCal]=useState(null),[calL,setCalL]=useState(false),[calE,setCalE]=useState(null);
+  const [impF,setImpF]=useState({1:true,2:true,3:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
@@ -7268,15 +7269,25 @@ function PageMarket({ eur=false }){
         if(calE) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {calE}<button onClick={function(){loadSec("/market/calendar",setCal,setCalL,setCalE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
         if(!cal) return null;
         var ev=cal.econ||[], ea=cal.earnings||[];
+        var CCY_FLAG={USD:"🇺🇸",EUR:"🇪🇺",GBP:"🇬🇧",JPY:"🇯🇵",CHF:"🇨🇭",CAD:"🇨🇦",AUD:"🇦🇺",NZD:"🇳🇿",CNY:"🇨🇳",HKD:"🇭🇰",SGD:"🇸🇬",SEK:"🇸🇪",NOK:"🇳🇴",DKK:"🇩🇰",MXN:"🇲🇽",BRL:"🇧🇷",INR:"🇮🇳",KRW:"🇰🇷",ZAR:"🇿🇦",TRY:"🇹🇷",RUB:"🇷🇺",PLN:"🇵🇱",ALL:"🌐"};
+        var lvlOf=function(e){ return e.impact>=1?e.impact:1; };
+        var evF=ev.filter(function(e){ return impF[lvlOf(e)]; });
         var impColor=function(l){ return l>=3?C.red:(l>=2?C.orange:C.text3); };
         var impLbl=function(l){ return l>=3?"Fort":(l>=2?"Moyen":"Faible"); };
         var fmtV=function(v){ return (v==null||v==="")?"—":String(v); };
-        var byDate={}; ev.forEach(function(e){ var d=(e.date||"").slice(0,10); (byDate[d]=byDate[d]||[]).push(e); });
+        var byDate={}; evF.forEach(function(e){ var d=(e.date||"").slice(0,10); (byDate[d]=byDate[d]||[]).push(e); });
         var dates=Object.keys(byDate).sort();
         return (
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Événements économiques</div>
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
+                {[[1,"Faible",C.text3],[2,"Moyen",C.orange],[3,"Fort",C.red]].map(function(x){ var on=impF[x[0]]; return (
+                  <button key={x[0]} onClick={function(){ setImpF(function(p){ var n=Object.assign({},p); n[x[0]]=!p[x[0]]; return n; }); }} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:5,background:on?x[2]+"22":C.bg1,border:"1px solid "+(on?x[2]:C.border),borderRadius:9,padding:"6px 0",color:on?x[2]:C.text3,fontSize:11,fontWeight:700,cursor:"pointer",opacity:on?1:0.55}}>
+                    <span style={{width:7,height:7,borderRadius:"50%",background:x[2],flexShrink:0}}/>{x[1]}
+                  </button>
+                );})}
+              </div>
               {dates.length===0 && <div style={{fontSize:11,color:C.text3}}>Aucun événement sur la période.</div>}
               {dates.map(function(d){ return (
                 <div key={d} style={{marginBottom:10}}>
@@ -7285,7 +7296,7 @@ function PageMarket({ eur=false }){
                     {byDate[d].map(function(e,i){ return (
                       <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderLeft:"3px solid "+impColor(e.impact),borderRadius:8,padding:"7px 10px"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:11,fontWeight:600,color:C.text}}>{e.country?(e.country+" · "):""}{e.event}</span>
+                          <span style={{fontSize:11,fontWeight:600,color:C.text}}><span style={{marginRight:5}}>{CCY_FLAG[e.country]||e.country||"🏳️"}</span>{e.event}</span>
                           <span style={{fontSize:8,fontWeight:700,color:impColor(e.impact),textTransform:"uppercase",flexShrink:0}}>{impLbl(e.impact)}</span>
                         </div>
                         <div style={{display:"flex",gap:12,marginTop:4}}>

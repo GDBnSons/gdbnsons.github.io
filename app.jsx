@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.06";
+const APP_VERSION = "v27.07";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7296,7 +7296,7 @@ function PageMarket({ eur=false }){
                     {byDate[d].map(function(e,i){ return (
                       <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderLeft:"3px solid "+impColor(e.impact),borderRadius:8,padding:"7px 10px"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:11,fontWeight:600,color:C.text}}><span style={{marginRight:5}}>{CCY_FLAG[e.country]||e.country||"🏳️"}</span>{e.event}</span>
+                          <span style={{fontSize:11,fontWeight:600,color:C.text}}><span style={{marginRight:5}}>{e.flag||CCY_FLAG[e.country]||e.country||"🏳️"}</span>{e.event}</span>
                           <span style={{fontSize:8,fontWeight:700,color:impColor(e.impact),textTransform:"uppercase",flexShrink:0}}>{impLbl(e.impact)}</span>
                         </div>
                         <div style={{display:"flex",gap:12,marginTop:4}}>

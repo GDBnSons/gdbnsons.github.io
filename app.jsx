@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.01";
+const APP_VERSION = "v27.02";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6235,8 +6235,8 @@ function SnapshotModal({onSave, onClose, EFF}){
 /* ═══════════════════════════════════════════════════════════
    ROOT APP
 ═══════════════════════════════════════════════════════════ */
-const TABS=["Home","Portfolio","Stats","GDB","Data","Legend"];
-const ICONS=["◎","◑","▲","◈","⬡","♛"];
+const TABS=["Home","Portfolio","Stats","GDB","Data","Legend","Market"];
+const ICONS=["◎","◑","▲","◈","⬡","♛","❖"];
 
 /* ── Global API keys (from Power Query in Excel) ── */
 
@@ -7073,6 +7073,149 @@ function recomputeGcFromDB(gcArr, ddArr, invArr){
     return [d, parseFloat((c/(u*p)).toFixed(4))].concat(r.slice(2));
   });
 }
+
+// ── v27.02 — Onglet Market : Pouls / Macro / Secteurs (worker /market/overview) ──
+function PageMarket({ eur=false }){
+  const [mkt,setMkt]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [sub,setSub]=useState("pouls");
+  const [mt,setMt]=useState(null);
+
+  function load(noCache){
+    setLoading(true); setErr(null);
+    fetch(CF_WORKER_URL+"/market/overview"+(noCache?"?no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(22000)})
+      .then(function(r){return r.json();})
+      .then(function(d){ if(d&&d.error){setErr(String(d.error));} else {setMkt(d);} setLoading(false); })
+      .catch(function(e){ setErr((e&&e.message)||"Erreur reseau"); setLoading(false); });
+  }
+  useEffect(function(){ load(false); },[]);
+
+  const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
+  const pctFmt=function(p){ return p==null?"\u2014":((p>0?"+":"")+p.toFixed(2)+"%"); };
+  const fgColor=function(v){ return v==null?C.text3:(v<25?C.red:(v<45?C.orange:(v<55?C.text2:(v<75?C.green:C.teal)))); };
+  const num=function(n,d){ if(n==null)return "\u2014"; return Number(n).toLocaleString("fr-FR",{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); };
+  const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
+  const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
+
+  const SUBS=[["pouls","Pouls"],["macro","Macro"],["secteurs","Secteurs"]];
+
+  function Gauge(props){
+    var v=props.value;
+    return (
+      <div style={{flex:1,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px"}}>
+        <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>{props.title}</div>
+        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+          <span style={{fontSize:30,fontWeight:800,color:fgColor(v),lineHeight:1}}>{v==null?"\u2014":v}</span>
+          <span style={{fontSize:10,fontWeight:600,color:C.text2}}>{props.label||""}</span>
+        </div>
+        <div style={{position:"relative",height:6,borderRadius:4,marginTop:10,background:"linear-gradient(90deg,#e5484d 0%,#f5a623 35%,#9b9b9b 50%,#46a758 70%,#12a594 100%)"}}>
+          {v!=null && <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,v))+"% - 6px)",width:12,height:12,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>}
+        </div>
+      </div>
+    );
+  }
+  function Card(props){
+    return (
+      <div onClick={props.onClick} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"10px 12px",cursor:props.onClick?"pointer":"default",display:"flex",flexDirection:"column",gap:3,gridColumn:props.span?"1 / -1":"auto"}}>
+        <span style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.4}}>{props.label}</span>
+        <span style={{fontSize:16,fontWeight:800,color:props.color||C.text}}>{props.value}</span>
+        {props.sub!=null && <span style={{fontSize:11,fontWeight:600,color:props.subColor||C.text2}}>{props.sub}</span>}
+      </div>
+    );
+  }
+  function Row(props){
+    return (
+      <div onClick={props.onClick} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"9px 12px",cursor:props.onClick?"pointer":"default"}}>
+        <span style={{fontSize:13,fontWeight:600,color:C.text}}>{props.label}</span>
+        <span style={{display:"flex",gap:10,alignItems:"baseline"}}>
+          <span style={{fontSize:13,fontWeight:700,color:C.text}}>{props.value}</span>
+          {props.pctTxt!=null && <span style={{fontSize:12,fontWeight:700,color:props.pctColor}}>{props.pctTxt}</span>}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:"16px 14px 96px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <span style={{fontSize:20,fontWeight:800,color:C.text}}>Market</span>
+        <button onClick={function(){load(true);}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"6px 10px",color:C.text2,fontSize:11,fontWeight:600,cursor:"pointer"}}>\u21bb Rafra\u00eechir</button>
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {SUBS.map(function(x){ var on=sub===x[0]; return (
+          <button key={x[0]} onClick={function(){setSub(x[0]);}} style={{flex:1,background:on?C.btc+"22":C.bg1,border:"1px solid "+(on?C.btc:C.border),borderRadius:10,padding:"8px 0",color:on?C.btc:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>
+        );})}
+      </div>
+
+      {loading && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement\u2026</div>}
+      {err && !loading && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>R\u00e9essayer</button></div>}
+
+      {mkt && !loading && sub==="pouls" && (function(){ var p=mkt.pulse||{}; return (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"flex",gap:10}}>
+            <Gauge title="Fear & Greed \u2014 Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
+            <Gauge title="Fear & Greed \u2014 March\u00e9" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Card label="Volatilit\u00e9 (VIX)" value={p.vix!=null?p.vix.toFixed(2):"\u2014"} sub={pctFmt(p.vixPct)} subColor={pctColor(p.vixPct)}/>
+            <Card label="Dominance BTC" value={p.btcDominance!=null?p.btcDominance.toFixed(1)+"%":"\u2014"}/>
+            <Card span label="Cap. march\u00e9 crypto" value={bigMcap(p.cryptoMcap)} sub={pctFmt(p.cryptoMcapPct)} subColor={pctColor(p.cryptoMcapPct)}/>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Indices</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {(p.indices||[]).map(function(it){ return (
+                <Row key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} label={it.label} value={it.price!=null?num(it.price,0):"\u2014"} pctTxt={pctFmt(it.pct)} pctColor={pctColor(it.pct)}/>
+              );})}
+            </div>
+          </div>
+        </div>
+      );})()}
+
+      {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
+        <div>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Performance sectorielle \u2014 du jour</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {ss.map(function(it){ var col=it.pct==null?C.text3:(it.pct>=0?C.green:C.red); return (
+              <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{background:col+heatA(it.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",cursor:"pointer",display:"flex",flexDirection:"column",gap:2}}>
+                <span style={{fontSize:11,fontWeight:700,color:C.text}}>{it.label}</span>
+                <span style={{fontSize:8,color:C.text3}}>{it.symbol}</span>
+                <span style={{fontSize:15,fontWeight:800,color:col}}>{pctFmt(it.pct)}</span>
+              </div>
+            );})}
+          </div>
+        </div>
+      );})()}
+
+      {mkt && !loading && sub==="macro" && (function(){ var m=mkt.macro||{}; return (
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Rendements obligataires US</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {(m.treasury||[]).map(function(it){ return (
+                <Card key={it.symbol} label={it.label} value={it.price!=null?it.price.toFixed(2)+"%":"\u2014"} sub={pctFmt(it.pct)} subColor={pctColor(it.pct)}/>
+              );})}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Devises majeures</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {(m.forex||[]).map(function(it){ return (
+                <Row key={it.symbol} label={it.label} value={it.price!=null?it.price.toFixed(4):"\u2014"} pctTxt={pctFmt(it.pct)} pctColor={pctColor(it.pct)}/>
+              );})}
+            </div>
+          </div>
+          <div style={{fontSize:9,color:C.text3,lineHeight:1.5}}>M2 &amp; stress financier (FRED) \u00e0 venir \u2014 n\u00e9cessite une cl\u00e9 FRED gratuite.</div>
+        </div>
+      );})()}
+
+      {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={0.86} onClose={function(){setMt(null);}}/>}
+    </div>
+  );
+}
+
 function App(){
   const[tab,setTab]=useState(0);
   const[chartData,setChartData]=useState(CHART_MONTHLY);
@@ -8457,6 +8600,7 @@ function App(){
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
+        {tab===6 && <PageMarket eur={eur}/>}
         {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
           liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
           liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/> }

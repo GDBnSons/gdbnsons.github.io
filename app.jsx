@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.04";
+const APP_VERSION = "v27.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7104,6 +7104,11 @@ function PageMarket({ eur=false }){
     if(sub==="movers"   && mov===null && !movL) loadSec("/market/movers",setMov,setMovL,setMovE,false);
     if(sub==="calendar" && cal===null && !calL) loadSec("/market/calendar",setCal,setCalL,setCalE,false);
   },[sub]);
+  function refresh(){
+    if(sub==="movers") loadSec("/market/movers",setMov,setMovL,setMovE,true);
+    else if(sub==="calendar") loadSec("/market/calendar",setCal,setCalL,setCalE,true);
+    else load(true);
+  }
 
   const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
   const pctFmt=function(p){ return p==null?"\u2014":((p>0?"+":"")+p.toFixed(2)+"%"); };
@@ -7154,7 +7159,7 @@ function PageMarket({ eur=false }){
     <div style={{padding:"16px 14px 96px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
         <span style={{fontSize:20,fontWeight:800,color:C.text}}>Market</span>
-        <button onClick={function(){load(true);}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"6px 10px",color:C.text2,fontSize:11,fontWeight:600,cursor:"pointer"}}>↻ Rafraîchir</button>
+        <button onClick={refresh} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"6px 10px",color:C.text2,fontSize:11,fontWeight:600,cursor:"pointer"}}>↻ Rafraîchir</button>
       </div>
 
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2}}>

@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.00";
+const APP_VERSION = "v27.01";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1488,6 +1488,26 @@ const TF_CONFIG = [
 // Mapping TF_CONFIG index → days CoinGecko
 const TF_CG_DAYS = ["1","7","7","14","30","365","1825","max"];
 
+// v27.01 — Ratios financiers : seuils indicatifs, jauges et explications neophytes
+var RATIO_DEFS=[
+ {k:"pe", g:"Valorisation", lbl:"P/E", unit:"", dir:"low", t1:15, t2:30, val:function(f){return f.pe>0?f.pe:null;}, expl:"Prix paye pour 1 d'euro de benefice annuel. Plus c'est bas, moins l'action est chere."},
+ {k:"pb", g:"Valorisation", lbl:"P/B", unit:"", dir:"low", t1:1.5, t2:4, val:function(f){return f.pb>0?f.pb:null;}, expl:"Prix rapporte a la valeur comptable des actifs. Sous 1 = sous la valeur des livres."},
+ {k:"ps", g:"Valorisation", lbl:"P/S", unit:"", dir:"low", t1:3, t2:8, val:function(f){return f.ps>0?f.ps:null;}, expl:"Prix rapporte au chiffre d'affaires. Utile quand l'entreprise n'est pas encore beneficiaire."},
+ {k:"ev", g:"Valorisation", lbl:"EV/EBITDA", unit:"", dir:"low", t1:10, t2:18, val:function(f){return f.evEbitda>0?f.evEbitda:null;}, expl:"Valeur de l'entreprise (dette incluse) sur son resultat d'exploitation. Comparable entre societes endettees ou non."},
+ {k:"peg", g:"Valorisation", lbl:"PEG", unit:"", dir:"low", t1:1, t2:2, val:function(f){return f.peg>0?f.peg:null;}, expl:"P/E ajuste de la croissance. Sous 1 = croissance pas encore payee."},
+ {k:"fcfev", g:"Valorisation", lbl:"FCF/EV", unit:"%", dir:"high", t1:8, t2:4, val:function(f){return (f.fcf!=null&&f.ev>0)?f.fcf/f.ev*100:null;}, expl:"Rendement de tresorerie libre : cash reel genere rapporte a la valeur. Plus haut = mieux."},
+ {k:"roe", g:"Qualite", lbl:"ROE", unit:"%", dir:"high", t1:15, t2:8, val:function(f){return f.roe!=null?f.roe*100:null;}, interp:{g:"Forte creation de valeur.",o:"Rentabilite correcte.",r:"Faible rentabilite."}, expl:"Rentabilite des capitaux des actionnaires. Au-dela de 15% durable = excellente creation de valeur."},
+ {k:"gm", g:"Qualite", lbl:"Marge brute", unit:"%", dir:"high", t1:50, t2:30, val:function(f){return f.grossM!=null?f.grossM*100:null;}, expl:"Part du CA restant apres cout de production. Elevee = pricing power."},
+ {k:"om", g:"Qualite", lbl:"Marge op.", unit:"%", dir:"high", t1:20, t2:8, val:function(f){return f.operM!=null?f.operM*100:null;}, expl:"Part du CA restant apres les charges d'exploitation."},
+ {k:"fcfm", g:"Qualite", lbl:"Marge FCF", unit:"%", dir:"high", t1:15, t2:5, val:function(f){return (f.fcf!=null&&f.totalRev>0)?f.fcf/f.totalRev*100:null;}, expl:"Part du CA convertie en tresorerie libre."},
+ {k:"nde", g:"Solvabilite & liquidite", lbl:"Net Debt/EBITDA", unit:"x", dir:"low", t1:2, t2:4, val:function(f){return (f.ebitda>0&&f.totalDebt!=null)?(f.totalDebt-(f.totalCash||0))/f.ebitda:null;}, interp:{g:"Faible endettement.",o:"Endettement modere.",r:"Endettement eleve (risque)."}, expl:"Nombre d'annees d'EBITDA pour rembourser la dette nette. Sous 2 = peu risque."},
+ {k:"cr", g:"Solvabilite & liquidite", lbl:"Current ratio", unit:"", dir:"high", t1:1.5, t2:1, val:function(f){return f.currentRatio>0?f.currentRatio:null;}, interp:{g:"Liquidite confortable.",o:"Liquidite juste.",r:"Liquidite tendue."}, expl:"Actifs court terme / dettes court terme. Au-dela de 1.5 = confortable."},
+ {k:"rg", g:"Croissance", lbl:"Croissance CA", unit:"%", dir:"high", t1:15, t2:5, val:function(f){return f.revGrowth!=null?f.revGrowth*100:null;}, interp:{g:"Forte croissance.",o:"Croissance moderee.",r:"Croissance faible ou negative."}, expl:"Croissance du chiffre d'affaires sur un an."}
+];
+function ratioColor(v,d){ if(v==null||isNaN(v)) return C.text3; if(d.dir==="low") return v<d.t1?C.green:(v<d.t2?C.orange:C.red); return v>d.t1?C.green:(v>d.t2?C.orange:C.red); }
+function ratioFmt(v,d){ if(v==null||isNaN(v)) return "\u2014"; if(d.unit==="%") return v.toFixed(1)+"%"; if(d.unit==="x") return v.toFixed(1)+"x"; return v.toFixed(Math.abs(v)<10?2:1); }
+function ratioInterp(v,d){ if(v==null||isNaN(v)) return "Donnee indisponible."; var col=ratioColor(v,d); var key=col===C.green?"g":(col===C.orange?"o":"r"); var def=d.interp||(d.dir==="low"?{g:"Niveau attractif (bon marche).",o:"Dans la moyenne.",r:"Niveau eleve (cher)."}:{g:"Solide.",o:"Moyen.",r:"Faible."}); return def[key]; }
+
 function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
@@ -1504,6 +1524,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [crosshair, setCrosshair] = useState(null); // {i, x, y, price, ts}
   const svgRef = useRef(null);
   const [holdingsOpen, setHoldingsOpen] = useState(false);
+  const [ratioInfo, setRatioInfo] = useState(null); // ratio dont la bulle est ouverte
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -2018,6 +2039,52 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           })()}
 
           {/* ── Blocs ETF : catégorie + top holdings ── */}
+          {/* v27.01 — Ratios financiers (actions only) */}
+          {data && data.fundamentals && quoteType !== "ETF" && (() => {
+            const f = data.fundamentals;
+            if(!RATIO_DEFS.some(d=>d.val(f)!=null)) return null;
+            const groups=["Valorisation","Qualite","Solvabilite & liquidite","Croissance"];
+            const sel=RATIO_DEFS.find(d=>d.k===ratioInfo);
+            return (
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.text2,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Ratios financiers</div>
+                {groups.map(g=>{
+                  const defs=RATIO_DEFS.filter(d=>d.g===g && d.val(f)!=null);
+                  if(!defs.length) return null;
+                  return (
+                    <div key={g} style={{marginBottom:8}}>
+                      <div style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:0.6,marginBottom:4}}>{g}</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                        {defs.map(d=>{
+                          const v=d.val(f), col=ratioColor(v,d), on=ratioInfo===d.k;
+                          return (
+                            <div key={d.k} onClick={()=>setRatioInfo(on?null:d.k)} style={{cursor:"pointer",background:on?col+"22":C.bg1,border:`1px solid ${on?col:C.border}`,borderRadius:10,padding:"7px 9px",display:"flex",flexDirection:"column",gap:3}}>
+                              <span style={{fontSize:8,color:C.text3,fontWeight:500,textTransform:"uppercase",letterSpacing:0.3}}>{d.lbl}</span>
+                              <span style={{display:"flex",alignItems:"center",gap:5}}>
+                                <span style={{width:7,height:7,borderRadius:"50%",background:col,flexShrink:0}}/>
+                                <span style={{fontSize:12,fontWeight:800,color:C.text}}>{ratioFmt(v,d)}</span>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {sel && (()=>{ const v=sel.val(f), col=ratioColor(v,sel); return (
+                  <div style={{background:C.bg3,border:`1px solid ${col}66`,borderRadius:10,padding:"9px 11px",marginTop:4}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:3}}>
+                      <span style={{fontSize:11,fontWeight:800,color:C.text}}>{sel.lbl} \u00b7 {ratioFmt(v,sel)}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:col,textAlign:"right"}}>{ratioInterp(v,sel)}</span>
+                    </div>
+                    <div style={{fontSize:10,color:C.text2,lineHeight:1.45}}>{sel.expl}</div>
+                    <div style={{fontSize:8,color:C.text3,marginTop:4}}>Seuils indicatifs (non ajustes au secteur).</div>
+                  </div>
+                ); })()}
+              </div>
+            );
+          })()}
+
           {quoteType === "ETF" && (() => {
             const etfDbg = data?._yahooDebug || data?._etfDebug || {};
             const hasHoldings = data?.topHoldings && data.topHoldings.length > 0;

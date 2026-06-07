@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.17";
+const APP_VERSION = "v27.18";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5251,6 +5251,22 @@ function PageGDB(
     if(eur){ const usdRef=usdEurAt(d); return (gcToday*usdEurNow)/(ref*usdRef)-1; }
     return gcToday/ref-1;
   };
+  // v27.18 — perf par nb de jours (1J/1S/1M) : MÊME formule que l'onglet Home
+  const _gcNow = src.gdbC || calcGdbPrices(src).gdbC;
+  const _gsNow = src.gdbS || calcGdbPrices(src).gdbS;
+  const _gdbsAtDays = days => {
+    const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
+    const ds=t.toISOString().slice(0,10);
+    return _GDBS.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
+  };
+  const _ddUsdAtDays = days => {
+    const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
+    const ds=t.toISOString().slice(0,10);
+    const row=_DD.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[5]?r:null),null);
+    return row?row[5]:usdEurNow;
+  };
+  const gcPerfD = days => { const r=_gdbsAtDays(days); if(!r||!r[2]) return null; if(eur){ const ref=_ddUsdAtDays(days); return (_gcNow*usdEurNow)/(r[2]*ref)-1; } return _gcNow/r[2]-1; };
+  const gsPerfD = days => { const r=_gdbsAtDays(days); if(!r||!r[1]) return null; if(eur){ const ref=_ddUsdAtDays(days); return (_gsNow*usdEurNow)/(r[1]*ref)-1; } return _gsNow/r[1]-1; };
   // Depuis création GDB.C : 10€ = 10.88$ au 25 mars 2020
   const GC_CREATION_USD = 10.88;
   const GC_CREATION_DATE = "2020-03-25";
@@ -5346,10 +5362,10 @@ function PageGDB(
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:4}}>
         <FondCard label="GDB.C — CRYPTO" cours={gcToday} qty={gcQty} fonds={gcFonds} color={C.btc} hidden={hidden}
           eur={eur} usdEur={src.usdEur} perfAllTime={gcPerfAllTime} onClick={()=>setDetailFond("GDB.C")}
-          perfs={[["1J",gcPerf(d1)],["1S",gcPerf(d7)],["1M",gcPerf(d30)],["YTD",gcPerf(dytd)],["ALL",gcPerfAllTime]]}/>
+          perfs={[["1J",gcPerfD(1)],["1S",gcPerfD(7)],["1M",gcPerfD(30)],["YTD",gcPerf(dytd)],["ALL",gcPerfAllTime]]}/>
         <FondCard label="GDB.S — ACTIONS" cours={gsToday} qty={gsQty} fonds={gsFonds} color={C.blue} hidden={hidden}
           eur={eur} usdEur={src.usdEur} perfAllTime={gsPerfAllTime} onClick={()=>setDetailFond("GDB.S")}
-          perfs={[["1J",gsPerf(d1)],["1S",gsPerf(d7)],["1M",gsPerf(d30)],["YTD",gsYTD],["1Y*",gsYTD]]}/>
+          perfs={[["1J",gsPerfD(1)],["1S",gsPerfD(7)],["1M",gsPerfD(30)],["YTD",gsYTD],["1Y*",gsYTD]]}/>
       </div>
       {detailFond && <FondDetailModal fond={detailFond} EFF={EFF} liveInv={liveInv} liveDD={liveDD} liveGC={liveGC} eur={eur} onClose={()=>setDetailFond(null)}/>}
 
@@ -6432,12 +6448,12 @@ function CloudKeyList({data, onRefresh}){
   var confirmAll = confirmAll_state[0]; var setConfirmAll = confirmAll_state[1];
 
   var CLOUD_KEYS = [
-    {key:"gdb_snapshots", label:"Snapshots journaliers (objets)"},
-    {key:"gdb_txns",      label:"Transactions"},
     {key:"gdb_dd",        label:"DD (historique quotidien)"},
     {key:"gdb_gdbs",      label:"GDBS (GDB.C et GDB.S)"},
     {key:"gdb_gc",        label:"GC_FULL (GDB.C historique)"},
     {key:"gdb_gsb",       label:"GS_B100_EXT"},
+    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
+    {key:"gdb_db",        label:"DB (base historique locale)"},
     {key:"gdb_cm",        label:"CRYPTO_MONTHLY"},
     {key:"gdb_sm",        label:"STOCKS_MONTHLY"},
     {key:"gdb_tm",        label:"TOTAL_MONTHLY"},
@@ -6445,12 +6461,13 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_crypto",    label:"Crypto (positions)"},
     {key:"gdb_stocks",    label:"Stocks (positions)"},
     {key:"gdb_bank",      label:"Banque (cash matelas)"},
+    {key:"gdb_txns",      label:"Transactions"},
+    {key:"gdb_snapshots", label:"Snapshots journaliers (objets)"},
     {key:"gdb_inv",       label:"Investissements (parts fonds)", cols:["Date","Fonds","Investisseur","Sens","Parts","Cours €","Montant €"]},
     {key:"gdb_futures",   label:"Futures (trades clotures)"},
     {key:"gdb_ibkr_annex", label:"IBKR annexe (div./interets/taxes)"},
     {key:"gdb_yfmap",     label:"YF_MAP (tickers Yahoo)"},
-    {key:"gdb_icons",     label:"Icônes personnalisées"},
-    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
+    {key:"gdb_icons",     label:"Icônes personnalisées (CUSTOM_ICONS)"},
   ];
 
   // v23.17 — rendu lisible des valeurs KV (évite "[object Object]" pour les tableaux/objets)
@@ -7311,7 +7328,7 @@ function PageMarket({ eur=false }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(null);
-  const [sub,setSub]=useState("pouls");
+  const [sub,setSub]=useState("macro");
   const [mt,setMt]=useState(null);
 
   function load(noCache){
@@ -7359,7 +7376,7 @@ function PageMarket({ eur=false }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"]];
+  const SUBS=[["macro","Macro"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"]];
 
   function Gauge(props){
     var v=props.value;
@@ -7413,28 +7430,6 @@ function PageMarket({ eur=false }){
       {loading && sub!=="movers" && sub!=="calendar" && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement…</div>}
       {err && !loading && sub!=="movers" && sub!=="calendar" && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
 
-      {mkt && !loading && sub==="pouls" && (function(){ var p=mkt.pulse||{}; return (
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{display:"flex",gap:10}}>
-            <Gauge title="Fear & Greed — Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
-            <Gauge title="Fear & Greed — Marché" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Card label="Volatilité (VIX)" value={p.vix!=null?p.vix.toFixed(2):"\u2014"} sub={pctFmt(p.vixPct)} subColor={pctColor(p.vixPct)}/>
-            <Card label="Dominance BTC" value={p.btcDominance!=null?p.btcDominance.toFixed(1)+"%":"\u2014"}/>
-            <Card span label="Cap. marché crypto" value={bigMcap(p.cryptoMcap)} sub={pctFmt(p.cryptoMcapPct)} subColor={pctColor(p.cryptoMcapPct)}/>
-          </div>
-          <div>
-            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Indices</div>
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {(p.indices||[]).map(function(it){ return (
-                <Row key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} label={it.label} value={it.price!=null?num(it.price,0):"\u2014"} pctTxt={pctFmt(it.pct)} pctColor={pctColor(it.pct)}/>
-              );})}
-            </div>
-          </div>
-        </div>
-      );})()}
-
       {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
         <div>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Performance sectorielle — du jour</div>
@@ -7450,27 +7445,51 @@ function PageMarket({ eur=false }){
         </div>
       );})()}
 
-      {mkt && !loading && sub==="macro" && (function(){ var m=mkt.macro||{}; return (
+      {mkt && !loading && sub==="macro" && (function(){ var p=mkt.pulse||{}; var m=mkt.macro||{};
+        var flag=function(cc){ return cc?<img src={"https://flagcdn.com/20x15/"+cc+".png"} alt="" style={{width:18,height:13,borderRadius:2,objectFit:"cover",flexShrink:0}}/>:null; };
+        var sectTitle=function(t){ return <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{t}</div>; };
+        var quoteRow=function(it){ var dec=it.symbol.indexOf("=X")>=0?4:2; return (
+          <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"9px 12px",cursor:"pointer"}}>
+            <span style={{display:"flex",alignItems:"center",gap:9,minWidth:0}}>{flag(it.cc)}<span style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.label}</span></span>
+            <span style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
+              <span style={{fontSize:13,fontWeight:700,color:C.text}}>{it.price!=null?num(it.price,dec):"—"}</span>
+              <span style={{fontSize:12,fontWeight:700,color:pctColor(it.pct)}}>{pctFmt(it.pct)}</span>
+            </span>
+          </div>
+        ); };
+        return (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{display:"flex",gap:10}}>
+            <Gauge title="Fear & Greed — Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
+            <Gauge title="Fear & Greed — Marché" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Card label="Volatilité (VIX)" value={p.vix!=null?p.vix.toFixed(2):"—"} sub={pctFmt(p.vixPct)} subColor={pctColor(p.vixPct)}/>
+            <Card label="Dominance BTC" value={p.btcDominance!=null?p.btcDominance.toFixed(1)+"%":"—"}/>
+          </div>
           <div>
-            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Rendements obligataires US</div>
+            {sectTitle("Rendements obligataires US")}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
               {(m.treasury||[]).map(function(it){ return (
-                <Card key={it.symbol} label={it.label} value={it.price!=null?it.price.toFixed(2)+"%":"\u2014"} sub={pctFmt(it.pct)} subColor={pctColor(it.pct)}/>
+                <Card key={it.symbol} label={it.label} value={it.price!=null?it.price.toFixed(2)+"%":"—"} sub={pctFmt(it.pct)} subColor={pctColor(it.pct)}/>
               );})}
             </div>
           </div>
           <div>
-            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Devises majeures</div>
+            {sectTitle("Indices mondiaux")}
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {(m.forex||[]).map(function(it){ return (
-                <Row key={it.symbol} label={it.label} value={it.price!=null?it.price.toFixed(4):"\u2014"} pctTxt={pctFmt(it.pct)} pctColor={pctColor(it.pct)}/>
-              );})}
+              {(m.indices||[]).map(quoteRow)}
             </div>
           </div>
-          <div style={{fontSize:9,color:C.text3,lineHeight:1.5}}>M2 &amp; stress financier (FRED) à venir — nécessite une clé FRED gratuite.</div>
+          <div>
+            {sectTitle("Devises (Forex)")}
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {(m.forex||[]).map(quoteRow)}
+            </div>
+          </div>
         </div>
-      );})()}
+        );
+      })()}
 
       {sub==="movers" && (function(){
         if(movL) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
@@ -7701,15 +7720,19 @@ function PageMarket({ eur=false }){
 
 function PageChangelog(){
   var LOG = [
-    ["Naissance (v1–v12)", "App React mobile issue du dashboard Excel v5.5. Onglets Overview/Allocation/Stats/GDB/Portfolio, thème dark, données crypto/actions/banque, historique DD, charts. Storage GitHub Gist puis architecture CURRENT/EFF (bases DD, GDBS, GC, BENCH). Mise en ligne GitHub Pages."],
-    ["v20 – v21", "Recherche ticker Yahoo live + YF_MAP (KV). Onglet GDB (comparatif vs indices, saisonnalité). Onglet Data : toutes les bases en accordéon + recherche. TickerModal (chart Yahoo, métriques, ETF holdings, news). Snapshot journalier robuste (retry KV). 7 thèmes, loader PWA."],
-    ["v22 (abandonnée)", "Tentative Storage Engine v9 (miroir localStorage + merge bidirectionnel). Jugée instable (calculs portfolio, BTC mal classé) → retour à v21.96 comme base stable."],
-    ["v23", "Reprise stable : onglet Data exhaustif (17 bases), helpers mensuels, pull-to-refresh plus réactif, module achat/vente affiné (EUR/USD, tri alpha)."],
-    ["v27 — Onglet Market", "Nouvel onglet Market : Pouls (Fear & Greed, VIX), Macro, Secteurs (heatmap), Top/Flop (CoinGecko + FMP), Calendrier économique (Nasdaq)."],
-    ["v27 — Analyse titre", "Modal enrichi : ratios financiers (P/E, P/B, EV/EBITDA, ROE, marges… avec jauges colorées et explications), transactions d'initiés (SEC EDGAR — Form 4)."],
-    ["v27 — Hedge funds (13F)", "Sous-onglet Hedge Funds : 11 fonds suivis (Berkshire, Burry, Ackman, Bridgewater, Renaissance, Soros, Druckenmiller, Citadel, Millennium, Elliott, Situational Awareness) + section « Détenu par » dans le modal."],
-    ["v27 — Congrès", "Sous-onglet Congrès : trades STOCK Act (source House Stock Watcher) + portefeuille estimé par élu + section « Tradé par le Congrès » dans le modal."],
-    ["v27 — Confort", "Édition de cellule dans les bases (DD, GDBS, GC, GS_B100, BENCH_IDX), accordéons repliés par défaut, et menu Paramètres (engrenage) regroupant Thèmes, Bases de données, Changelog et À propos."],
+    ["Naissance (v1–v8)", "App React mobile issue du dashboard Excel v5.5. Onglets Overview/Allocation/Stats/GDB/Portfolio, thème dark, données crypto/actions/banque, historique DD, sparkline/donut/charts, toggle €/$. Onglet Transactions (PA moyen pondéré). Storage GitHub Gist multi-appareils."],
+    ["v9 – v12", "Architecture CURRENT (live) / EFF (appliqué) + Storage Engine modulaire. Bases DD, GDBS, GC_FULL, GS_B100, BENCH_IDX. Onglet GDB (comparatif vs indices). Mise en ligne GitHub Pages."],
+    ["v20", "Recherche ticker Yahoo live + YF_MAP (KV). Onglet GDB enrichi (saisonnalité, FondCards). Onglet Data (toutes les bases en accordéon + recherche). TickerModal : chart Yahoo, métriques, ETF holdings, scoring news."],
+    ["v21", "Multi-sources EFF/CURRENT, pull-to-refresh, loader splash. Worker enrichi (FMP logos, ETF holdings, crumb Yahoo, benchmarks). Snapshot journalier robuste (retry KV). CoinGecko (rank, ATH, dominance) + fallback OHLC Yahoo. 7 thèmes."],
+    ["v22 (abandonnée)", "Tentative Storage Engine v9 (miroir localStorage + merge bidirectionnel). Jugée instable (calculs portfolio, BTC mal classé) → retour à v21.96."],
+    ["v23", "Onglet Data exhaustif (17 bases), helpers mensuels, pull-to-refresh affiné, module achat/vente (EUR/USD, tri alpha), header redesign."],
+    ["v27 — Onglet Market", "Nouvel onglet : Pouls (Fear & Greed, VIX), Macro (taux, indices, forex), Secteurs (heatmap), Top/Flop, Calendrier économique (Nasdaq)."],
+    ["v27 — Ratios financiers", "Ratios dans l'analyse titre : P/E, P/B, P/S, EV/EBITDA, PEG, FCF/EV, ROE, marges, dette nette, liquidité, croissance — jauges colorées + explications néophytes."],
+    ["v27 — Initiés & Hedge Funds", "Transactions d'initiés (SEC EDGAR Form 4). Sous-onglet Hedge Funds (11 fonds 13F) + section « Détenu par » dans le modal."],
+    ["v27 — Congrès", "Sous-onglet Congrès (trades STOCK Act via House Stock Watcher) + portefeuille estimé par élu + section « Tradé par le Congrès ». Sénat indisponible (eFD/Capitol Trades bloqués)."],
+    ["v27.14 — Édition des bases", "Édition de cellule dans les bases time-series (DD, GDBS, GC, GS_B100, BENCH_IDX) → réécriture KV via /write-bases."],
+    ["v27.17 — Menu Paramètres", "Engrenage regroupant Thèmes, Bases de données, Changelog et À propos. Onglet Data retiré de la barre du bas (6 onglets)."],
+    ["v27.18 — Ajustements", "Pull-to-refresh désactivé (déclenchements involontaires). Fusion Pouls + Macro en un seul Macro (Fear & Greed, VIX, taux US, indices mondiaux + forex avec drapeaux). Bases locales/cloud alignées (mêmes 20 bases). Correction des variations GDB.S/GDB.C dans l'onglet GDB (même formule que Home)."],
   ];
   return (
     <div style={{paddingBottom:40}}>
@@ -8431,41 +8454,9 @@ function App(){
   const pullActive=useRef(false);
   const PULL_THRESHOLD=50; // réduit de 70 à 50 pour plus de réactivité
 
-  useEffect(()=>{
-    const onTouchStart=e=>{
-      // Activer dès que scroll = 0, peu importe la position précise
-      if(window.scrollY<=2){
-        pullStartY.current=e.touches[0].clientY;
-        pullActive.current=true;
-      }
-    };
-    const onTouchMove=e=>{
-      if(!pullActive.current) return;
-      const dy=e.touches[0].clientY-pullStartY.current;
-      if(dy>0 && window.scrollY<=2){
-        setPullY(Math.min(dy*0.6, PULL_THRESHOLD+30)); // résistance augmentée 0.5→0.6
-        if(dy>5) e.preventDefault(); // seuil réduit 10→5
-      } else if(dy<=0){
-        pullActive.current=false;
-        setPullY(0);
-      }
-    };
-    const onTouchEnd=()=>{
-      if(pullActive.current && pullY>=PULL_THRESHOLD && !refreshing){
-        handleRefresh();
-      }
-      pullActive.current=false;
-      setPullY(0);
-    };
-    window.addEventListener('touchstart',onTouchStart,{passive:true});
-    window.addEventListener('touchmove',onTouchMove,{passive:false});
-    window.addEventListener('touchend',onTouchEnd);
-    return()=>{
-      window.removeEventListener('touchstart',onTouchStart);
-      window.removeEventListener('touchmove',onTouchMove);
-      window.removeEventListener('touchend',onTouchEnd);
-    };
-  },[pullY,refreshing,handleRefresh]);
+  // v27.18 — pull-to-refresh désactivé (se déclenchait trop facilement).
+  // Le rafraîchissement reste accessible via le bouton dédié.
+  useEffect(()=>{ return; },[]);
 
   function updateBasesFromSnapshot(snap, src, liveSeries){
     const log = [], errors = [];

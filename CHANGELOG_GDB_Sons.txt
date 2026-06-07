@@ -252,6 +252,10 @@ CONFORT & RÉGLAGES
   - v27.17 : menu Paramètres (engrenage) remplaçant l'icône palette → Thèmes,
     Bases de données (ancien onglet Data), Changelog, À propos. Onglet Data
     retiré de la barre du bas (6 onglets).
+  - v27.18 : pull-to-refresh désactivé ; fusion Pouls + Macro (Fear & Greed, VIX,
+    taux US, indices mondiaux + forex avec drapeaux flagcdn) ; bases locales/cloud
+    alignées (mêmes 20 bases, dont DB) ; correction des variations GDB.S/GDB.C dans
+    l'onglet GDB (même formule que Home).
 
 
 ARCHITECTURE TECHNIQUE
@@ -261,7 +265,7 @@ Storage    localStorage (offline) + Cloudflare KV (cloud)
 APIs       Yahoo Finance (cours, news, fondamentaux), CoinGecko (crypto),
            FMP (logos, movers), SEC EDGAR (Form 4, 13F), Nasdaq (calendrier éco),
            House Stock Watcher (trades du Congrès)
-Worker     Cloudflare Worker v64 (proxy API, KV store, endpoints Market, no CORS)
+Worker     Cloudflare Worker v65 (proxy API, KV store, endpoints Market, no CORS)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
 BASES KV (19 clés)

@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.14";
+const APP_VERSION = "v27.15";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7326,9 +7326,9 @@ function PageMarket({ eur=false }){
   const [mov,setMov]=useState(null),[movL,setMovL]=useState(false),[movE,setMovE]=useState(null);
   const [cal,setCal]=useState(null),[calL,setCalL]=useState(false),[calE,setCalE]=useState(null);
   const [hf,setHf]=useState(null),[hfL,setHfL]=useState(false),[hfE,setHfE]=useState(null);
-  const [hfOpen,setHfOpen]=useState({0:true});
+  const [hfOpen,setHfOpen]=useState({});
   const [cong,setCong]=useState(null),[congL,setCongL]=useState(false),[congE,setCongE]=useState(null);
-  const [congOpen,setCongOpen]=useState({0:true});
+  const [congOpen,setCongOpen]=useState({});
   const [impF,setImpF]=useState({1:true,2:true,3:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);

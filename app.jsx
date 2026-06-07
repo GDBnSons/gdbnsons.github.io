@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.08";
+const APP_VERSION = "v27.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1525,6 +1525,16 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const svgRef = useRef(null);
   const [holdingsOpen, setHoldingsOpen] = useState(false);
   const [ratioInfo, setRatioInfo] = useState(null); // ratio dont la bulle est ouverte
+  const [ins, setIns] = useState(null);
+  const [insL, setInsL] = useState(false);
+  useEffect(function(){
+    if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setIns(null); return; }
+    setInsL(true); setIns(null);
+    fetch(CF_WORKER_URL + "/market/insiders?symbol=" + encodeURIComponent(ticker), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ setIns(d && d.trades ? d : { trades: [] }); setInsL(false); })
+      .catch(function(){ setIns({ trades: [] }); setInsL(false); });
+  }, [ticker, cat]);
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -2084,6 +2094,33 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
               </div>
             );
           })()}
+
+          {/* v27.09 — Insiders (SEC EDGAR Form 4) */}
+          {ins && ins.trades && ins.trades.length > 0 && quoteType !== "ETF" && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.text2,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Transactions d'initiés</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {ins.trades.slice(0,12).map(function(t,i){
+                  const col = t.code === "P" ? C.green : (t.code === "S" ? C.red : C.text3);
+                  const lbl = t.code === "P" ? "Achat" : (t.code === "S" ? "Vente" : (t.code || (t.acq === "A" ? "Acq." : "Cess.")));
+                  return (
+                    <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.owner}</span>
+                        <span style={{fontSize:9,fontWeight:800,color:col,flexShrink:0}}>{lbl}</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:3}}>
+                        <span style={{fontSize:9,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.role||"—")+" · "+(t.date||"")}</span>
+                        <span style={{fontSize:9,color:C.text2,flexShrink:0}}>{t.shares!=null?Math.round(t.shares).toLocaleString("fr-FR"):"—"}{t.price!=null?(" @ "+t.price.toFixed(2)):""}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:8,color:C.text3,marginTop:5}}>Source : SEC EDGAR (Form 4). P = achat marché, S = vente marché.</div>
+            </div>
+          )}
+          {insL && quoteType !== "ETF" && cat !== "Crypto" && (<div style={{fontSize:10,color:C.text3,marginBottom:12}}>Chargement des transactions d'initiés…</div>)}
 
           {quoteType === "ETF" && (() => {
             const etfDbg = data?._yahooDebug || data?._etfDebug || {};

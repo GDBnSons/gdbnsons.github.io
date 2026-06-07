@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.12";
+const APP_VERSION = "v27.13";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1559,6 +1559,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [insOpen, setInsOpen] = useState(false);
   const [hold13f, setHold13f] = useState(null);
   const [holdOpen, setHoldOpen] = useState(false);
+  const [congT, setCongT] = useState(null);
+  const [congTOpen, setCongTOpen] = useState(false);
   useEffect(function(){
     if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setIns(null); return; }
     setInsL(true); setIns(null);
@@ -1575,6 +1577,13 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       .then(function(d){ setHold13f(d && d.funds ? d.funds : []); })
       .catch(function(){ setHold13f([]); });
   }, [data && data.name, cat]);
+  useEffect(function(){
+    if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setCongT(null); return; }
+    fetch(CF_WORKER_URL + "/market/congress?ticker=" + encodeURIComponent(ticker), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ setCongT(d && d.trades ? d.trades : []); })
+      .catch(function(){ setCongT([]); });
+  }, [ticker, cat]);
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -2186,7 +2195,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
               <div style={{marginBottom:14}}>
                 <button onClick={() => setHoldOpen(o => !o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:holdOpen?C.teal+"15":C.bg3,border:`1px solid ${holdOpen?C.teal+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:holdOpen?6:0}}>
                   <span style={{fontSize:11,color:holdOpen?C.teal:C.text,fontWeight:700,letterSpacing:0.3}}>
-                    🏛️ Détenu par (13F)
+                    🏦 Détenu par (13F)
                     <span style={{marginLeft:6,fontSize:10,color:holdOpen?C.teal:C.text2,fontWeight:500}}>({fs.length})</span>
                   </span>
                   <span style={{fontSize:11,color:holdOpen?C.teal:C.text2,display:"inline-block",transform:holdOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
@@ -2205,6 +2214,46 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                       );
                     })}
                     <div style={{fontSize:8,color:C.text3,marginTop:2}}>Source : SEC EDGAR (13F). Poids = part du portefeuille actions déclaré du fonds.</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {(function(){
+            if (!(congT && congT.length > 0)) return null;
+            var pc=function(p){ return p==="D"?"#4aa3ff":(p==="R"?"#e5484d":C.text3); };
+            var sideCol=function(s){ return s==="buy"?C.green:(s==="sell"?C.red:C.text3); };
+            var sideSym=function(s){ return s==="buy"?"▲":(s==="sell"?"▼":(s==="exch"?"⇄":"•")); };
+            var amtC=function(t){ if(t.amountMid!=null){ var v=t.amountMid; return v>=1e6?"$"+(v/1e6).toFixed(1)+" M":(v>=1e3?"$"+Math.round(v/1e3)+" k":"$"+v); } return t.amount||""; };
+            var ts=congT.slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={() => setCongTOpen(o => !o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:congTOpen?C.orange+"15":C.bg3,border:`1px solid ${congTOpen?C.orange+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:congTOpen?6:0}}>
+                  <span style={{fontSize:11,color:congTOpen?C.orange:C.text,fontWeight:700,letterSpacing:0.3}}>
+                    🏛️ Tradé par le Congrès
+                    <span style={{marginLeft:6,fontSize:10,color:congTOpen?C.orange:C.text2,fontWeight:500}}>({ts.length})</span>
+                  </span>
+                  <span style={{fontSize:11,color:congTOpen?C.orange:C.text2,display:"inline-block",transform:congTOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {congTOpen && (
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {ts.map(function(t,i){
+                      return (
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+                            <span style={{fontSize:9,fontWeight:800,color:pc(t.party),border:"1px solid "+pc(t.party)+"66",borderRadius:4,padding:"1px 4px",flexShrink:0}}>{t.party}</span>
+                            <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.member}</span>
+                          </div>
+                          <div style={{display:"flex",gap:9,alignItems:"baseline",flexShrink:0}}>
+                            <span style={{fontSize:11,fontWeight:800,color:sideCol(t.side)}}>{sideSym(t.side)}</span>
+                            <span style={{fontSize:9,color:C.text3}}>{t.date}</span>
+                            <span style={{fontSize:10,fontWeight:700,color:C.text2,minWidth:48,textAlign:"right"}}>{amtC(t)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{fontSize:8,color:C.text3,marginTop:2}}>Source : House Stock Watcher (STOCK Act). ▲ achat · ▼ vente.</div>
                   </div>
                 )}
               </div>
@@ -7221,6 +7270,8 @@ function PageMarket({ eur=false }){
   const [cal,setCal]=useState(null),[calL,setCalL]=useState(false),[calE,setCalE]=useState(null);
   const [hf,setHf]=useState(null),[hfL,setHfL]=useState(false),[hfE,setHfE]=useState(null);
   const [hfOpen,setHfOpen]=useState({0:true});
+  const [cong,setCong]=useState(null),[congL,setCongL]=useState(false),[congE,setCongE]=useState(null);
+  const [congOpen,setCongOpen]=useState({0:true});
   const [impF,setImpF]=useState({1:true,2:true,3:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
@@ -7233,11 +7284,13 @@ function PageMarket({ eur=false }){
     if(sub==="movers"   && mov===null && !movL) loadSec("/market/movers",setMov,setMovL,setMovE,false);
     if(sub==="calendar" && cal===null && !calL) loadSec("/market/calendar",setCal,setCalL,setCalE,false);
     if(sub==="hedge"    && hf===null   && !hfL) loadSec("/market/13f",setHf,setHfL,setHfE,false);
+    if(sub==="congress" && cong===null && !congL) loadSec("/market/congress",setCong,setCongL,setCongE,false);
   },[sub]);
   function refresh(){
     if(sub==="movers") loadSec("/market/movers",setMov,setMovL,setMovE,true);
     else if(sub==="calendar") loadSec("/market/calendar",setCal,setCalL,setCalE,true);
     else if(sub==="hedge") loadSec("/market/13f",setHf,setHfL,setHfE,true);
+    else if(sub==="congress") loadSec("/market/congress",setCong,setCongL,setCongE,true);
     else load(true);
   }
 
@@ -7248,7 +7301,7 @@ function PageMarket({ eur=false }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"],["hedge","Hedge Funds"]];
+  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"]];
 
   function Gauge(props){
     var v=props.value;
@@ -7494,6 +7547,56 @@ function PageMarket({ eur=false }){
                             <div style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
                               <span style={{fontSize:10,fontWeight:700,color:C.text}}>{h.weight!=null?h.weight.toFixed(1)+"%":"—"}</span>
                               <span style={{fontSize:9,color:C.text3,minWidth:48,textAlign:"right"}}>{bigMcap(h.value)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {sub==="congress" && (function(){
+        if(congL) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
+        if(congE) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {congE}<button onClick={function(){loadSec("/market/congress",setCong,setCongL,setCongE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
+        if(!cong) return null;
+        var members=cong.members||[];
+        var toggle=function(i){ setCongOpen(function(p){ var n=Object.assign({},p); n[i]=!p[i]; return n; }); };
+        var pc=function(p){ return p==="D"?"#4aa3ff":(p==="R"?"#e5484d":C.text3); };
+        var sideCol=function(s){ return s==="buy"?C.green:(s==="sell"?C.red:C.text3); };
+        var sideSym=function(s){ return s==="buy"?"▲":(s==="sell"?"▼":(s==="exch"?"⇄":"•")); };
+        var amtC=function(t){ if(t.amountMid!=null){ var v=t.amountMid; return v>=1e6?"$"+(v/1e6).toFixed(1)+" M":(v>=1e3?"$"+Math.round(v/1e3)+" k":"$"+v); } return t.amount||""; };
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginBottom:2}}>Trades déclarés (STOCK Act) — source : House Stock Watcher (Chambre des représentants). Tickers en couleur cliquables.</div>
+            {members.map(function(m,mi){
+              var open=!!congOpen[mi]; var tr=m.trades||[];
+              return (
+                <div key={m.label} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden",opacity:m.n===0?0.55:1}}>
+                  <div onClick={function(){ if(m.n>0) toggle(mi); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",cursor:m.n>0?"pointer":"default"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+                      <span style={{fontSize:9,fontWeight:800,color:pc(m.party),border:"1px solid "+pc(m.party)+"66",borderRadius:4,padding:"1px 4px",flexShrink:0}}>{m.party}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.label}</span>
+                    </div>
+                    <span style={{fontSize:9,color:C.text3,flexShrink:0,textAlign:"right"}}>{m.n>0?(m.n+" trades · "+(m.last||"")):"aucun trade"}</span>
+                  </div>
+                  {open && m.n>0 && (
+                    <div style={{borderTop:"1px solid "+C.border,padding:"4px 10px 8px"}}>
+                      {tr.map(function(t,ti){
+                        var clk=!!t.ticker;
+                        return (
+                          <div key={ti} onClick={clk?function(){setMt({ticker:t.ticker,cat:""});}:undefined} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 2px",borderBottom:ti<tr.length-1?"1px solid "+C.border+"66":"none",cursor:clk?"pointer":"default"}}>
+                            <div style={{display:"flex",alignItems:"baseline",gap:6,minWidth:0}}>
+                              <span style={{fontSize:11,fontWeight:800,color:sideCol(t.side),flexShrink:0}}>{sideSym(t.side)}</span>
+                              <span style={{fontSize:10,fontWeight:700,color:clk?C.btc:C.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:140}}>{t.ticker||t.asset}</span>
+                            </div>
+                            <div style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
+                              <span style={{fontSize:9,color:C.text3}}>{t.date}</span>
+                              <span style={{fontSize:10,fontWeight:700,color:C.text2,minWidth:52,textAlign:"right"}}>{amtC(t)}</span>
                             </div>
                           </div>
                         );

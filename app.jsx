@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.13";
+const APP_VERSION = "v27.14";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6910,6 +6910,10 @@ function PageData(
   var cloudError = ce_state[0]; var setCloudError = ce_state[1];
   var eb_state = useState(null);
   var expandedBase = eb_state[0]; var setExpandedBase = eb_state[1];
+  var edb_state = useState(null); var editBase = edb_state[0]; var setEditBase = edb_state[1];
+  var edd_state = useState([]);   var editData = edd_state[0]; var setEditData = edd_state[1];
+  var eds_state = useState(false);var editSaving = eds_state[0]; var setEditSaving = eds_state[1];
+  var edm_state = useState(null); var editMsg = edm_state[0]; var setEditMsg = edm_state[1];
 
   var src = EFF || CURRENT;
 
@@ -6933,6 +6937,24 @@ function PageData(
   function handleViewMode(mode){
     setViewMode(mode);
     if(mode==="cloud" && !cloudData && !cloudLoading) doLoadCloud();
+  }
+
+  function buildTyped(data){
+    return data.map(function(r){ return r.map(function(v,ci){
+      if(ci===0) return v;
+      if(v===""||v==null) return null;
+      var n=Number(String(v).replace(",",".")); return isNaN(n)? v : n;
+    }); });
+  }
+  function saveEdit(kv){
+    setEditSaving(true); setEditMsg(null);
+    var payload={}; payload[kv]=buildTyped(editData);
+    fetch(CF_WORKER_URL+"/write-bases",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)})
+      .then(function(r){return r.json();})
+      .then(function(d){ setEditSaving(false);
+        if(d&&d.ok){ setEditMsg("Enregistré ✓ — recharge l'app pour propager aux calculs."); }
+        else { setEditMsg("Erreur : "+((d&&((d.errors&&d.errors.join(", "))||d.error))||"inconnue")); } })
+      .catch(function(e){ setEditSaving(false); setEditMsg("Erreur réseau : "+e.message); });
   }
 
   function getLast(arr){ return (arr && arr.length>0 && arr[arr.length-1]) ? (arr[arr.length-1][0]||"—") : "—"; }
@@ -7091,6 +7113,13 @@ function PageData(
     },
   };
 
+  var EDITABLE = {
+    "DD":        { kv:"gdb_dd",    raw:_DD },
+    "GDBS":      { kv:"gdb_gdbs",  raw:_GDBS },
+    "GC_FULL":   { kv:"gdb_gc",    raw:_GC },
+    "GS_B100":   { kv:"gdb_gsb",   raw:_GSB },
+    "BENCH_IDX": { kv:"gdb_bench", raw:_BENCH },
+  };
   var currentDB = DATABASES[db];
   var filtered = search
     ? currentDB.rows.filter(function(r){return r.some(function(v){return String(v||"").toLowerCase().indexOf(search.toLowerCase())>=0;});})
@@ -7168,11 +7197,22 @@ function PageData(
                       <span style={{fontSize:10,color:isOpen?C.btc:C.gray,transition:"transform .2s",display:"inline-block",transform:isOpen?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
                     </div>
                   </button>
-                  {isOpen && previewDB && (
-                    <div style={{marginBottom:8,borderRadius:8,overflow:"hidden",border:"1px solid "+C.border+"66"}}>
-                      <div style={{fontSize:9,color:C.gray,padding:"5px 8px",background:C.bg3,borderBottom:"1px solid "+C.border+"44"}}>
-                        {previewDB.desc} — {Math.min(100, previewDB.rows.length)} / {previewDB.rows.length} lignes
+                  {isOpen && previewDB && (function(){
+                    var ed = EDITABLE[dbKey]; var editable = !!ed; var inEdit = editBase===b.name;
+                    return (
+                    <div style={{marginBottom:8,borderRadius:8,overflow:"hidden",border:"1px solid "+(inEdit?C.btc+"88":C.border+"66")}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:9,color:C.gray,padding:"5px 8px",background:C.bg3,borderBottom:"1px solid "+C.border+"44"}}>
+                        <span>{previewDB.desc} — {inEdit ? (editData.length+" lignes (édition)") : (Math.min(100, previewDB.rows.length)+" / "+previewDB.rows.length+" lignes")}</span>
+                        {editable && (inEdit ? (
+                          <span style={{display:"flex",gap:6,flexShrink:0}}>
+                            <button onClick={function(){ saveEdit(ed.kv); }} disabled={editSaving} style={{background:C.green,border:"none",borderRadius:6,color:"#000",fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer"}}>{editSaving?"…":"💾 Enregistrer"}</button>
+                            <button onClick={function(){ setEditBase(null); setEditData([]); setEditMsg(null); }} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,color:C.gray,fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer"}}>✕</button>
+                          </span>
+                        ) : (
+                          <button onClick={function(){ setEditBase(b.name); setEditData(ed.raw.map(function(r){return r.map(function(v){return v==null?"":String(v);});})); setEditMsg(null); }} style={{background:C.btc+"22",border:"1px solid "+C.btc+"66",borderRadius:6,color:C.btc,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",flexShrink:0}}>✎ Modifier</button>
+                        ))}
                       </div>
+                      {inEdit && editMsg && <div style={{fontSize:9,padding:"5px 8px",color: editMsg.indexOf("Erreur")>=0?C.red:C.green, background:C.bg2}}>{editMsg}</div>}
                       <div style={{overflowX:"auto"}}>
                         <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
                           <thead>
@@ -7183,21 +7223,38 @@ function PageData(
                             </tr>
                           </thead>
                           <tbody>
-                            {previewDB.rows.slice(0,100).map(function(row,ri){return(
-                              <tr key={ri} style={{background:ri%2===0?"transparent":C.bg2+"55"}}>
-                                {row.map(function(cell,ci){return(
-                                  <td key={ci} style={{padding:"4px 7px",color:ci===0?C.btc:C.text,fontFamily:ci===0?"monospace":"inherit",whiteSpace:"nowrap"}}>{cell}</td>
-                                );})}
-                              </tr>
-                            );})}
-                            {previewDB.rows.length===0 && (
+                            {inEdit ? (
+                              editData.slice().reverse().slice(0,80).map(function(_ignore,p){
+                                var rawIdx=editData.length-1-p; var row=editData[rawIdx];
+                                return(
+                                  <tr key={rawIdx} style={{background:p%2===0?"transparent":C.bg2+"55"}}>
+                                    {row.map(function(cell,ci){return(
+                                      <td key={ci} style={{padding:"2px 4px"}}>
+                                        <input value={cell} onChange={function(e){ var nv=e.target.value; setEditData(function(prev){ var cp=prev.map(function(rr){return rr.slice();}); cp[rawIdx][ci]=nv; return cp; }); }} style={{width:ci===0?80:62,background:C.bg1,border:"1px solid "+C.border,borderRadius:4,color:ci===0?C.btc:C.text,fontSize:10,padding:"2px 4px",fontFamily:ci===0?"monospace":"inherit"}}/>
+                                      </td>
+                                    );})}
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              previewDB.rows.slice(0,100).map(function(row,ri){return(
+                                <tr key={ri} style={{background:ri%2===0?"transparent":C.bg2+"55"}}>
+                                  {row.map(function(cell,ci){return(
+                                    <td key={ci} style={{padding:"4px 7px",color:ci===0?C.btc:C.text,fontFamily:ci===0?"monospace":"inherit",whiteSpace:"nowrap"}}>{cell}</td>
+                                  );})}
+                                </tr>
+                              );})
+                            )}
+                            {!inEdit && previewDB.rows.length===0 && (
                               <tr><td colSpan={previewDB.headers.length} style={{padding:"8px",color:C.gray,fontSize:10,textAlign:"center"}}>Base vide</td></tr>
                             )}
                           </tbody>
                         </table>
                       </div>
+                      {inEdit && editData.length>80 && <div style={{fontSize:8,color:C.gray,padding:"4px 8px"}}>Édition limitée aux 80 lignes les plus récentes.</div>}
                     </div>
-                  )}
+                    );
+                  })()}
                   {isOpen && !previewDB && (
                     <div style={{fontSize:10,color:C.gray,padding:"6px 0 8px"}}>Aperçu non disponible</div>
                   )}

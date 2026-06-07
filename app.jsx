@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.11";
+const APP_VERSION = "v27.12";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1553,6 +1553,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const svgRef = useRef(null);
   const [holdingsOpen, setHoldingsOpen] = useState(false);
   const [ratioInfo, setRatioInfo] = useState(null); // ratio dont la bulle est ouverte
+  const [ratioOpen, setRatioOpen] = useState(false);
   const [ins, setIns] = useState(null);
   const [insL, setInsL] = useState(false);
   const [insOpen, setInsOpen] = useState(false);
@@ -2096,7 +2097,11 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             const sel=RATIO_DEFS.find(d=>d.k===ratioInfo);
             return (
               <div style={{marginBottom:14}}>
-                <div style={{fontSize:11,fontWeight:800,color:C.text2,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Ratios financiers</div>
+                <button onClick={()=>setRatioOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:ratioOpen?C.btc+"15":C.bg3,border:`1px solid ${ratioOpen?C.btc+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:ratioOpen?8:0}}>
+                  <span style={{fontSize:11,color:ratioOpen?C.btc:C.text,fontWeight:700,letterSpacing:0.3}}>📊 Ratios financiers<span style={{marginLeft:6,fontSize:10,color:ratioOpen?C.btc:C.text2,fontWeight:500}}>({RATIO_DEFS.filter(d=>d.val(f)!=null).length})</span></span>
+                  <span style={{fontSize:11,color:ratioOpen?C.btc:C.text2,display:"inline-block",transform:ratioOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {ratioOpen && (<div>
                 {groups.map(g=>{
                   const defs=RATIO_DEFS.filter(d=>d.g===g && d.val(f)!=null);
                   if(!defs.length) return null;
@@ -2130,6 +2135,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     <div style={{fontSize:8,color:C.text3,marginTop:4}}>Seuils indicatifs (non ajustes au secteur).</div>
                   </div>
                 ); })()}
+                </div>)}
               </div>
             );
           })()}

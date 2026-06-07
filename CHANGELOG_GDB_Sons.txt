@@ -180,170 +180,91 @@ v21.96   Debug Yahoo masqué si données présentes (qsStatus:200 + hasResult:tr
          ⭐ Base stable v21.96
 
 
-DISCUSSION 5 — Storage Engine v9 & refonte architecture (v22.00–v22.18)
-─────────────────────────────────────────────────────────────────────────
-CONTEXTE
-  Les v22.xx ont tenté d'introduire un Storage Engine v9 (localStorage miroir de KV),
-  un merge bidirectionnel intelligent, et diverses améliorations UI.
-  Cette série s'est avérée instable — régression des calculs portfolio, BTC mal classé
-  dans stocks, refresh plantant, bases locales corrompues.
-  Décision finale : retour à v21.96 comme base stable pour la v23.
-
-v22.00   Storage Engine v9 introduit :
-         LS_V9_KEY = "gdb_sons_v9" — miroir exact des 15 clés KV
-         lsv9Read/Write/WriteMany, migrateV8toV9()
-         Phase 1 (local immédiat) + Phase 2 (KV async)
-         ⚠ Bloquait sur l'écran de chargement (bug format snapshots)
-
-v22.01   Merge bidirectionnel :
-         mergeTimeSeries (séries temporelles, union par date)
-         mergeTxns (union par id)
-         mergeDict (dictionnaires, KV gagne sur conflit)
-         mergeSnapshot (plus récent par date)
-         mergeAndSync : si local plus riche → push vers KV
-         ⚠ lsReadIcons manquant → crash au démarrage
-
-v22.02   Fix crash démarrage : normalizeDD() convertit [[]] → {} pour snapshots
-         finally { setReady(true) } garantit sortie du splash
-         ⚠ Onglet Data plantait (écran noir)
-
-v22.03   Séparation gdb_snapshots (objets {d,ao…}) ≠ gdb_dd (tableaux [[date,…]])
-         SK.chart = "gdb_snapshots" (distinct de "gdb_dd")
-         Correction de toutes les fonctions qui confondaient les deux formats
-         ⚠ gdb_snapshots absent des listes ALLOWED/KEYS worker
-
-v22.04   Worker v38 : gdb_snapshots ajouté dans KEYS (/read) et ALLOWED (/write-bases)
-         ⚠ Logs snapshot KV incorrects (format des bases mal lu)
-
-v22.05   Logs snapshot corrigés :
-         BENCH_IDX : r[1]/r[2] au lieu de .BTC/.ETH
-         GDBS : r[1]/r[2] au lieu de ["GDB.S"]/["GDB.C"]
-         Monthly : accès par année/mois objet au lieu de tableau
-         gdb_snapshots et localStorage confirmés dans les logs
-
-v22.06   Visualisation bases KV : fmtCell() remplace String()
-         Objets imbriqués : résumé lisible (ex: "€331k · 8 tickers")
-         Monthly renderer : déplie {année:{m:[],bom:[]}} en lignes
-         JSON brut affiché si aucune ligne exploitable
-
-v22.07   Suppression écran splash (choix local/KV) — démarrage direct
-         Header agrandi + version orange sous "GDB & Sons"
-         Boutons 28→32px avec couleurs thème
-         Fallback portfolio TradeModal sur CURRENT si EFF vide
-         ⚠ Blocs orphelins (setLocalData) → crash syntax
-
-v22.08   portfolioTickers réactif dans TradeModal (recalculé à chaque render)
-         Tri alphabétique de la liste des tickers
-         Vente totale → ticker disparaît du dropdown
-         Achat nouveau → ticker apparaît immédiatement
-
-v22.10   Retour base v22.05 stable pour les fixes UI
-         Debug Yahoo : fcStatus:404 ignoré si qsStatus:200 + hasResult:true
-         portfolioTickers réactif + trié alphabétiquement + fallback CURRENT
-
-v22.11   Header agrandi (padding 13px), boutons 32px, version sous titre
-         TickerModal : overlay opacité 0.75→0.96, fond panel opaque C.bg
-
-v22.12   Header sans bordure (borderBottom supprimé)
-         Refresh ⟳→↺, boutons droite 32px avec couleurs thème
-         €/$ → C.gold, 👁/🎨 → C.purple, border 1.5px
-
-v22.13   Visualisation bases : renderers spécifiques par type
-         Portfolio : résumé sous-objets lisible
-         Monthly : tableau année/mois/BOM/EOM/PNL
-
-v22.14   Phase 1 chargement portfolio sans condition de date stricte
-         Snapshot → localStorage : extraction correcte _portfolio.crypto/stocks/bank
-         Phase 2 KV : persist local après chargement KV
-         ⚠ Priorité KV absolue — perdait les données offline
-
-v22.15   Priorité portfolio : max(dateKV, dateLocal), KV gagne à égalité
-         Si local plus récent (offline) → push local vers KV
-         ⭐ Dernière version v22 jugée stable
-
-v22.16   LOCAL_SUMMARY : 17 bases (+Crypto, +Stocks, +Banque)
-         countMonthly/lastMonthly helpers
-         ⚠ Cassait les formules portfolio → abandonné
-
-v22.17   Reprise depuis v22.15. LOCAL_SUMMARY 17 bases (sans casser la logique)
-         dbKey intégré dans la définition des bases (plus de map séparé)
-
-v22.18   Fix crash refresh : setLocalData orphelin supprimé de handleRefresh
-         Nettoyage KV : cryptos mal classées dans stocks → déplacées vers crypto
-         ⚠ Toujours instable — BTC dans stocks, portfolio vide en local
-         ⚠ Régression majeure constatée → retour définitif à v21.96
-
-BILAN v22.xx
-  ✅ Concepts validés : Storage Engine v9, merge bidirectionnel, séparation
-     gdb_snapshots/gdb_dd, visualisation bases, header redesign
-  ❌ Instabilité persistante : données KV corrompues, BTC mal classé,
-     setLocalData orphelins, écran splash supprimé trop tôt
-  📋 À reprendre ultérieurement de manière incrémentale depuis une base propre
+DISCUSSION 5 — Storage Engine v9 (v22.00–v22.18) — ABANDONNÉE
+─────────────────────────────────────────────────────────────
+Tentative d'un Storage Engine v9 : miroir localStorage des clés KV + merge
+bidirectionnel (séries temporelles, txns, dictionnaires, snapshots), séparation
+gdb_snapshots / gdb_dd, visualisation enrichie des bases, refonte du header.
+Série jugée instable (calculs portfolio cassés, BTC classé en stocks, refresh
+plantant, splash supprimé trop tôt) → retour définitif à v21.96 comme base stable.
+Concepts conservés pour reprise incrémentale ultérieure.
 
 
 WORKERS CLOUDFLARE
 ──────────────────
-v1–v26  Enrichissements progressifs (proxy Yahoo, FMP logo, ETF holdings,
+v1–v26   Enrichissements progressifs (proxy Yahoo, FMP logos, ETF holdings,
          crumb Yahoo, benchmarks, retry, CORS headers)
-v27     Base discussion 4
-v28     ALLOWED : gdb_bench + gdb_icons dans /write-bases
-v29     Entête de version dans le code
-v30     KEYS /read : gdb_icons + gdb_bench
-v31     Paramètre no_logo=1
-v32     Prix robuste depuis dernier candle, quoteType ETF/ETC fix
-v33     Endpoint /coingecko-coin (métriques + OHLC + news + dominance BTC)
-v34     _cgDebug dans réponse CoinGecko
-v35     Headers navigateur CoinGecko (anti-403), close OHLC marché fermé
-v36     /coingecko-coin avec cache KV 1h, /coingecko-ohlc séparé
-v37     Fix /search : chemin sData.quotes (nouvelle API Yahoo)
-v38     gdb_snapshots dans KEYS (/read) et ALLOWED (/write-bases)
+v27–v38  ALLOWED/KEYS étendus (gdb_bench, gdb_icons, gdb_snapshots) ; endpoints
+         /coingecko-coin & /coingecko-ohlc (cache 1h) ; fix /search ; prix robuste
+v39–v42  Endpoints Market (/market/overview, /market/movers) + ratios financiers
+         (financialData) dans /yahoo
+v43–v51  /market/calendar : sources testées (FMP / Forex Factory / Trading
+         Economics mortes) → Nasdaq retenu ; drapeaux flagcdn ; impact par mots-clés
+v52–v54  /market/insiders : Form 4 SEC EDGAR (fix préfixe XSL → XML brut)
+v55–v57  /market/13f : tables 13F (namespaces tolérés), index byIssuer, décodage
+         entités HTML, résolution issuer→ticker
+v58–v64  /market/congress : House Stock Watcher (GitHub), matching strict des noms,
+         portefeuille estimé ; Sénat abandonné (Capitol Trades 503, eFD Akamai 403)
 
 
-DISCUSSION 5 SUITE — Retour à la stabilité (v21.97–v23.00)
+DISCUSSION 5 SUITE — Retour à la stabilité (v21.97 → v23.00)
 ────────────────────────────────────────────────────────────
-v21.97   Retour à v21.96. Nouveau design header :
-         Fond sans bordure (C.bg pur, backdropFilter blur)
-         ↺ remplace ⟳, boutons 28→32px, border 1.5px
-         Version "v21.97" en monospace orange sous "GDB & Sons"
-         €/$ → C.gold, 👁/🎨 → C.purple, tous 32×32px
-         ⭐ Base stable pour la v23
+v21.97   Retour à v21.96 + nouveau header (fond sans bordure, ↺, version orange
+         monospace, boutons 32px). Base stable de la v23.
+v23.00   Onglet Data exhaustif (17 bases dont Crypto/Stocks/Banque), helpers
+         mensuels, dbKey intégré, gdb_snapshots dans les clés cloud. Icône €/$
+         verte en mode EUR. Achat/vente : EUR/USD en bas de liste, tri alpha.
+         Pull-to-refresh plus réactif (seuil 50px).
 
-v23.00   Nouvelle série stable depuis v21.97 :
 
-         ONGLET DATA — EXHAUSTIVITÉ
-         ▸ LOCAL_SUMMARY passe de 14 à 17 bases :
-           Crypto (src.crypto.items), Stocks (src.stocks.items),
-           Banque (src.bank.breakdown) ajoutées
-         ▸ countMonthly() : compte les mois réels (pas les années)
-           lastMonthly() : affiche "2026 MAI" au lieu de "2026 ans"
-         ▸ Compteur "17 bases" / "16 bases" affiché au-dessus de chaque liste
-         ▸ gdb_snapshots ajouté dans CLOUD_KEYS (remplace gdb_data obsolète)
-         ▸ dbKey intégré dans LOCAL_SUMMARY (suppression du map intermédiaire)
+DISCUSSION 6+ — Market, données externes & confort (v23 → v27.17)
+───────────────────────────────────────────────────────────────────
+ONGLET MARKET (nouveau — 7ᵉ onglet ❖)
+  Pouls       Fear & Greed (crypto + traditionnel), VIX, dominance BTC
+  Macro       Indices, taux (treasuries), forex
+  Secteurs    Heatmap des 11 secteurs (ETF sectoriels)
+  Top/Flop    Plus fortes hausses/baisses (CoinGecko crypto + FMP actions)
+  Calendrier  Calendrier économique (Nasdaq), filtre par impact, drapeaux flagcdn
 
-         HEADER
-         ▸ Icône €/$ : verte (C.green) quand mode EUR actif, dorée sinon
+ANALYSE TITRE (TickerModal enrichi — accordéons)
+  Ratios       P/E, P/B, P/S, EV/EBITDA, PEG, FCF/EV, ROE, marges, dette nette,
+               liquidité, croissance — jauges colorées + explications néophytes
+  Initiés      Transactions d'initiés SEC EDGAR (Form 4), codes traduits
+  Détenu par   Fonds 13F détenant le titre
+  Congrès      « Tradé par le Congrès » : élus suivis ayant tradé ce titre
 
-         MODULE ACHAT/VENTE
-         ▸ Clic "Nouveau ticker" → dropdown tickers masqué
-         ▸ EUR et USD ajoutés en bas de la liste des tickers (IBKR EUR/USD)
-         ▸ Liste triée alphabétiquement
+HEDGE FUNDS (13F — SEC EDGAR)
+  Sous-onglet : 11 fonds suivis (Berkshire/Buffett, Scion/Burry, Pershing/Ackman,
+  Bridgewater/Dalio, Renaissance, Soros, Duquesne/Druckenmiller, Citadel/Griffin,
+  Millennium, Elliott/Singer, Situational Awareness/Aschenbrenner) → top positions,
+  poids %, valeur ; positions cliquables (résolution ticker).
 
-         PULL-TO-REFRESH
-         ▸ PULL_THRESHOLD : 70 → 50px (plus réactif)
-         ▸ scrollY===0 → scrollY<=2 (tolérance scroll résiduel)
-         ▸ Seuil preventDefault : dy>10 → dy>5 (détection plus tôt)
+CONGRÈS (STOCK Act)
+  Sous-onglet : trades déclarés des représentants suivis (House Stock Watcher),
+  achats/ventes colorés, montants ; vue « Portefeuille estimé » reconstituée
+  (net achats − ventes par titre). Sources Sénat (eFD, Capitol Trades) bloquées
+  en fetch serveur → Chambre uniquement.
+
+CONFORT & RÉGLAGES
+  - Édition de cellule dans les bases time-series (DD, GDBS, GC, GS_B100,
+    BENCH_IDX) → réécriture KV via /write-bases.
+  - Accordéons (Hedge Funds, Congrès) repliés par défaut.
+  - v27.17 : menu Paramètres (engrenage) remplaçant l'icône palette → Thèmes,
+    Bases de données (ancien onglet Data), Changelog, À propos. Onglet Data
+    retiré de la barre du bas (6 onglets).
 
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 (Babel standalone) + JSX — GitHub Pages (noindex)
 Storage    localStorage (offline) + Cloudflare KV (cloud)
-APIs       Yahoo Finance (cours, news), FMP (logos stocks),
-           CoinGecko (crypto : cours, métriques, logos, dominance)
-Worker     Cloudflare Worker v38 (proxy API, KV store, no CORS)
+APIs       Yahoo Finance (cours, news, fondamentaux), CoinGecko (crypto),
+           FMP (logos, movers), SEC EDGAR (Form 4, 13F), Nasdaq (calendrier éco),
+           House Stock Watcher (trades du Congrès)
+Worker     Cloudflare Worker v64 (proxy API, KV store, endpoints Market, no CORS)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
-BASES KV (16 clés)
+BASES KV (19 clés)
   gdb_snapshots   Snapshots journaliers objets {d, ao, ao_usd, eur, gdbs, gdbc}
   gdb_txns        Transactions [{id, date, side, ticker, qty, price, cat}]
   gdb_dd          DD séries temporelles [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
@@ -360,333 +281,6 @@ BASES KV (16 clés)
   gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
   gdb_yfmap       YF_MAP {ticker: yahooSymbol}
   gdb_icons       ICON_DB {ticker: {user, fmp}}
-
-v23.01   PHASE 1 — Couche de persistance locale unifiée « lsv9 » (invisible)
-         Objectif : poser le socle pour fiabiliser local + cloud (cf. PLAN).
-         • Nouveau miroir localStorage « gdb_sons_v9 » des 16 clés KV,
-           chaque base encapsulée { v: valeur, t: timestamp }.
-         • Primitives lsv9Get / lsv9Set / lsv9SetMany / lsv9GetMeta / lsv9SeedFromKv.
-         • Migration unique v8→v9 (idempotente) : chart→gdb_snapshots,
-           txns→gdb_txns, icons→gdb_icons (flag gdb_sons_v9_migrated).
-         • Au boot : migrateV8toV9() puis seed additif du miroir depuis le /read KV.
-         ⚠ AUCUN chemin de lecture/écriture applicatif modifié — comportement
-           identique à v23.00. Le câblage des écritures viendra en Phase 2 (v23.02+).
-         Vérif : DevTools→Application→localStorage → clé « gdb_sons_v9 » peuplée ;
-                 console : « [lsv9] migration v8→v9… » et « [lsv9] seed KV→v9… ».
-
-v23.02   FIX — Panneau « Debug Yahoo » qui réapparaissait dans le modal EQUITY
-         Régression d'un correctif v22.xx : le panneau de diagnostic s'affichait
-         alors que les données étaient bien chargées.
-         • Cause : hasRealError se déclenchait sur fcStatus:404 (étape « crumb »
-           de Yahoo), bénin dès lors que quoteSummary renvoie hasResult:true
-           (données récupérées via fallback).
-         • Correctif : hasRealError exige désormais !d.hasResult — le panneau
-           n'apparaît plus que si le chargement a réellement échoué.
-         Bloc ETF (fallback sans holdings) laissé inchangé (non concerné).
-         Diff minimal, aucun impact sur les calculs ni sur la couche lsv9 (Phase 1).
-
-v23.03   PHASE 2 (début) — Écriture unifiée saveBase() + câblage addTxn
-         • Nouvelle fonction saveBase(key, value) :
-             1) miroir local immédiat (lsv9Set) — non bloquant, marche offline ;
-             2) push KV /write-bases avec retry (×3) ; échec → clé marquée "dirty"
-                (gdb_sons_v9_dirty) pour re-push ultérieur.
-           + helpers cfWriteBase / lsv9MarkDirty / lsv9ClearDirty / lsv9DirtyList.
-         • addTxn câblé : conserve le save() legacy (gdb_sons_v8 + gdb_data) ET
-           écrit désormais la base canonique gdb_txns (local v9 + KV) via saveBase.
-           → 1ʳᵉ branche de la Phase 2, la plus sûre : testable offline, aucun
-             impact sur les calculs de portefeuille.
-         ⚠ Aucune LECTURE ne dépend encore de v9 (ce sera la Phase 3 / loadBase).
-         Vérif : ajouter une transaction → console « [saveBase] gdb_txns → KV OK » ;
-                 offline → « …KV échec, conservé en local (dirty) » + clé gdb_txns
-                 présente dans localStorage gdb_sons_v9.
-
-         BONUS livraison : le fichier d'archive GDB_Sons_App_v23_03.jsx est
-         désormais ouvrable tel quel dans l'aperçu Claude (montage ReactDOM gardé
-         par typeof + export default App). app.jsx (déploiement GitHub) reste
-         inchangé dans son montage (ReactDOM.createRoot via index.html).
-
-v23.04   PHASE 3 (étape 1) — Re-push automatique des bases "dirty" (flush)
-         • Nouvelle fonction flushDirtyBases() : lit la liste gdb_sons_v9_dirty,
-           relit chaque base depuis le miroir local v9 et la re-pousse via
-           saveBase() (qui efface le flag dirty en cas de succès).
-         • Déclenchée au boot juste après un /read KV réussi (= preuve d'être
-           en ligne). Une transaction ajoutée hors ligne se synchronise donc
-           toute seule à la prochaine ouverture en ligne.
-         ⚠ La LECTURE reste inchangée (toujours le chemin v23.00). loadBase()
-           (lecture local OU cloud selon le plus récent) viendra en étape 2.
-         Vérif : après une txn ajoutée offline (dirty), rouvrir l'app EN LIGNE →
-                 console « [flush] 1 base(s) dirty… » puis « 1/1 re-poussée(s) » ;
-                 kv/gdb_txns passe au même nombre de lignes que le local ;
-                 la clé gdb_sons_v9_dirty redevient vide ([]).
-
-v23.05   FIX Phase 3 — Seed non destructif + réconciliation des transactions
-         Problème observé en v23.04 : le seed KV→v9 (boot) écrasait le miroir
-         local gdb_txns AVANT le flush → la txn ajoutée hors ligne était gommée
-         puis "re-poussée" à l'identique (KV restait à 8 lignes).
-         • lsv9SeedFromKv : ne remplit plus que les clés MANQUANTES, et ne touche
-           jamais une clé "dirty" (changement local non synchronisé). Fini le clobber.
-         • Réconciliation des transactions au boot : fusion local ∪ KV par id
-           (unionTxnsById). Récupère une txn ajoutée offline (local-only) ET une
-           txn faite sur un autre appareil (cloud-only) — sans perte. Re-push KV
-           si le local apporte des txns manquantes.
-         • removeTxn câblé sur saveBase('gdb_txns') : les suppressions se propagent
-           au cloud (évite que la fusion ne ressuscite une txn supprimée).
-         ⚠ Lecture des séries/positions toujours inchangée (chemin v23.00).
-         Vérif : rouvrir l'app EN LIGNE → console « [txns] fusion local(9) ∪ KV(8)
-                 = 9 » puis « [txns] re-push KV : 1 txn… » ; kv/gdb_txns passe à 9.
-
-v23.06   PHASE 3 (snapshots) — Persistance unifiée de gdb_snapshots
-         La clé canonique gdb_snapshots n'était jamais peuplée (snapshots
-         persistés seulement via le moteur legacy save(SK.chart) → gdb_data).
-         Même pattern que les transactions, dédup par date `d` :
-         • doSnapUpload câblé sur saveBase('gdb_snapshots', next) : miroir local
-           v9 + KV, avec gestion offline (dirty) — en plus du save() legacy.
-         • Réconciliation au boot : fusion local ∪ KV par date (unionSnapsByDate),
-           local prioritaire en cas de conflit de date. Récupère un snapshot
-           local-only ET un snapshot fait sur un autre appareil. Re-push si le
-           local apporte des dates absentes du cloud.
-         • 1er boot : tes snapshots existants (chartData) sont poussés vers KV →
-           la clé gdb_snapshots se remplit enfin (onglet Data).
-         ⚠ Positions/portefeuille toujours non câblés (zone de calcul, en dernier).
-         Vérif : au boot en ligne → console « [snap] fusion local(N) ∪ KV(0) = N »
-                 puis « [snap] re-push KV : N snapshot(s)… » ; onglet Data →
-                 kv/gdb_snapshots passe de vide à N points. Faire un snapshot →
-                 « ✓ Snapshots journaliers » + KV gdb_snapshots incrémenté.
-
-v23.07   FIX affichage — Mapping de la vue locale "Snapshots" (onglet Data)
-         Cosmétique uniquement (aucune donnée ni persistance touchée).
-         Le tableau lisait des champs inexistants → colonnes toujours vides :
-         • GDB.C : lisait s.gdbc → lit désormais s.gc (champ réel, col AF).
-         • Total USD : aucun champ stocké → calculé = Total EUR / usdEur
-           (relation EUR = USD × usdEur déjà utilisée par l'app).
-         • Total EUR : repli s.ao → s.t (les points mensuels n'ont que t).
-         • GDB.S : repli s.gdbs → s.gs (les points mensuels n'ont que gs).
-         • Une valeur 0 n'est plus affichée comme "—".
-         → Les snapshots quotidiens s'affichent complets ; les points mensuels
-           montrent ce qu'ils contiennent réellement (le reste reste "—").
-         Rappel : les deux vues (locale vs KV) projettent des sous-ensembles
-         différents des ~30 champs d'un snapshot ; ce n'était pas une divergence
-         local↔cloud mais un affichage de champs différents.
-
-v23.08   PHASE 3 (séries 1/3) — gdb_dd + gdb_gdbs en fusion par date
-         Avant : au boot, DD/GDBS étaient REMPLACÉES en bloc par KV si KV plus
-         récent (risque de perte des dates présentes d'un seul côté).
-         • Nouveau helper unionSeriesByDate([date,…]) : fusion par row[0].
-         • doSnapUpload câblé : saveBase('gdb_dd', newDD) + saveBase('gdb_gdbs',
-           newGDBS) → miroir v9 local + KV + gestion offline (dirty), en plus
-           du batch /write-bases existant.
-         • Boot : DD/GDBS = build ∪ miroir local v9 ∪ KV (KV prioritaire sur
-           conflit de date), re-push des dates local-only. Récupère un snapshot
-           offline ET adopte une date faite sur un autre appareil. Zéro perte.
-         • Les autres séries (gc/gsb/cm/sm/tm) gardent l'ancienne logique
-           « remplacement si KV plus récent » — traitées en v23.09 / v23.10.
-         Vérif : au boot en ligne → console « [dd] fusion DD=N · GDBS=M » ;
-                 snapshot → KV gdb_dd / gdb_gdbs mis à jour (onglet Data) ;
-                 offline : snapshot → dirty → reload online → flush + fusion
-                 → les deux séries se synchronisent.
-
-v23.09   PHASE 3 (séries 2/3) — gdb_gc + gdb_gsb + gdb_bench en fusion par date
-         Mêmes garanties que DD/GDBS (union par date, KV prioritaire, re-push
-         des dates local-only). Séries concernées : GC_FULL, GS_B100_EXT, BENCH_IDX.
-         • doSnapUpload câblé : saveBase('gdb_gc'/'gdb_gsb'/'gdb_bench') → miroir
-           v9 local + KV + offline dirty, en plus du batch existant.
-         • Boot (2e effet) : GC/GSB/BENCH = build ∪ miroir v9 ∪ KV ; retrait de
-           l'écrasement en bloc (setLiveGC(kvGC)/setLiveGSB(kvGSB)) du chemin kvIsNewer.
-         • Boot (1er effet) : bench passe de remplacement brut à _mergeArrays
-           (cohérent, ne perd plus les dates du build).
-         • Reste à traiter : monthly cm/sm/tm (objets par année, fusion différente) → v23.10.
-         Vérif : boot en ligne → console « [series] fusion GC=N · GSB=M · BENCH=P » ;
-                 snapshot → kv/gdb_gc, kv/gdb_gsb, kv/gdb_bench mis à jour ;
-                 offline snapshot → dirty → reload online → flush + fusion ;
-                 NON-RÉGRESSION : pages GDB / comparaison (courbes GC/GSB/BENCH) OK.
-
-v23.10   PHASE 3 (séries 3/3) — mensuelles gdb_cm / gdb_sm / gdb_tm
-         Objets {année:{bom,eom,pct,pnl,inv,m,…}} recalculés en entier à chaque
-         snapshot. Fusion adaptée (pas une fusion par date) :
-         • unionMonthlyByYear : union des années ; pour une année des deux côtés,
-           on garde la PLUS COMPLÈTE (le plus de mois non-null) ; égalité → KV.
-           + helpers monthsFilled / totalFilled.
-         • doSnapUpload câblé : saveBase('gdb_cm'/'gdb_sm'/'gdb_tm') (miroir v9 +
-           KV + offline dirty).
-         • Boot : 1er effet → merge par année (au lieu de remplacement brut) ;
-           2e effet → union complète build ∪ miroir v9 ∪ KV + re-push si le local
-           est plus complet. Retrait du dernier remplacement-en-bloc (kvIsNewer ne
-           fait plus que logguer la récence).
-         → FIN des séries : DD, GDBS, GC, GSB, BENCH, snapshots, txns, CM/SM/TM
-           sont désormais tous persistés local+cloud avec fusion sans perte.
-         Reste : positions/portefeuille + application des trades (zone de calcul,
-         traitée en dernier avec filet).
-         Vérif : boot → console « [monthly] fusion CM/SM/TM (mois remplis : …) » ;
-                 snapshot → kv/gdb_cm,gdb_sm,gdb_tm mis à jour ; NON-RÉGRESSION :
-                 tableaux mensuels (PageData) + page Overview/Stats OK.
-
-v23.11   PHASE 3 (positions 1/2) — Write-side : persister l'état après un trade
-         Modèle « état matérialisé » (PAS de rejeu de l'historique des trades).
-         • applyTradeToEFF : les deux branches (achat/vente + dépôt/retrait)
-           tamponnent l'état résultant avec savedAt = Date.now(). Le CALCUL n'est
-           pas modifié (zone v22 préservée), on ajoute juste le tampon.
-         • Nouvel effet useEffect([live]) : quand savedAt change (= un trade), il
-           persiste les 4 bases de positions via saveBase — gdb_crypto, gdb_stocks,
-           gdb_bank, gdb_portfolio — chacune estampillée savedAt (miroir v9 + KV +
-           offline dirty). Refresh / boot ne déclenchent PAS la persistance.
-         ⚠ Read-side inchangé pour l'instant : le boot garde l'injection
-           « Portfolio KV plus récent ». En ligne, un trade poussé en KV est donc
-           déjà rechargé au reload. La réconciliation fine local↔KV par savedAt
-           (offline + récence robuste) arrive en v23.12.
-         Conseil : faire un snapshot avant de déployer (état KV de repli).
-         Vérif : faire un achat → console « [positions] état persisté après trade
-                 (savedAt=…) » + saveBase gdb_crypto/stocks/bank/portfolio KV OK ;
-                 onglet Data → ces 4 bases reflètent le trade ; RELOAD en ligne →
-                 le trade est toujours là dans le portefeuille.
-
-v23.12   FIX calcul — Achat/vente de crypto autre que BTC (applyTrade)
-         Bug (pré-existant) : le bloc crypto de applyTrade ne gérait QUE BTC.
-         Acheter ETH (ou toute crypto) ne créait/màj aucune position crypto ;
-         le trade semblait « ne rien mouvementer ».
-         • Bloc crypto généralisé : recherche par ticker dans crypto.items ;
-           achat existant → qty + PA pondéré ; achat nouveau → ajout avec
-           cat:"Crypto" (évite le mal-classement en "Picking"/stocks, piège v22) ;
-           vente → réduction qty. BTC inchangé (même résultat qu'avant).
-         • La contrepartie bancaire (déjà générique) décrémente alors correctement
-           le compte sélectionné + le Cash Matelas correspondant.
-         Vérifié hors-app : achat ETH+Kucoin → ETH ajouté & Kucoin débité ;
-         régression BTC OK (1→2, PA pondéré) ; vente partielle OK.
-         Vérif app : acheter une crypto ≠ BTC avec contrepartie banque → la ligne
-         crypto apparaît/augmente ET le compte bancaire diminue ; total ≈ inchangé
-         (cash converti en crypto). Persistance v23.11 inchangée.
-
-v23.13   FIX affichage — Nom des cryptos dans l'onglet Portfolio
-         Le libellé de chaque crypto était codé en dur "Bitcoin" (et l'unité "BTC")
-         dans la vue catégorie. → ETH s'affichait "Bitcoin".
-         • label dérivé du ticker ({BTC:Bitcoin, ETH:Ethereum, SOL, DOGE, TAO},
-           sinon le ticker) ; detail utilise l'unité réelle (x.t).
-         Données et persistance inchangées (le détail crypto affichait déjà BTC/ETH
-         correctement). Bug KuCoin (contrepartie) traité séparément en v23.14.
-
-v23.14   FIX calcul — Contrepartie KuCoin (et comptes "Cash Dip" en général)
-         Le formulaire envoie "KuCoin" mais l'item est "KUCOIN" (cat:"Cash"),
-         et applyTrade ne gérait la contrepartie que pour Cash Matelas + IBKR.
-         → KuCoin n'était jamais débité ; en plus, l'écriture parasite dans
-         bank.breakdown créait un double-comptage latent (aussi pour IBKR).
-         • Contrepartie réécrite en 3 cas MUTUELLEMENT EXCLUSIFS :
-             - Cash Matelas (présent dans bank.breakdown) → bank.breakdown ;
-             - IBKR → item EURO ou USD (inchangé, mais sans écriture parasite) ;
-             - Cash Dip (ex. KuCoin) → décrémente l'item Cash correspondant
-               (pont de casse "KuCoin"↔"KUCOIN", montant via le live de l'item).
-         Vérifié hors-app : achat ETH avec contrepartie KuCoin / IBKR-USD / BCI →
-         total CONSERVÉ dans les 3 cas (cash → actif), compte correctement débité,
-         aucun double-comptage. portfolio.items se synchronise via le mapping existant.
-         Affichage KuCoin : non hardcodé (lit l'item) ; "$1" = live d'un compte vide.
-
-v23.15   FIX — Contrepartie Cash Dip (KuCoin) : montant correct + découvert autorisé
-         La contrepartie KuCoin est maintenant débitée EN VALEUR ($), du montant
-         exact du trade, SANS borne (le compte peut passer en négatif = découvert).
-         • Débit val-based : val -= tradeUSD (achat) / += (vente), qty recalculé,
-           aucun Math.max ni plancher à 0. Propagé à portfolio.items.
-         • Log console [contrepartie] TICKER : avant$ → après$ pour diagnostic,
-           + avertissement si l'item Cash est introuvable au runtime.
-         • Aperçu "KuCoin après" corrigé : lit l'item KUCOIN (et non USD).
-         Rappel : Cash Matelas (bank.breakdown), IBKR et Cash Dip autorisent déjà
-         tous le négatif (aucun clamp dans les chemins de trade).
-         Vérifié hors-app : achat 2 ETH @2000$ via KuCoin → KUCOIN 0$ → -4000$
-         (stocks + portfolio), valEUR -3440.
-
-v23.16   PHASE 3 (positions 2/2) — Read-side : injection de l'état le plus récent
-         Au boot, les positions sont injectées depuis la source la PLUS RÉCENTE
-         entre le miroir local v9 et KV, par savedAt (estampillé à chaque trade).
-         • Sélection : localFresher = (savedAt local > KV) ET 4 bases locales
-           présentes → injecte local ; sinon KV. Égalité → KV. Modèle "état
-           matérialisé", injection EN BLOC, AUCUN rejeu de l'historique des trades.
-         • Condition d'injection inchangée (date portefeuille > build) → pas de
-           régression sur les chargements legacy/snapshot.
-         • savedAt retiré de l'état injecté pour ne pas re-déclencher la
-           persistance write-side (pas de boucle).
-         → FIN du chantier bases : txns, snapshots, séries (dd/gdbs/gc/gsb/bench),
-           mensuelles (cm/sm/tm) ET positions (crypto/stocks/bank/portfolio) sont
-           tous persistés local+cloud avec réconciliation sans perte / par récence.
-         Vérifié : sélection local/KV correcte (offline→local, online→KV, égalité→KV,
-         local incomplet→KV). Reste hors-bases : bug du module VENTE (à traiter).
-         Vérif app : trade → reload en ligne → trade conservé ; console
-         « [positions] injection KV|LOCAL v9 (savedAt …) ».
-
-v23.17   LOT 1 — Affichages (3 corrections, aucune logique de calcul touchée)
-         • Onglet Portfolio : la catégorie crypto s'appelle "Crypto" (au lieu de
-           "Bitcoin"). (n:"Bitcoin" → "Crypto", ligne ~3302)
-         • Onglet Data / vue Cloudflare KV : les bases positions (portfolio/crypto/
-           stocks/bank) n'affichent plus "[object Object]" dans la colonne items.
-           Nouveau formateur fmtKvVal : tableaux → "N élt(s): tk1, tk2…", objets →
-           JSON tronqué, scalaires → tels quels. Utilisé pour les lignes objets ET
-           les tableaux d'objets.
-         • Onglet Data / vue locale : passe de 5 à 100 lignes affichées, avec
-           en-tête dynamique "{affichées} / {total} lignes".
-
-v23.18   LOT 2 — Écran de démarrage : carte "Base locale" reflète les données fraîches
-         Avant : la carte locale lisait les constantes build (DD/GDBS figées au
-         17 mai) → total/date du build, jamais à jour, divergence avec la carte KV.
-         • localData (useState initial ET effet de préchargement) lit désormais le
-           MIROIR v9 : lsv9Get('gdb_dd') / lsv9Get('gdb_gdbs') (fallback build).
-         • Le TOTAL (€/$) est aussi mis à jour (l'effet ne mettait à jour que
-           date/GDB.S/GDB.C avant) → la carte locale affiche le dernier snapshot local.
-         Résultat : après un snapshot, la carte "Base locale" et la carte
-         "Cloudflare KV" affichent la même date et les mêmes totaux.
-         Aucune logique de calcul/trade touchée.
-
-v23.19   LOT 3 — Snapshot unifié (une seule action : local immédiat + cloud best-effort)
-         Avant : la persistance locale (save + saveBase) était dans doSnapUpload,
-         déclenchée uniquement au clic « Envoyer sur Cloudflare » → rien n'était
-         écrit si on ne confirmait pas l'envoi cloud.
-         • Auto-exécution : dès qu'un snapshot est calculé (addSnap → pendingUpload),
-           un useEffect (_snapAutoRef, run-once) lance doSnapUpload automatiquement.
-           Plus de bouton manuel d'envoi.
-         • Étape 1 (locale, inconditionnelle) : save(SK.chart) + saveBase des
-           séries/snapshots ET désormais des positions (gdb_portfolio/crypto/
-           stocks/bank). Réussit toujours (offline inclus) → log « ✓ Bases locales
-           enregistrées ». Étape 2+3 (batch cloud /write-bases, retry×3) : seul
-           l'échec cloud apparaît dans les erreurs.
-         • Panneau : en-tête « 💾 Enregistrement (local + cloud) » ; pendant l'envoi
-           « Enregistré en local — envoi cloud en cours… ».
-         Résultat : offline → snapshot enregistré localement + erreur uniquement
-         sur la ligne cloud, comme demandé.
-
-v23.20   LOT 4 — Module Vente : catégorie correcte + décrément/suppression crypto
-         Cause commune : le sélecteur de VENTE ne définissait pas form.cat (resté
-         "Picking" par défaut). → txn mal catégorisée ET applyTrade ne routait pas
-         les ventes crypto (isCryptoTrade testait cat==="Crypto" ; seul BTC passait
-         via le fallback ticker).
-         • Catégorie : dérivée de l'actif vendu au submit (resolvedCat depuis
-           portfolio.items) + le sélecteur de vente fixe aussi form.cat (cohérence UI).
-           → les ventes sont enregistrées dans la bonne catégorie (point 5).
-         • Décrément crypto + suppression à qty 0 (point 6) : le filtre crypto
-           (qty>0) passait AVANT le calcul de zeroTickers → une crypto soldée n'était
-           pas retirée de portfolio.items. Filtre déplacé APRÈS zeroTickers, comme
-           pour les stocks. Désormais : vente partielle → décrément ; vente totale →
-           ligne supprimée de crypto.items ET portfolio.items.
-         Vérifié hors-app : vente partielle/totale ETH (suppression des deux côtés),
-         parité stocks (AAPL), non-régression achat BTC, contrepartie bancaire OK.
-
-v23.21   FIX calcul — KuCoin rattaché au fonds GDB.C (et non GDB.S)
-         calcGdbPrices comptait KuCoin dans GDB.S (somme de tous les stocks.items,
-         KUCOIN inclus) et l'excluait de GDB.C (crypto.total seul). Avec KuCoin
-         désormais mouvementable, une vente crypto→KuCoin (transfert interne GDB.C)
-         faisait baisser GDB.C et monter GDB.S à tort — visible sur les cours live,
-         le chart, et figé dans la base GDBS au snapshot suivant.
-         • GDB.S = stocks.items SAUF KUCOIN. GDB.C = crypto.total + KUCOIN.val.
-         • calcGdbPrices renvoie aussi gdbCfondsUSD ; gcFonds (détail) l'utilise.
-         Source unique : corrige live + snapshot + chart d'un coup.
-         Vérifié hors-app : vente crypto→KuCoin → ΔGDB.C = 0 ET ΔGDB.S = 0 ;
-         vente action→IBKR → ΔGDB.C = 0 (crypto intacte).
-         NB : décale le plan — Lot 5 → v23.22, Lot 6 → v23.23, Lot 7 → v23.24.
-
-v23.22   LOT 5 — Refresh des prix : cryptos via Yahoo + généralisation + nouveaux tickers
-         1. Coingecko retiré de fetchAllPrices (BTC, ETH, toutes les cryptos et le
-            taux EUR/USD sont dans YF_MAP avec leurs symboles Yahoo et fetché dans
-            la même boucle que les actions). Coingecko restait en doublon ; désormais
-            source unique = Yahoo Finance.
-         2. applyPrices — crypto générique : la reconstruction BTC-only
-            (src.crypto.items[0] → cryptoItems=[{BTC}]) est remplacée par une boucle
-            sur TOUS les src.crypto.items. ETH, SOL, DOGE, TAO etc. voient leur prix
-            mis à jour au refresh (plus de perte de ligne).
-         3. YF_MAP build : ajout TAO:"TAO-USD" et EURUSD:"EURUSD=X" (taux de change).
-         4. Nouveaux tickers : saveBase('gdb_yfmap') immédiatement quand un ticker
-            est ajouté à YF_MAP dans applyTrade. Plus besoin de snapshoter pour
-            que le ticker soit fetché au prochain boot.
+  gdb_inv         INV — mouvements de parts fonds [{date, fonds, holder, io, shares...}]
+  gdb_futures     FUTURES — trades futures clôturés
+  gdb_ibkr_annex  ANNEX — lignes IBKR (div./intérêts/taxes/frais)

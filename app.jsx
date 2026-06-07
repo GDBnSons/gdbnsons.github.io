@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.15";
+const APP_VERSION = "v27.17";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7329,6 +7329,7 @@ function PageMarket({ eur=false }){
   const [hfOpen,setHfOpen]=useState({});
   const [cong,setCong]=useState(null),[congL,setCongL]=useState(false),[congE,setCongE]=useState(null);
   const [congOpen,setCongOpen]=useState({});
+  const [congView,setCongView]=useState("trades");
   const [impF,setImpF]=useState({1:true,2:true,3:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
@@ -7623,13 +7624,19 @@ function PageMarket({ eur=false }){
         if(!cong) return null;
         var members=cong.members||[];
         var toggle=function(i){ setCongOpen(function(p){ var n=Object.assign({},p); n[i]=!p[i]; return n; }); };
+        var moneyC=function(v){ return v>=1e6?"$"+(v/1e6).toFixed(1)+" M":(v>=1e3?"$"+Math.round(v/1e3)+" k":"$"+Math.round(v)); };
         var pc=function(p){ return p==="D"?"#4aa3ff":(p==="R"?"#e5484d":C.text3); };
         var sideCol=function(s){ return s==="buy"?C.green:(s==="sell"?C.red:C.text3); };
         var sideSym=function(s){ return s==="buy"?"▲":(s==="sell"?"▼":(s==="exch"?"⇄":"•")); };
         var amtC=function(t){ if(t.amountMid!=null){ var v=t.amountMid; return v>=1e6?"$"+(v/1e6).toFixed(1)+" M":(v>=1e3?"$"+Math.round(v/1e3)+" k":"$"+v); } return t.amount||""; };
         return (
           <div style={{display:"flex",flexDirection:"column",gap:9}}>
-            <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginBottom:2}}>Trades déclarés (STOCK Act) — source : House Stock Watcher (Chambre des représentants). Tickers en couleur cliquables.</div>
+            <div style={{display:"flex",gap:6,background:C.bg2,borderRadius:9,padding:3}}>
+              {[["trades","Trades"],["port","Portefeuille est."]].map(function(v){ return (
+                <button key={v[0]} onClick={function(){setCongView(v[0]);}} style={{flex:1,padding:"6px 0",borderRadius:7,fontSize:11,fontWeight:700,border:"none",cursor:"pointer",background:congView===v[0]?C.btc:"transparent",color:congView===v[0]?"#000":C.gray}}>{v[1]}</button>
+              );})}
+            </div>
+            <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginBottom:2}}>{congView==="port" ? "Portefeuille estimé = net cumulé (achats − ventes) par titre, en $ médians des fourchettes. Estimation indicative (ni nb d'actions ni valeur de marché)." : "Trades déclarés (STOCK Act) — source : House Stock Watcher (Chambre)."} Tickers cliquables.</div>
             {members.map(function(m,mi){
               var open=!!congOpen[mi]; var tr=m.trades||[];
               return (
@@ -7639,11 +7646,30 @@ function PageMarket({ eur=false }){
                       <span style={{fontSize:9,fontWeight:800,color:pc(m.party),border:"1px solid "+pc(m.party)+"66",borderRadius:4,padding:"1px 4px",flexShrink:0}}>{m.party}</span>
                       <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.label}</span>
                     </div>
-                    <span style={{fontSize:9,color:C.text3,flexShrink:0,textAlign:"right"}}>{m.n>0?(m.n+" trades · "+(m.last||"")):"aucun trade"}</span>
+                    <span style={{fontSize:9,color:C.text3,flexShrink:0,textAlign:"right"}}>{m.n===0?"aucun trade":(congView==="port"?((m.portfolio||[]).length+" pos. · ~"+moneyC(m.portTotal||0)):(m.n+" trades · "+(m.last||"")))}</span>
                   </div>
                   {open && m.n>0 && (
                     <div style={{borderTop:"1px solid "+C.border,padding:"4px 10px 8px"}}>
-                      {tr.map(function(t,ti){
+                      {congView==="port" ? (
+                        (m.portfolio||[]).length===0 ? (
+                          <span style={{fontSize:10,color:C.text3}}>Portefeuille estimé indisponible (que des ventes ou tickers inconnus).</span>
+                        ) : (m.portfolio||[]).map(function(h,hi){
+                          var pf=m.portfolio;
+                          return (
+                            <div key={hi} onClick={function(){setMt({ticker:h.ticker,cat:""});}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 2px",borderBottom:hi<pf.length-1?"1px solid "+C.border+"66":"none",cursor:"pointer"}}>
+                              <div style={{display:"flex",alignItems:"baseline",gap:6,minWidth:0}}>
+                                <span style={{fontSize:10,fontWeight:700,color:C.btc,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{h.ticker}</span>
+                                <span style={{fontSize:8,color:C.text3}}>{h.n} op.</span>
+                              </div>
+                              <div style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
+                                <span style={{fontSize:10,fontWeight:800,color:C.text}}>{h.weight!=null?h.weight.toFixed(1)+"%":"—"}</span>
+                                <span style={{fontSize:9,color:C.text3,minWidth:52,textAlign:"right"}}>{moneyC(h.net)}</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                      tr.map(function(t,ti){
                         var clk=!!t.ticker;
                         return (
                           <div key={ti} onClick={clk?function(){setMt({ticker:t.ticker,cat:""});}:undefined} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 2px",borderBottom:ti<tr.length-1?"1px solid "+C.border+"66":"none",cursor:clk?"pointer":"default"}}>
@@ -7657,7 +7683,8 @@ function PageMarket({ eur=false }){
                             </div>
                           </div>
                         );
-                      })}
+                      })
+                      )}
                     </div>
                   )}
                 </div>
@@ -7668,6 +7695,67 @@ function PageMarket({ eur=false }){
       })()}
 
       {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={0.86} onClose={function(){setMt(null);}}/>}
+    </div>
+  );
+}
+
+function PageChangelog(){
+  var LOG = [
+    ["Naissance (v1–v12)", "App React mobile issue du dashboard Excel v5.5. Onglets Overview/Allocation/Stats/GDB/Portfolio, thème dark, données crypto/actions/banque, historique DD, charts. Storage GitHub Gist puis architecture CURRENT/EFF (bases DD, GDBS, GC, BENCH). Mise en ligne GitHub Pages."],
+    ["v20 – v21", "Recherche ticker Yahoo live + YF_MAP (KV). Onglet GDB (comparatif vs indices, saisonnalité). Onglet Data : toutes les bases en accordéon + recherche. TickerModal (chart Yahoo, métriques, ETF holdings, news). Snapshot journalier robuste (retry KV). 7 thèmes, loader PWA."],
+    ["v22 (abandonnée)", "Tentative Storage Engine v9 (miroir localStorage + merge bidirectionnel). Jugée instable (calculs portfolio, BTC mal classé) → retour à v21.96 comme base stable."],
+    ["v23", "Reprise stable : onglet Data exhaustif (17 bases), helpers mensuels, pull-to-refresh plus réactif, module achat/vente affiné (EUR/USD, tri alpha)."],
+    ["v27 — Onglet Market", "Nouvel onglet Market : Pouls (Fear & Greed, VIX), Macro, Secteurs (heatmap), Top/Flop (CoinGecko + FMP), Calendrier économique (Nasdaq)."],
+    ["v27 — Analyse titre", "Modal enrichi : ratios financiers (P/E, P/B, EV/EBITDA, ROE, marges… avec jauges colorées et explications), transactions d'initiés (SEC EDGAR — Form 4)."],
+    ["v27 — Hedge funds (13F)", "Sous-onglet Hedge Funds : 11 fonds suivis (Berkshire, Burry, Ackman, Bridgewater, Renaissance, Soros, Druckenmiller, Citadel, Millennium, Elliott, Situational Awareness) + section « Détenu par » dans le modal."],
+    ["v27 — Congrès", "Sous-onglet Congrès : trades STOCK Act (source House Stock Watcher) + portefeuille estimé par élu + section « Tradé par le Congrès » dans le modal."],
+    ["v27 — Confort", "Édition de cellule dans les bases (DD, GDBS, GC, GS_B100, BENCH_IDX), accordéons repliés par défaut, et menu Paramètres (engrenage) regroupant Thèmes, Bases de données, Changelog et À propos."],
+  ];
+  return (
+    <div style={{paddingBottom:40}}>
+      <div style={{fontSize:11,color:C.text3,lineHeight:1.5,marginBottom:14}}>Historique synthétique des versions. Le détail complet est dans le fichier CHANGELOG du projet.</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {LOG.map(function(e,i){
+          return (
+            <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"11px 13px"}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.btc,marginBottom:4}}>{e[0]}</div>
+              <div style={{fontSize:11,color:C.text2,lineHeight:1.55}}>{e[1]}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PageAbout(){
+  var rows = [
+    ["Application", "GDB & Sons — tracker de portefeuille mobile (crypto, actions, banque)"],
+    ["Version", APP_VERSION],
+    ["Frontend", "React 18 (JSX, Babel standalone) · JavaScript · HTML / CSS"],
+    ["Backend", "Cloudflare Worker (JavaScript) + KV storage"],
+    ["Hébergement", "GitHub Pages"],
+    ["Sources de données", "Yahoo Finance · CoinGecko · FMP · SEC EDGAR · Nasdaq · House Stock Watcher"],
+  ];
+  return (
+    <div style={{paddingBottom:40}}>
+      <div style={{textAlign:"center",margin:"6px 0 18px"}}>
+        <div style={{fontSize:26,fontWeight:900,color:C.text,letterSpacing:.5}}>GDB & Sons</div>
+        <div style={{fontSize:11,fontWeight:700,color:C.btc,fontFamily:"monospace",marginTop:4}}>{APP_VERSION}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {rows.map(function(r,i){
+          return (
+            <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 13px"}}>
+              <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>{r[0]}</div>
+              <div style={{fontSize:12,color:C.text,lineHeight:1.45}}>{r[1]}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{textAlign:"center",fontSize:10,color:C.text3,marginTop:20,lineHeight:1.6}}>
+        © 2026 GDB & Sons. Tous droits réservés.<br/>Application personnelle — données fournies à titre indicatif, sans garantie.
+      </div>
     </div>
   );
 }
@@ -7738,6 +7826,8 @@ function App(){
     try{ return localStorage.getItem('gdb_theme')||'dark'; }catch{ return 'dark'; }
   });
   const[showTheme,setShowTheme]=useState(false);
+  const[showSettings,setShowSettings]=useState(false);
+  const[settingsPage,setSettingsPage]=useState(null); // null | "data" | "changelog" | "about"
   // ── Écran de démarrage ──────────────────────────────────────────────────
   const[startScreen,setStartScreen]=useState(true); // afficher l'écran de choix
   const[startLoading,setStartLoading]=useState(true); // en train de charger les 2 sources
@@ -9019,12 +9109,12 @@ function App(){
             cursor:"pointer",fontSize:15,color:hidden?C.btc:C.purple,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>{hidden?"🙈":"👁"}</button>
-          <button onClick={()=>setShowTheme(true)} title="Thème" style={{
+          <button onClick={()=>setShowSettings(s=>!s)} title="Paramètres" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${C.border}`,background:C.purple+"1A",
-            cursor:"pointer",fontSize:14,
+            border:`1.5px solid ${showSettings?C.btc:C.border}`,background:C.purple+"1A",
+            cursor:"pointer",fontSize:16,color:showSettings?C.btc:C.text2,
             display:"flex",alignItems:"center",justifyContent:"center",
-          }}>🎨</button>
+          }}>⚙</button>
         </div>
       </div>
       {/* ── Pull-to-refresh indicator ── */}
@@ -9057,13 +9147,10 @@ function App(){
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
         {tab===6 && <PageMarket eur={eur}/>}
-        {tab===4 && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
-          liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-          liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/> }
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>
-        {TABS.map((lb,i)=>(
+        {TABS.map((lb,i)=> lb==="Data" ? null : (
           <button key={i} onClick={()=>setTab(i)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",cursor:"pointer",color:tab===i?C.btc:C.text3,transition:"color .15s"}}>
             <span style={{fontSize:22}}>{ICONS[i]}</span>
             <span style={{fontSize:11,fontWeight:700}}>{lb}</span>
@@ -9217,6 +9304,42 @@ function App(){
                 color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",
               }}>Fermer</button>
             )}
+          </div>
+        </div>
+      )}
+      {showSettings&&(
+        <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:460}}>
+          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:56,left:"50%",transform:"translateX(-50%)",width:430,maxWidth:"100%",display:"flex",justifyContent:"flex-end"}}>
+            <div style={{width:230,marginRight:14,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",boxShadow:"0 10px 30px rgba(0,0,0,.45)"}}>
+              {[
+                ["🎨","Thèmes",function(){ setShowSettings(false); setShowTheme(true); }],
+                ["🗄️","Bases de données",function(){ setShowSettings(false); setSettingsPage("data"); }],
+                ["📜","Changelog",function(){ setShowSettings(false); setSettingsPage("changelog"); }],
+                ["ℹ️","À propos",function(){ setShowSettings(false); setSettingsPage("about"); }],
+              ].map(function(it,i){
+                return (
+                  <button key={i} onClick={it[2]} style={{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"12px 14px",background:"none",border:"none",borderBottom:i<3?"1px solid "+C.border+"66":"none",cursor:"pointer",textAlign:"left"}}>
+                    <span style={{fontSize:16,width:20,textAlign:"center"}}>{it[0]}</span>
+                    <span style={{fontSize:13,fontWeight:700,color:C.text}}>{it[1]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {settingsPage&&(
+        <div style={{position:"fixed",inset:0,zIndex:1200,background:C.bg,display:"flex",flexDirection:"column",width:430,maxWidth:"100%",left:"50%",transform:"translateX(-50%)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+            <span style={{fontSize:15,fontWeight:800,color:C.text}}>{settingsPage==="data"?"🗄️ Bases de données":(settingsPage==="changelog"?"📜 Changelog":"ℹ️ À propos")}</span>
+            <button onClick={()=>setSettingsPage(null)} style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.border,background:C.bg1,color:C.text2,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+            {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
+              liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/>}
+            {settingsPage==="changelog" && <PageChangelog/>}
+            {settingsPage==="about" && <PageAbout/>}
           </div>
         </div>
       )}

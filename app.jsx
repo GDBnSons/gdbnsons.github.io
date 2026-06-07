@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.09";
+const APP_VERSION = "v27.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1508,6 +1508,34 @@ function ratioColor(v,d){ if(v==null||isNaN(v)) return C.text3; if(d.dir==="low"
 function ratioFmt(v,d){ if(v==null||isNaN(v)) return "\u2014"; if(d.unit==="%") return v.toFixed(1)+"%"; if(d.unit==="x") return v.toFixed(1)+"x"; return v.toFixed(Math.abs(v)<10?2:1); }
 function ratioInterp(v,d){ if(v==null||isNaN(v)) return "Donnee indisponible."; var col=ratioColor(v,d); var key=col===C.green?"g":(col===C.orange?"o":"r"); var def=d.interp||(d.dir==="low"?{g:"Niveau attractif (bon marche).",o:"Dans la moyenne.",r:"Niveau eleve (cher)."}:{g:"Solide.",o:"Moyen.",r:"Faible."}); return def[key]; }
 
+// v27.10 — Insiders : libellés des codes Form 4 + couleur par fonction
+function insCodeInfo(code){
+  var m = {
+    P:{lbl:"Achat",col:"#46a758"}, S:{lbl:"Vente",col:"#e5484d"},
+    A:{lbl:"Attribution",col:"#8b8d98"}, M:{lbl:"Levée d'options",col:"#4aa3ff"},
+    X:{lbl:"Exercice",col:"#4aa3ff"}, G:{lbl:"Don",col:"#8b8d98"},
+    F:{lbl:"Retenue fiscale",col:"#8b8d98"}, D:{lbl:"Cession",col:"#8b8d98"},
+    C:{lbl:"Conversion",col:"#a78bfa"}, J:{lbl:"Autre",col:"#8b8d98"}, V:{lbl:"Volontaire",col:"#8b8d98"}
+  };
+  return m[code] || { lbl: code || "—", col:"#8b8d98" };
+}
+function insRoleColor(role){
+  var r = (role||"").toLowerCase();
+  if (/chief executive|(\b|^)ceo(\b|$)/.test(r)) return "#f5a623";
+  if (/chief financial|(\b|^)cfo(\b|$)/.test(r)) return "#4aa3ff";
+  if (/chief operating|(\b|^)coo(\b|$)/.test(r)) return "#a78bfa";
+  if (/director/.test(r)) return "#22d3ee";
+  if (/10%|ten percent/.test(r)) return "#f472b6";
+  if (/chief|officer|president|vice|counsel|secretary|accounting|treasurer/.test(r)) return "#34d399";
+  return "#8b8d98";
+}
+function insValM(v){
+  if (v == null || v === 0) return null;
+  if (Math.abs(v) >= 1e6) return "$" + (v/1e6).toFixed(1) + "M";
+  if (Math.abs(v) >= 1e3) return "$" + (v/1e3).toFixed(0) + "k";
+  return "$" + Math.round(v);
+}
+
 function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
@@ -1527,6 +1555,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [ratioInfo, setRatioInfo] = useState(null); // ratio dont la bulle est ouverte
   const [ins, setIns] = useState(null);
   const [insL, setInsL] = useState(false);
+  const [insOpen, setInsOpen] = useState(false);
   useEffect(function(){
     if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setIns(null); return; }
     setInsL(true); setIns(null);
@@ -2095,29 +2124,41 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             );
           })()}
 
-          {/* v27.09 — Insiders (SEC EDGAR Form 4) */}
+          {/* v27.10 — Insiders (SEC EDGAR Form 4) — accordéon */}
           {ins && ins.trades && ins.trades.length > 0 && quoteType !== "ETF" && (
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:800,color:C.text2,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Transactions d'initiés</div>
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                {ins.trades.slice(0,12).map(function(t,i){
-                  const col = t.code === "P" ? C.green : (t.code === "S" ? C.red : C.text3);
-                  const lbl = t.code === "P" ? "Achat" : (t.code === "S" ? "Vente" : (t.code || (t.acq === "A" ? "Acq." : "Cess.")));
-                  return (
-                    <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.owner}</span>
-                        <span style={{fontSize:9,fontWeight:800,color:col,flexShrink:0}}>{lbl}</span>
+              <button onClick={() => setInsOpen(o => !o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:insOpen?C.btc+"15":C.bg3,border:`1px solid ${insOpen?C.btc+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:insOpen?6:0}}>
+                <span style={{fontSize:11,color:insOpen?C.btc:C.text,fontWeight:700,letterSpacing:0.3}}>
+                  👤 Transactions d'initiés
+                  <span style={{marginLeft:6,fontSize:10,color:insOpen?C.btc:C.text2,fontWeight:500}}>({ins.trades.length})</span>
+                </span>
+                <span style={{fontSize:11,color:insOpen?C.btc:C.text2,display:"inline-block",transform:insOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+              </button>
+              {insOpen && (
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {ins.trades.map(function(t,i){
+                    const ci = insCodeInfo(t.code);
+                    const rc = insRoleColor(t.role);
+                    const vm = insValM(t.value);
+                    return (
+                      <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.owner}</span>
+                          <span style={{fontSize:9,fontWeight:800,color:ci.col,flexShrink:0,textTransform:"uppercase",letterSpacing:0.3}}>{ci.lbl}</span>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:8,marginTop:4}}>
+                          <div style={{minWidth:0,overflow:"hidden"}}>
+                            <span style={{fontSize:9,fontWeight:700,color:rc,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>{t.role||"—"}</span>
+                            <span style={{fontSize:9,color:C.text3}}>{t.date}{t.shares!=null?(" · "+Math.round(t.shares).toLocaleString("fr-FR")+(t.price?(" @ "+t.price.toFixed(2)):"")):""}</span>
+                          </div>
+                          {vm && <span style={{fontSize:15,fontWeight:800,color:ci.col,flexShrink:0}}>{vm}</span>}
+                        </div>
                       </div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:3}}>
-                        <span style={{fontSize:9,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.role||"—")+" · "+(t.date||"")}</span>
-                        <span style={{fontSize:9,color:C.text2,flexShrink:0}}>{t.shares!=null?Math.round(t.shares).toLocaleString("fr-FR"):"—"}{t.price!=null?(" @ "+t.price.toFixed(2)):""}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{fontSize:8,color:C.text3,marginTop:5}}>Source : SEC EDGAR (Form 4). P = achat marché, S = vente marché.</div>
+                    );
+                  })}
+                  <div style={{fontSize:8,color:C.text3,marginTop:2}}>Source : SEC EDGAR (Form 4). P = achat marché · S = vente marché · A = attribution · M = levée d'options · G = don · F = retenue fiscale.</div>
+                </div>
+              )}
             </div>
           )}
           {insL && quoteType !== "ETF" && cat !== "Crypto" && (<div style={{fontSize:10,color:C.text3,marginBottom:12}}>Chargement des transactions d'initiés…</div>)}

@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.10";
+const APP_VERSION = "v27.11";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1556,6 +1556,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [ins, setIns] = useState(null);
   const [insL, setInsL] = useState(false);
   const [insOpen, setInsOpen] = useState(false);
+  const [hold13f, setHold13f] = useState(null);
+  const [holdOpen, setHoldOpen] = useState(false);
   useEffect(function(){
     if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setIns(null); return; }
     setInsL(true); setIns(null);
@@ -1564,6 +1566,14 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       .then(function(d){ setIns(d && d.trades ? d : { trades: [] }); setInsL(false); })
       .catch(function(){ setIns({ trades: [] }); setInsL(false); });
   }, [ticker, cat]);
+  useEffect(function(){
+    var nm = data && data.name;
+    if (!nm || cat === "Crypto" || /[-=]/.test(ticker)) { setHold13f(null); return; }
+    fetch(CF_WORKER_URL + "/market/13f?holder=" + encodeURIComponent(nm), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ setHold13f(d && d.funds ? d.funds : []); })
+      .catch(function(){ setHold13f([]); });
+  }, [data && data.name, cat]);
 
   // Bloquer le scroll du body quand le modal est ouvert
   useEffect(() => {
@@ -2162,6 +2172,38 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             </div>
           )}
           {insL && quoteType !== "ETF" && cat !== "Crypto" && (<div style={{fontSize:10,color:C.text3,marginBottom:12}}>Chargement des transactions d'initiés…</div>)}
+          {(function(){
+            if (!(hold13f && hold13f.length > 0)) return null;
+            var bv=function(v){ return v==null?"":(v>=1e9?"$"+(v/1e9).toFixed(1)+" Md":(v>=1e6?"$"+(v/1e6).toFixed(0)+" M":"$"+Math.round(v).toLocaleString("fr-FR"))); };
+            var fs=hold13f.slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); });
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={() => setHoldOpen(o => !o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:holdOpen?C.teal+"15":C.bg3,border:`1px solid ${holdOpen?C.teal+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:holdOpen?6:0}}>
+                  <span style={{fontSize:11,color:holdOpen?C.teal:C.text,fontWeight:700,letterSpacing:0.3}}>
+                    🏛️ Détenu par (13F)
+                    <span style={{marginLeft:6,fontSize:10,color:holdOpen?C.teal:C.text2,fontWeight:500}}>({fs.length})</span>
+                  </span>
+                  <span style={{fontSize:11,color:holdOpen?C.teal:C.text2,display:"inline-block",transform:holdOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {holdOpen && (
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {fs.map(function(fnd,i){
+                      return (
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px"}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fnd.fund}</span>
+                          <span style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
+                            <span style={{fontSize:12,fontWeight:800,color:C.teal}}>{fnd.weight!=null?fnd.weight.toFixed(1)+"%":"—"}</span>
+                            <span style={{fontSize:9,color:C.text3,minWidth:52,textAlign:"right"}}>{bv(fnd.value)}</span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <div style={{fontSize:8,color:C.text3,marginTop:2}}>Source : SEC EDGAR (13F). Poids = part du portefeuille actions déclaré du fonds.</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {quoteType === "ETF" && (() => {
             const etfDbg = data?._yahooDebug || data?._etfDebug || {};
@@ -7171,6 +7213,8 @@ function PageMarket({ eur=false }){
 
   const [mov,setMov]=useState(null),[movL,setMovL]=useState(false),[movE,setMovE]=useState(null);
   const [cal,setCal]=useState(null),[calL,setCalL]=useState(false),[calE,setCalE]=useState(null);
+  const [hf,setHf]=useState(null),[hfL,setHfL]=useState(false),[hfE,setHfE]=useState(null);
+  const [hfOpen,setHfOpen]=useState({0:true});
   const [impF,setImpF]=useState({1:true,2:true,3:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
@@ -7182,10 +7226,12 @@ function PageMarket({ eur=false }){
   useEffect(function(){
     if(sub==="movers"   && mov===null && !movL) loadSec("/market/movers",setMov,setMovL,setMovE,false);
     if(sub==="calendar" && cal===null && !calL) loadSec("/market/calendar",setCal,setCalL,setCalE,false);
+    if(sub==="hedge"    && hf===null   && !hfL) loadSec("/market/13f",setHf,setHfL,setHfE,false);
   },[sub]);
   function refresh(){
     if(sub==="movers") loadSec("/market/movers",setMov,setMovL,setMovE,true);
     else if(sub==="calendar") loadSec("/market/calendar",setCal,setCalL,setCalE,true);
+    else if(sub==="hedge") loadSec("/market/13f",setHf,setHfL,setHfE,true);
     else load(true);
   }
 
@@ -7196,7 +7242,7 @@ function PageMarket({ eur=false }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"]];
+  const SUBS=[["pouls","Pouls"],["movers","Top/Flop"],["secteurs","Secteurs"],["macro","Macro"],["calendar","Calendrier"],["hedge","Hedge Funds"]];
 
   function Gauge(props){
     var v=props.value;
@@ -7404,6 +7450,53 @@ function PageMarket({ eur=false }){
                 </div>
               </div>
             )}
+          </div>
+        );
+      })()}
+
+      {sub==="hedge" && (function(){
+        if(hfL) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
+        if(hfE) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {hfE}<button onClick={function(){loadSec("/market/13f",setHf,setHfL,setHfE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
+        if(!hf) return null;
+        var funds=hf.funds||[];
+        var toggle=function(fi){ setHfOpen(function(p){ var n=Object.assign({},p); n[fi]=!p[fi]; return n; }); };
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginBottom:2}}>Positions 13F (SEC EDGAR) — dépôt trimestriel. Les noms en couleur sont cliquables (analyse).</div>
+            {funds.map(function(fd,fi){
+              var open=!!hfOpen[fi]; var hold=fd.holdings||[];
+              return (
+                <div key={fd.cik} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
+                  <div onClick={function(){toggle(fi);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer"}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:2,minWidth:0}}>
+                      <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fd.name}</span>
+                      <span style={{fontSize:9,color:C.text3}}>{(fd.date||"").slice(0,10)} · {hold.length} pos. · {bigMcap(fd.total)}</span>
+                    </div>
+                    <span style={{color:C.text3,fontSize:11,flexShrink:0}}>{open?"▾":"▸"}</span>
+                  </div>
+                  {open && (
+                    <div style={{borderTop:"1px solid "+C.border,padding:"4px 10px 8px"}}>
+                      {hold.length===0 && <span style={{fontSize:10,color:C.text3}}>Aucune position.</span>}
+                      {hold.map(function(h,hi){
+                        var clk=!!h.ticker;
+                        return (
+                          <div key={hi} onClick={clk?function(){setMt({ticker:h.ticker,cat:""});}:undefined} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"6px 2px",borderBottom:hi<hold.length-1?"1px solid "+C.border+"66":"none",cursor:clk?"pointer":"default"}}>
+                            <div style={{display:"flex",alignItems:"baseline",gap:6,minWidth:0}}>
+                              <span style={{fontSize:10,fontWeight:700,color:clk?C.btc:C.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{h.issuer}</span>
+                              {h.ticker && <span style={{fontSize:8,fontWeight:600,color:C.text3,flexShrink:0}}>{h.ticker}</span>}
+                            </div>
+                            <div style={{display:"flex",gap:10,alignItems:"baseline",flexShrink:0}}>
+                              <span style={{fontSize:10,fontWeight:700,color:C.text}}>{h.weight!=null?h.weight.toFixed(1)+"%":"—"}</span>
+                              <span style={{fontSize:9,color:C.text3,minWidth:48,textAlign:"right"}}>{bigMcap(h.value)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })()}

@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.19";
+const APP_VERSION = "v27.20";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1473,20 +1473,20 @@ const Btn=({label,onClick,color,full,outline})=>(
 /* ═══════════════════════════════════════════════════════════
    TICKER MODAL — chart courbe + infos live via Cloudflare proxy
 ═══════════════════════════════════════════════════════════ */
+var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes du modal ticker
 const TF_CONFIG = [
-  { label:"1h",  interval:"5m",   range:"1d"   },
-  { label:"4h",  interval:"15m",  range:"5d"   },
-  { label:"1J",  interval:"1h",   range:"5d"   },
-  { label:"1S",  interval:"1d",   range:"1mo"  },
-  { label:"1M",  interval:"1d",   range:"3mo"  },
-  { label:"1A",  interval:"1wk",  range:"1y"   },
-  { label:"5A",  interval:"1mo",  range:"5y"   },
-  { label:"ALL", interval:"3mo",  range:"max"  },
+  { label:"1J",  interval:"5m",   range:"1d"   },
+  { label:"1S",  interval:"30m",  range:"5d"   },
+  { label:"1M",  interval:"1d",   range:"1mo"  },
+  { label:"6M",  interval:"1d",   range:"6mo"  },
+  { label:"1A",  interval:"1d",   range:"1y"   },
+  { label:"5A",  interval:"1wk",  range:"5y"   },
+  { label:"ALL", interval:"1mo",  range:"max"  },
 ];
 
 // Timeframes CoinGecko : days valides = 1,7,14,30,90,180,365,max
 // Mapping TF_CONFIG index → days CoinGecko
-const TF_CG_DAYS = ["1","7","7","14","30","365","1825","max"];
+const TF_CG_DAYS = ["1","7","30","180","365","max","max"];
 
 // v27.01 — Ratios financiers : seuils indicatifs, jauges et explications neophytes
 var RATIO_DEFS=[
@@ -1541,7 +1541,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
   const yfSym    = YF_MAP[ticker] || ticker;
 
-  const [tf, setTf]         = useState(3);
+  const [tf, setTf]         = useState(2);
+  const [candleMode, setCandleMode] = useState(false);
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr]       = useState(null);
@@ -1747,6 +1748,18 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   // Chart
   const candles = data?.candles || [];
   const closes  = candles.map(c=>c.c).filter(v=>v!=null);
+  // Marqueurs achats/ventes : transactions de l'utilisateur sur ce ticker, dans la fenêtre affichée
+  const chartMarkers = (function(){
+    if(!candles.length) return [];
+    var first=candles[0].t, last=candles[candles.length-1].t;
+    var mine=(GLOBAL_TXNS||[]).filter(function(t){ return String(t.ticker||"").toUpperCase()===String(ticker||"").toUpperCase(); });
+    return mine.map(function(t){
+      var tms=new Date(t.date).getTime(); if(isNaN(tms)) return null;
+      if(tms < first-2*864e5 || tms > last+2*864e5) return null;
+      var bi=0,bd=Infinity; for(var i=0;i<candles.length;i++){ var dd=Math.abs(candles[i].t-tms); if(dd<bd){bd=dd;bi=i;} }
+      return { i:bi, side:String(t.side||"").toUpperCase() };
+    }).filter(Boolean);
+  })();
   const W=320, H=110, PAD=6;
   const minV = Math.min(...closes), maxV = Math.max(...closes);
   const rng  = maxV - minV || 1;
@@ -1759,9 +1772,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const fmtTs = ts => {
     const d = new Date(ts);
     const lbl = TF_CONFIG[tf].label;
-    if(lbl==="1h")  return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
-    if(lbl==="4h")  return d.getDate()+"/"+(d.getMonth()+1)+" "+d.getHours()+"h";
-    if(["1J","1S"].includes(lbl)) return d.getDate()+"/"+(d.getMonth()+1);
+    if(lbl==="1J") return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
+    if(lbl==="1S") return d.getDate()+"/"+(d.getMonth()+1)+" "+d.getHours()+"h";
+    if(["1M","6M"].includes(lbl)) return d.getDate()+"/"+(d.getMonth()+1);
     return (d.getMonth()+1)+"/"+d.getFullYear().toString().slice(2);
   };
   const xIdxs = closes.length > 1
@@ -2359,7 +2372,20 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           </div>
 
           {/* Chart */}
-          <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4}}>
+          <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
+            <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
+              {candleMode
+                ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
+            </button>
+            {candleMode && candles.length>0 && (function(){ var cd=crosshair?candles[crosshair.i]:candles[candles.length-1]; if(!cd) return null; var f=function(v){ return v==null?"\u2014":(eur?(v*usdEur):v).toFixed(2); }; return (
+              <div style={{display:"flex",gap:10,fontSize:9,color:C.text2,padding:"0 38px 6px 8px"}}>
+                <span>O <b style={{color:C.text}}>{f(cd.o)}</b></span>
+                <span>H <b style={{color:C.green}}>{f(cd.h)}</b></span>
+                <span>L <b style={{color:C.red}}>{f(cd.l)}</b></span>
+                <span>C <b style={{color:C.text}}>{f(cd.c)}</b></span>
+              </div>
+            ); })()}
             {loading && (
               <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:12}}>
                 Chargement…
@@ -2419,11 +2445,27 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                       <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
                     </linearGradient>
                   </defs>
-                  <polygon
-                    points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)}
-                    fill={"url(#"+gradId+")"}
-                  />
-                  <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+                  {candleMode ? (
+                    candles.map(function(cd,i){
+                      if(cd.o==null||cd.c==null) return null;
+                      var x=toX(i,candles.length); var up=cd.c>=cd.o; var col=up?C.green:C.red;
+                      var yO=toY(cd.o), yC=toY(cd.c);
+                      var yH=toY(cd.h!=null?cd.h:Math.max(cd.o,cd.c)), yL=toY(cd.l!=null?cd.l:Math.min(cd.o,cd.c));
+                      var bw=Math.max(1.2,(W-PAD*2)/candles.length*0.62);
+                      var top=Math.min(yO,yC), bh=Math.max(1,Math.abs(yC-yO));
+                      return (<g key={"cd"+i}><line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={0.8}/><rect x={x-bw/2} y={top} width={bw} height={bh} fill={col}/></g>);
+                    })
+                  ) : (<>
+                    <polygon points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)} fill={"url(#"+gradId+")"}/>
+                    <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+                  </>)}
+                  {/* Marqueurs achats (vert ▲) / ventes (rouge ▼) */}
+                  {chartMarkers.map(function(m,mi){
+                    var x=toX(m.i,candles.length); var y=toY(candles[m.i].c);
+                    var col=m.side==="BUY"?C.green:C.red; var dir=m.side==="BUY"?1:-1; var yo=y+dir*8;
+                    var tri=m.side==="BUY" ? (x+","+(yo-4)+" "+(x-4)+","+(yo+3)+" "+(x+4)+","+(yo+3)) : (x+","+(yo+4)+" "+(x-4)+","+(yo-3)+" "+(x+4)+","+(yo-3));
+                    return <polygon key={"mk"+mi} points={tri} fill={col} stroke={C.bg1} strokeWidth={0.7}/>;
+                  })}
                   {/* Labels X */}
                   {xIdxs.map((ci,i)=>(
                     <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
@@ -6789,8 +6831,8 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
         <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px"}}>
           <div style={{display:"flex",gap:16,marginBottom:6,paddingLeft:2,fontSize:11}}>
             <span style={{color:C.blue,fontWeight:700}}>Cours Yahoo</span>
-            <span style={{color:C.green,fontWeight:700}}>\u25cf Buy</span>
-            <span style={{color:C.red,fontWeight:700}}>\u25cf Sell</span>
+            <span style={{color:C.green,fontWeight:700}}>● Buy</span>
+            <span style={{color:C.red,fontWeight:700}}>● Sell</span>
           </div>
           {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}…</div>}
           {hist!==null && hist.length>0 && <LineChart series={chartSeries} dates={chartDates} h={180} unit={""} hideTF={true} defaultTF="ALL" markers={markers}/>}
@@ -7822,6 +7864,7 @@ function App(){
   const[iconDbVersion,setIconDbVersion]=useState(0);
   const bumpIconDb = () => setIconDbVersion(v=>v+1);
   const[txns,setTxns]=useState(SEED_TXNS_REAL);
+  GLOBAL_TXNS = txns || [];
   const[ready,setReady]=useState(false);
   const[showSnap,setShowSnap]=useState(false);
   const[showTrade,setShowTrade]=useState(false);

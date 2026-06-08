@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.18";
+const APP_VERSION = "v27.19";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7457,6 +7457,19 @@ function PageMarket({ eur=false }){
             </span>
           </div>
         ); };
+        var idxRow3=function(it){ return (
+          <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{display:"flex",alignItems:"center",gap:8,background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"8px 10px 8px 12px",cursor:"pointer"}}>
+            <span style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>{flag(it.cc)}<span style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.label}</span></span>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              {[["1J",it.pct],["1S",it.pct1w],["1M",it.pct1m]].map(function(c,ci){ return (
+                <div key={ci} style={{textAlign:"center",minWidth:48,background:C.bg2,borderRadius:6,padding:"3px 4px"}}>
+                  <div style={{fontSize:7,color:C.text3,letterSpacing:0.3}}>{c[0]}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:pctColor(c[1])}}>{pctFmt(c[1])}</div>
+                </div>
+              );})}
+            </div>
+          </div>
+        ); };
         return (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{display:"flex",gap:10}}>
@@ -7476,9 +7489,9 @@ function PageMarket({ eur=false }){
             </div>
           </div>
           <div>
-            {sectTitle("Indices mondiaux")}
+            {sectTitle("Indices mondiaux — variations 1J / 1S / 1M")}
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {(m.indices||[]).map(quoteRow)}
+              {(m.indices||[]).map(idxRow3)}
             </div>
           </div>
           <div>

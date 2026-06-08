@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.22";
+const APP_VERSION = "v27.23";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4676,24 +4676,25 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         // P&L converti pour les labels des barres
         const pnlsC = data.m.map((_,i)=>cvtPNL(i));
         const mx = Math.max(...vals.filter(v=>v!=null).map(Math.abs), .01);
-        const W=320, HTOP=52, HBOT=52, HLAB=14, HPNL=10, MIDLINE=HTOP;
+        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, MIDLINE=HTOP;
         const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
-        const n12=data.m.length, barW=Math.floor((W-16)/n12)-2, gap=2;
-        const bx=i=>8+i*(barW+gap);
+        const n12=data.m.length, barW=Math.floor((W-8)/n12)-2, gap=2;
+        const bx=i=>4+i*(barW+gap);
         return(
-          <div style={{...crd(),marginBottom:14}}>
-            <div style={{fontSize:10,color:C.gray,marginBottom:8,fontWeight:700}}>
-              Performance mensuelle {safeYr} — {cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total"} {eur?"€":"$"}
-            </div>
+          <>
+          <div style={{fontSize:11,color:C.text2,marginBottom:6,fontWeight:700,padding:"0 2px"}}>
+            Performance mensuelle {safeYr} — {cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total"} {eur?"€":"$"}
+          </div>
+          <div style={{...crd(),marginBottom:14,padding:"8px 4px"}}>
             <svg width="100%" viewBox={`0 0 ${W} ${TOTAL_H}`} style={{overflow:"visible",display:"block"}}>
-              <line x1={4} y1={MIDLINE} x2={W-4} y2={MIDLINE} stroke={C.border} strokeWidth={0.8}/>
+              <line x1={2} y1={MIDLINE} x2={W-2} y2={MIDLINE} stroke={C.border} strokeWidth={0.8}/>
               {data.m.map((m,i)=>{
                 const v=vals[i], pnl=pnlsC[i];
                 const cx=bx(i)+barW/2;
                 if(v==null) return(
                   <g key={i}>
                     <rect x={bx(i)} y={MIDLINE-1} width={barW} height={2} fill={C.bg3} rx={1}/>
-                    <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle" fill={C.text3} fontSize={6.5}>{m.slice(0,3)}</text>
+                    <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle" fill={C.text3} fontSize={7.5}>{m.slice(0,3)}</text>
                   </g>
                 );
                 const hpx=Math.max(2,Math.abs(v)/mx*(HTOP-8));
@@ -4708,18 +4709,18 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                     <rect x={bx(i)} y={barY} width={barW} height={barH}
                       fill={col} opacity={0.85} rx={2}/>
                     <text x={cx} y={lblY} textAnchor="middle"
-                      fill={col} fontSize={6.5} fontWeight="800">
+                      fill={col} fontSize={8} fontWeight="800">
                       {fmtP(v,0)}
                     </text>
                     {pnl!=null&&(
                       <text x={cx} y={pnlY} textAnchor="middle"
-                        fill={C.text3} fontSize={5.5}>
+                        fill={C.text3} fontSize={6.5}>
                         {pnl>=0?"+":""}{Math.round(pnl/1000)}k
                       </text>
                     )}
                     <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle"
                       fill={i===bestI?C.green:i===worstI?C.red:C.text3}
-                      fontSize={6.5} fontWeight={i===bestI||i===worstI?"800":"400"}>
+                      fontSize={7.5} fontWeight={i===bestI||i===worstI?"800":"400"}>
                       {m.slice(0,3)}
                     </text>
                   </g>
@@ -4727,6 +4728,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
               })}
             </svg>
           </div>
+          </>
         );
       })()}
 
@@ -7390,7 +7392,8 @@ function PageMarket({ eur=false }){
   const [cong,setCong]=useState(null),[congL,setCongL]=useState(false),[congE,setCongE]=useState(null);
   const [congOpen,setCongOpen]=useState({});
   const [congView,setCongView]=useState("trades");
-  const [impF,setImpF]=useState({1:true,2:true,3:true});
+  const [impF,setImpF]=useState({1:false,2:false,3:true});
+  const [ccF,setCcF]=useState({us:true});
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
@@ -7587,7 +7590,9 @@ function PageMarket({ eur=false }){
         var ev=cal.econ||[], ea=cal.earnings||[];
         var CCY_FLAG={USD:"🇺🇸",EUR:"🇪🇺",GBP:"🇬🇧",JPY:"🇯🇵",CHF:"🇨🇭",CAD:"🇨🇦",AUD:"🇦🇺",NZD:"🇳🇿",CNY:"🇨🇳",HKD:"🇭🇰",SGD:"🇸🇬",SEK:"🇸🇪",NOK:"🇳🇴",DKK:"🇩🇰",MXN:"🇲🇽",BRL:"🇧🇷",INR:"🇮🇳",KRW:"🇰🇷",ZAR:"🇿🇦",TRY:"🇹🇷",RUB:"🇷🇺",PLN:"🇵🇱",ALL:"🌐"};
         var lvlOf=function(e){ return e.impact>=1?e.impact:1; };
-        var evF=ev.filter(function(e){ return impF[lvlOf(e)]; });
+        var allCC=Array.from(new Set(ev.map(function(e){return e.cc;}).filter(Boolean)));
+        allCC.sort(function(a,b){ if(a==="us")return -1; if(b==="us")return 1; return a.localeCompare(b); });
+        var evF=ev.filter(function(e){ return impF[lvlOf(e)] && !!ccF[e.cc]; });
         var impColor=function(l){ return l>=3?C.red:(l>=2?C.orange:C.text3); };
         var impLbl=function(l){ return l>=3?"Fort":(l>=2?"Moyen":"Faible"); };
         var fmtV=function(v){ return (v==null||v==="")?"—":String(v); };
@@ -7604,7 +7609,18 @@ function PageMarket({ eur=false }){
                   </button>
                 );})}
               </div>
-              {dates.length===0 && <div style={{fontSize:11,color:C.text3}}>Aucun événement sur la période.</div>}
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+                {(function(){ var allOn=allCC.length>0&&allCC.every(function(c){return ccF[c];}); return (
+                  <button onClick={function(){ if(allOn){ setCcF({}); } else { var n={}; allCC.forEach(function(c){n[c]=true;}); setCcF(n); } }} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:allOn?C.btc+"22":C.bg1,border:"1px solid "+(allOn?C.btc:C.border),borderRadius:9,padding:"5px 10px",color:allOn?C.btc:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>Tous</button>
+                ); })()}
+                {allCC.map(function(cc){ var on=!!ccF[cc]; return (
+                  <button key={cc} onClick={function(){ setCcF(function(p){ var n=Object.assign({},p); n[cc]=!p[cc]; return n; }); }} style={{display:"flex",alignItems:"center",gap:4,background:on?C.btc+"22":C.bg1,border:"1px solid "+(on?C.btc:C.border),borderRadius:9,padding:"4px 8px",cursor:"pointer",opacity:on?1:0.5}}>
+                    <img src={"https://flagcdn.com/20x15/"+cc+".png"} alt="" style={{width:18,height:13,borderRadius:2,objectFit:"cover"}} onError={function(ev){ev.target.style.display="none";}}/>
+                    <span style={{fontSize:10,fontWeight:700,color:on?C.btc:C.text3}}>{cc.toUpperCase()}</span>
+                  </button>
+                );})}
+              </div>
+              {dates.length===0 && <div style={{fontSize:11,color:C.text3}}>Aucun événement (essaie d'élargir les filtres importance / pays).</div>}
               {dates.map(function(d){ return (
                 <div key={d} style={{marginBottom:10}}>
                   <div style={{fontSize:10,fontWeight:700,color:C.text2,marginBottom:5}}>{d}</div>

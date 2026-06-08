@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.20";
+const APP_VERSION = "v27.21";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2819,7 +2819,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   useEffect(()=>{ onSparkData&&onSparkData(portAbs); }, [tf, portAbs.join(",")]); // eslint-disable-line
 
   /* ── SVG geometry ── */
-  const W = 300, H = 96, PAD_L = 30, PAD_R = 38;
+  const W = 300, H = 150, PAD_L = 26, PAD_R = 34;
   const IW = W - PAD_L - PAD_R;
 
   const leftVals = [...gsB, ...gcB].filter(v => v != null);
@@ -2874,32 +2874,33 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   const vw = typeof window!=="undefined"?window.innerWidth:390;
   const vh = typeof window!=="undefined"?window.innerHeight:844;
 
+  /* ── Barre timeframe (rendue au-dessus du cadre en vue normale) ── */
+  const tfBar = (
+    <div style={{display:"flex",gap:3,marginBottom:8,alignItems:"center"}}>
+      {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
+        <button key={t} onClick={()=>{setTF(t);setHover(null);}} style={{
+          flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
+          border:"none",cursor:"pointer",
+          background:tf===t?C.btc:"transparent",
+          color:tf===t?"#000":C.gray,
+        }}>{t}</button>
+      ))}
+      <div style={{width:1,height:16,background:C.border,margin:"0 2px"}}/>
+      {setEur&&(
+        <button onClick={()=>setEur(!eur)} style={{
+          padding:"4px 7px",borderRadius:6,fontSize:10,fontWeight:800,
+          border:`1px solid ${eur?C.btc:C.border}`,cursor:"pointer",
+          background:eur?C.btc+"22":"transparent",
+          color:eur?C.btc:C.gray,flexShrink:0,
+        }}>{eur?"€":"$"}</button>
+      )}
+    </div>
+  );
+
   /* ── Contenu du graphique (partagé entre normal et fullscreen) ── */
   const chartContent = (hFull) => (
     <>
-      {/* Timeframe selector + bouton € */}
-      <div style={{display:"flex",gap:3,marginBottom:10,alignItems:"center"}}>
-        {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
-          <button key={t} onClick={()=>{setTF(t);setHover(null);}} style={{
-            flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
-            border:"none",cursor:"pointer",
-            background:tf===t?C.btc:"transparent",
-            color:tf===t?"#000":C.gray,
-          }}>{t}</button>
-        ))}
-        {/* Séparateur */}
-        <div style={{width:1,height:16,background:C.border,margin:"0 2px"}}/>
-        {/* Bouton € / $ */}
-        {setEur&&(
-          <button onClick={()=>setEur(!eur)} style={{
-            padding:"4px 7px",borderRadius:6,fontSize:10,fontWeight:800,
-            border:`1px solid ${eur?C.btc:C.border}`,cursor:"pointer",
-            background:eur?C.btc+"22":"transparent",
-            color:eur?C.btc:C.gray,
-            flexShrink:0,
-          }}>{eur?"€":"$"}</button>
-        )}
-      </div>
+      {hFull && tfBar}
 
       {/* Tooltip flottant — position fixed au dessus du titre */}
       {hover != null && (
@@ -3020,7 +3021,9 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
     </div>
   ) : (
     /* ── VUE NORMALE ── */
-    <div style={{background:C.bg1,borderRadius:12,padding:"10px 10px 6px",border:`1px solid ${C.border}`,marginBottom:7,position:"relative"}}>
+    <>
+    {tfBar}
+    <div style={{background:C.bg1,borderRadius:12,padding:"8px 4px 6px",border:`1px solid ${C.border}`,marginBottom:7,position:"relative"}}>
       {chartContent(false)}
       {/* Bouton plein écran — coin bas droite */}
       <button onClick={()=>setFull(true)} title="Plein écran" style={{
@@ -3031,6 +3034,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
         cursor:"pointer",fontSize:11,color:C.gray,lineHeight:1,
       }}>⛶</button>
     </div>
+    </>
   );
 }
 
@@ -4000,31 +4004,6 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
       <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC}/>
-
-      {/* ── Taux EUR/USD ── */}
-      {(()=>{
-        const _src3 = EFF||CURRENT;
-        const eurUsdRate = _src3.eurUsd || (1/_src3.usdEur);
-        const usdEurRate = _src3.usdEur;
-        return(
-          <div style={{...crd(),display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",marginBottom:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <span style={{fontSize:13}}>🇪🇺</span>
-              <span style={{fontSize:11,color:C.text2,fontWeight:600}}>EUR / USD</span>
-            </div>
-            <div style={{display:"flex",gap:16,alignItems:"center"}}>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.text}}>${eurUsdRate.toFixed(4)}</div>
-                <div style={{fontSize:9,color:C.gray}}>1€ = ${eurUsdRate.toFixed(4)}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.text}}>€{usdEurRate.toFixed(4)}</div>
-                <div style={{fontSize:9,color:C.gray}}>1$ = €{usdEurRate.toFixed(4)}</div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Version discrète */}
       <div style={{

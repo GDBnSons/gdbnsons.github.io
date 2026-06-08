@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.21";
+const APP_VERSION = "v27.22";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2736,6 +2736,16 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
    Right axis (montant en €/$ selon eur)         : Patrimoine total
    La valeur finale = exactement celle affichée en haut
 ═══════════════════════════════════════════════════════════ */
+function useWindowSize(){
+  const [s,setS]=React.useState({w: typeof window!=="undefined"?window.innerWidth:390, h: typeof window!=="undefined"?window.innerHeight:844});
+  React.useEffect(()=>{
+    const on=()=>setS({w:window.innerWidth,h:window.innerHeight});
+    window.addEventListener("resize",on); window.addEventListener("orientationchange",on);
+    return ()=>{ window.removeEventListener("resize",on); window.removeEventListener("orientationchange",on); };
+  },[]);
+  return s;
+}
+
 function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC}){
   const _DD=liveDD||DD;
   const _GDBS=liveGDBS||GDBS;
@@ -2743,6 +2753,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);
   const [full, setFull] = useState(false);
+  const win = useWindowSize();
   // tf et setTF viennent du parent (PageOverview) pour synchroniser avec le card
 
   const src = EFF||CURRENT;
@@ -2819,7 +2830,9 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   useEffect(()=>{ onSparkData&&onSparkData(portAbs); }, [tf, portAbs.join(",")]); // eslint-disable-line
 
   /* ── SVG geometry ── */
-  const W = 300, H = 150, PAD_L = 26, PAD_R = 34;
+  const W = 300, PAD_L = 26, PAD_R = 34;
+  const _availW = Math.max(220, win.w - 24), _availH = Math.max(160, win.h - 200);
+  const H = full ? Math.max(120, Math.round(300*_availH/_availW) - 22) : 150;
   const IW = W - PAD_L - PAD_R;
 
   const leftVals = [...gsB, ...gcB].filter(v => v != null);
@@ -4829,6 +4842,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const [tf, setTF]     = useState("YTD");
   const [hover, setHover] = useState(null);
   const [full, setFull]   = useState(false);
+  const win = useWindowSize();
   const svgRef = useRef(null);
 
   const _GSB_data = liveGSB || GS_B100_EXT;
@@ -4880,7 +4894,9 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   if(!n||!allVals.length) return null;
 
   const mn=Math.min(...allVals), mx=Math.max(...allVals), rng=mx-mn||1;
-  const W=300, H=110, PL=28, PR=8, IW=W-PL-PR;
+  const W=300, PL=28, PR=8, IW=W-PL-PR;
+  const _availW = Math.max(220, win.w - 24), _availH = Math.max(160, win.h - 200);
+  const H = full ? Math.max(120, Math.round(300*_availH/_availW) - 20) : 150;
   const px=i=>PL+i/(n-1)*IW;
   const py=v=>v==null?null:H-((v-mn)/rng)*(H-4)+2;
 
@@ -4922,19 +4938,22 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const vw = typeof window!=="undefined"?window.innerWidth:390;
   const vh = typeof window!=="undefined"?window.innerHeight:844;
 
+  /* ── Barre timeframe (au-dessus du cadre en vue normale) ── */
+  const tfBar = (
+    <div style={{display:"flex",gap:3,marginBottom:8}}>
+      {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
+        <button key={t} onClick={()=>handleTF(t)} style={{
+          flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
+          border:"none",cursor:"pointer",
+          background:tf===t?C.btc:"transparent",color:tf===t?"#000":C.gray,
+        }}>{t}</button>
+      ))}
+    </div>
+  );
+
   /* ── Chart content (shared between normal + fullscreen) ── */
   const chartBody = (
     <>
-      {/* TF selector */}
-      <div style={{display:"flex",gap:3,marginBottom:10}}>
-        {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
-          <button key={t} onClick={()=>handleTF(t)} style={{
-            flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
-            border:"none",cursor:"pointer",
-            background:tf===t?C.btc:"transparent",color:tf===t?"#000":C.gray,
-          }}>{t}</button>
-        ))}
-      </div>
 
       {/* Tooltip fixe — au-dessus des encarts GDB.C et GDB.S */}
       {hover!=null && hDate && (
@@ -5018,18 +5037,21 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
         <span style={{fontSize:13,fontWeight:800,color:C.btc}}>GDB.C · GDB.S · Benchmarks</span>
         <button onClick={()=>setFull(false)} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 14px",color:C.text,fontSize:12,fontWeight:700,cursor:"pointer"}}>✕</button>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>{chartBody}</div>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column"}}>{tfBar}{chartBody}</div>
     </div>
   ) : (
-    <div style={{background:C.bg1,borderRadius:12,padding:"10px 10px 6px",border:`1px solid ${C.border}`,marginBottom:12,position:"relative"}}>
+    <>
+    {tfBar}
+    <div style={{background:C.bg1,borderRadius:12,padding:"8px 4px 6px",border:`1px solid ${C.border}`,marginBottom:12,position:"relative"}}>
       <button onClick={()=>setFull(true)} title="Plein écran" style={{
-        position:"absolute",top:8,right:8,zIndex:10,
+        position:"absolute",bottom:8,right:8,zIndex:10,
         background:C.bg2,border:`1px solid ${C.border}`,borderRadius:6,
         width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",
         cursor:"pointer",fontSize:11,color:C.gray,
       }}>⛶</button>
       {chartBody}
     </div>
+    </>
   );
 }
 

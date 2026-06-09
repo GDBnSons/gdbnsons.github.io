@@ -602,23 +602,38 @@ function applyTrade(trade, currentEFF){
 async function fetchAllPrices(){
   const results = {errors: []};
 
-  // v23.22 — BTC, ETH, toutes les cryptos ET le taux EUR/USD sont dans YF_MAP
-  // (BTC-USD, ETH-USD…, EURUSD=X) et fetché via Yahoo comme les actions.
-  // Coingecko n'est plus nécessaire.
+  // v27.25 — Phase 1 : batch des cours en UN seul appel worker (/yahoo-quotes).
+  // Fallback par-ticker (anciens proxies) uniquement pour les symboles manquants.
+  const entries = Object.entries(YF_MAP).filter(([key])=> key!=="EURUSD");
+  const symbols = Array.from(new Set(entries.map(([,sym])=> sym)));
+  const sym2keys = {};
+  entries.forEach(([key,sym])=>{ (sym2keys[sym] = sym2keys[sym] || []).push(key); });
 
-  /* Stocks + crypto + taux de change — en parallel (max 3 à la fois) */
-  const tickers = Object.entries(YF_MAP);
-  for(let i=0; i<tickers.length; i+=3){
-    const batch = tickers.slice(i, i+3);
+  // 1) Appel groupé (1 requête pour tous les symboles)
+  let got = {};
+  try{
+    const res = await fetch(`${CF_WORKER_URL}/yahoo-quotes?symbols=${encodeURIComponent(symbols.join(","))}`, {
+      headers:{ "X-Auth-Key": CF_AUTH_KEY },
+      signal: AbortSignal.timeout(20000),
+    });
+    if(res.ok){ const d = await res.json(); got = (d && d.quotes) || {}; }
+  }catch(e){ /* on bascule sur le fallback par-ticker ci-dessous */ }
+  Object.keys(got).forEach(function(sym){
+    const p = got[sym];
+    if(p != null) (sym2keys[sym] || []).forEach(function(key){ results[key] = p; });
+  });
+
+  // 2) Fallback par-ticker pour les manquants seulement (parallèle par 5, sans pause)
+  const missing = entries.filter(([key])=> results[key] == null);
+  for(let i=0; i<missing.length; i+=5){
+    const batch = missing.slice(i, i+5);
     await Promise.all(batch.map(async([key, sym])=>{
-      if(key==="EURUSD") return;  // retire du refresh Yahoo (buggait a chaque refresh)
-      try {
+      try{
         const price = await fetchYahoo(sym);
         if(price != null) results[key] = price;
-        else results.errors.push(`${key}`); // null = échec silencieux
+        else results.errors.push(`${key}`);
       } catch(e){ results.errors.push(`${key}`); }
     }));
-    if(i+3 < tickers.length) await new Promise(r=>setTimeout(r,300));
   }
 
   return results;
@@ -723,7 +738,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.24";
+const APP_VERSION = "v27.25";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

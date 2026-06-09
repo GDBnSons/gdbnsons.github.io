@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.28";
+const APP_VERSION = "v27.29";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3011,13 +3011,13 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
       {/* Legend */}
       <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 2, paddingTop: 4, borderTop: `1px solid ${C.border}` }}>
         {[
-          { color: C.orange, label: `GDB.C ${eur?"€"+(gcLive*src.usdEur).toFixed(2):"$"+gcLive.toFixed(2)}` },
-          { color: C.blue,   label: `GDB.S ${eur?"€"+(gsLive*src.usdEur).toFixed(2):"$"+gsLive.toFixed(2)}` },
-          { color: C.green,  label: `Patrimoine ${cur}${fmtK(portToday)}` },
+          { color: C.orange, label: "GDB.C" },
+          { color: C.blue,   label: "GDB.S" },
+          { color: C.green,  label: "Patrimoine" },
         ].map((l, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <div style={{ width: 12, height: 2, background: l.color, borderRadius: 1 }}/>
-            <span style={{ fontSize: 9, color: C.gray }}>{l.label}</span>
+            <span style={{ fontSize: 10, color: l.color, fontWeight: 700 }}>{l.label}</span>
           </div>
         ))}
       </div>
@@ -3809,7 +3809,14 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center",
         }}>
           <div style={{flex:1}}>
-            <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>
+            <div style={{fontSize:11,color:C.green,fontWeight:800,letterSpacing:.5,marginBottom:2,textTransform:"uppercase"}}>Total Net Worth</div>
+            <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.green}}>
+              {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
+            </div>
+            <div style={{fontSize:12,color:C.gray,marginTop:2}}>
+              {msk(eur?"$"+fmt(_sumUSD):"€"+fmt(_sumEUR), hidden)}
+            </div>
+            <div style={{fontSize:9,color:C.gray,marginTop:4,textTransform:"uppercase",letterSpacing:.5}}>
               {(()=>{
                 const src = chosenSource==="cloudflare" ? "BASE CF" : "BASE LOCALE";
                 const snapDate = (EFF||CURRENT).date || CURRENT.date;
@@ -3821,18 +3828,11 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
                   return String(dt.getDate()).padStart(2,"0")+" "+m+" "+String(dt.getFullYear()).slice(2);
                 };
                 if(refreshedAt){
-                  // Un refresh a été effectué
                   const refreshDate = refreshedAt.replace(/^(cloudflare|snapshot|locale)\s*/i,"");
                   return `${src} · REFRESH ${fmtDate(refreshDate)} ⟳`;
                 }
                 return `${src} · ${fmtDate(snapDate)} 📂`;
               })()}
-            </div>
-            <div style={{fontSize:32,fontWeight:900,letterSpacing:-1.5,color:C.green}}>
-              {msk(cur+fmt(Math.round(eur?_sumEUR:_sumUSD)), hidden)}
-            </div>
-            <div style={{fontSize:12,color:C.gray,marginTop:2}}>
-              {msk(eur?"$"+fmt(_sumUSD):"€"+fmt(_sumEUR), hidden)}
             </div>
           </div>
           {/* Sparkline portfeuille — timeframe du graphique */}

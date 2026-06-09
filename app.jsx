@@ -723,7 +723,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.23";
+const APP_VERSION = "v27.24";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4694,7 +4694,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                 if(v==null) return(
                   <g key={i}>
                     <rect x={bx(i)} y={MIDLINE-1} width={barW} height={2} fill={C.bg3} rx={1}/>
-                    <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle" fill={C.text3} fontSize={7.5}>{m.slice(0,3)}</text>
+                    <text x={cx} y={TOTAL_H-3} textAnchor="middle" fill={C.text3} fontSize={7.5}>{m.slice(0,3)}</text>
                   </g>
                 );
                 const hpx=Math.max(2,Math.abs(v)/mx*(HTOP-8));
@@ -4718,7 +4718,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                         {pnl>=0?"+":""}{Math.round(pnl/1000)}k
                       </text>
                     )}
-                    <text x={cx} y={MIDLINE+HBOT+HLAB-2} textAnchor="middle"
+                    <text x={cx} y={TOTAL_H-3} textAnchor="middle"
                       fill={i===bestI?C.green:i===worstI?C.red:C.text3}
                       fontSize={7.5} fontWeight={i===bestI||i===worstI?"800":"400"}>
                       {m.slice(0,3)}
@@ -6972,6 +6972,7 @@ function PageData(
   var cloudError = ce_state[0]; var setCloudError = ce_state[1];
   var eb_state = useState(null);
   var expandedBase = eb_state[0]; var setExpandedBase = eb_state[1];
+  var yf_state = useState(0); var setYfV = yf_state[1];
   var edb_state = useState(null); var editBase = edb_state[0]; var setEditBase = edb_state[1];
   var edd_state = useState([]);   var editData = edd_state[0]; var setEditData = edd_state[1];
   var eds_state = useState(false);var editSaving = eds_state[0]; var setEditSaving = eds_state[1];
@@ -7282,6 +7283,7 @@ function PageData(
                               {previewDB.headers.map(function(h,hi){return(
                                 <th key={hi} style={{padding:"4px 7px",textAlign:"left",color:C.gray,fontWeight:700,borderBottom:"1px solid "+C.border+"44",whiteSpace:"nowrap"}}>{h}</th>
                               );})}
+                              {b.name==="YF_MAP" && !inEdit && <th style={{padding:"4px 7px",borderBottom:"1px solid "+C.border+"44"}}></th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -7304,6 +7306,11 @@ function PageData(
                                   {row.map(function(cell,ci){return(
                                     <td key={ci} style={{padding:"4px 7px",color:ci===0?C.btc:C.text,fontFamily:ci===0?"monospace":"inherit",whiteSpace:"nowrap"}}>{cell}</td>
                                   );})}
+                                  {b.name==="YF_MAP" && (
+                                    <td style={{padding:"2px 6px",textAlign:"right",whiteSpace:"nowrap"}}>
+                                      <button onClick={function(){ if(window.confirm("Retirer "+row[0]+" de YF_MAP ? Il ne sera plus chargé au refresh.")){ delete YF_MAP[row[0]]; saveBase("gdb_yfmap", Object.assign({}, YF_MAP)); setYfV(function(v){return v+1;}); } }} title="Supprimer ce ticker" style={{background:C.red+"22",border:"1px solid "+C.red+"55",borderRadius:5,color:C.red,fontSize:11,padding:"1px 7px",cursor:"pointer",lineHeight:1.3}}>🗑</button>
+                                    </td>
+                                  )}
                                 </tr>
                               );})
                             )}
@@ -8137,7 +8144,7 @@ function App(){
       if(kv.gdb_futures)    setLiveFutures(unionTxnsById(SEED_FUTURES, kv.gdb_futures));
       if(kv.gdb_ibkr_annex) setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, kv.gdb_ibkr_annex));
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
-      if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object") Object.assign(YF_MAP,kv.gdb_yfmap);
+      if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
         // Merger : KV écrase les entrées existantes (KV = vérité cloud)
         // mais on conserve les entrées localStorage qui ne seraient pas dans KV
@@ -8364,8 +8371,9 @@ function App(){
           if(kvIsNewer) console.info("Bases KV plus récentes ("+kvLastDate+" > "+buildLastDate+")");
           else          console.info("Build plus récent que KV ("+buildLastDate+" >= "+kvLastDate+")");
 
-          // YF_MAP : toujours merger (nouveaux tickers ajoutés par l'utilisateur)
+          // YF_MAP : le KV fait autorité (les suppressions de tickers persistent) ; garde-fou si KV trop petit
           if(kvYF && typeof kvYF === "object"){
+            if(Object.keys(kvYF).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];});
             Object.assign(YF_MAP, kvYF);
           }
 

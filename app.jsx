@@ -728,7 +728,9 @@ function applyPrices(prices, usdEur, effSrc){
     usdEur: rate, eurUsd,
     totalUSD, totalEUR,
     btcPrice: btcLive,
-    _ethLive: prices.ETH || src._ethLive || null,  // conservé pour le snapshot
+    _ethLive: prices.ETH || src._ethLive || null,   // conservé pour le snapshot
+    _msciLive: prices.URTH || src._msciLive || null,  // MSCI World = URTH (sinon snapshot figé à 199.92)
+    _sp500Live: prices.QQQ || src._sp500Live || null, // proxy S&P 500 / Nasdaq = QQQ
     gdbC, gdbS,
     crypto: {...src.crypto, total: cryptoTotal, items: cryptoItems},
     stocks: {...src.stocks, total: stocksTotal, items: stocksItems},
@@ -738,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.25";
+const APP_VERSION = "v27.28";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4859,6 +4861,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const [tf, setTF]     = useState("YTD");
   const [hover, setHover] = useState(null);
   const [full, setFull]   = useState(false);
+  const [hiddenSeries, setHiddenSeries] = useState({});
   const win = useWindowSize();
   const svgRef = useRef(null);
 
@@ -4907,10 +4910,23 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const ethB = rebase(ethRaw);
   const msB  = rebase(msRaw);
 
-  const allVals = [...gcB,...gsB,...btcB,...spB,...nqB,...ethB,...msB].filter(v=>v!=null);
-  if(!n||!allVals.length) return null;
-
-  const mn=Math.min(...allVals), mx=Math.max(...allVals), rng=mx-mn||1;
+  const SERIES = [
+    {vals:gcB,  col:"#F7931A", lbl:"GDB.C", bold:true},
+    {vals:gsB,  col:"#EF4444", lbl:"GDB.S", bold:true},
+    {vals:btcB, col:"#FBBF24", lbl:"BTC"},
+    {vals:ethB, col:"#1E40AF", lbl:"ETH"},
+    {vals:nqB,  col:"#10B981", lbl:"Nasdaq"},
+    {vals:msB,  col:"#EC4899", lbl:"MSCI"},
+    {vals:spB,  col:"#6B7280", lbl:"S&P"},
+  ];
+  const visSeries = SERIES.filter(sx=>!hiddenSeries[sx.lbl]);
+  const anyVals = [...gcB,...gsB,...btcB,...spB,...nqB,...ethB,...msB].filter(v=>v!=null);
+  if(!n||!anyVals.length) return null;
+  // Échelle Y adaptée aux SEULES courbes visibles
+  const visVals = visSeries.flatMap(sx=>sx.vals).filter(v=>v!=null);
+  const mn = visVals.length ? Math.min(...visVals) : 90;
+  const mx = visVals.length ? Math.max(...visVals) : 110;
+  const rng = (mx-mn)||1;
   const W=300, PL=28, PR=8, IW=W-PL-PR;
   const _availW = Math.max(220, win.w - 24), _availH = Math.max(160, win.h - 200);
   const H = full ? Math.max(120, Math.round(300*_availH/_availW) - 20) : 150;
@@ -4942,16 +4958,6 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
 
   /* Tooltip data au hover */
   const hDate = hi!=null ? dates[hi] : null;
-  const SERIES = [
-    {vals:gcB,  col:"#F7931A", lbl:"GDB.C"},
-    {vals:gsB,  col:"#EF4444", lbl:"GDB.S"},
-    {vals:btcB, col:"#FBBF24", lbl:"BTC"},
-    {vals:ethB, col:"#1E40AF", lbl:"ETH"},
-    {vals:nqB,  col:"#10B981", lbl:"Nasdaq"},
-    {vals:msB,  col:"#EC4899", lbl:"MSCI"},
-    {vals:spB,  col:"#6B7280", lbl:"S&P"},
-  ];
-
   const vw = typeof window!=="undefined"?window.innerWidth:390;
   const vh = typeof window!=="undefined"?window.innerHeight:844;
 
@@ -4969,6 +4975,23 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   );
 
   /* ── Chart content (shared between normal + fullscreen) ── */
+  const tickerBar = (
+    <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 12px"}}>
+      {SERIES.map(({col,lbl})=>{ const on=!hiddenSeries[lbl]; return (
+        <button key={lbl} onClick={()=>setHiddenSeries(h=>{ const n2=Object.assign({},h); n2[lbl]=!h[lbl]; return n2; })} style={{
+          display:"flex",alignItems:"center",gap:5,
+          background:on?col+"22":"transparent",
+          border:"1.5px solid "+(on?col:C.border),
+          borderRadius:8,padding:"4px 9px",cursor:"pointer",
+          color:on?col:C.gray,fontSize:11,fontWeight:700,opacity:on?1:0.55,
+        }}>
+          <span style={{width:8,height:8,borderRadius:2,background:on?col:C.border,display:"inline-block"}}/>
+          {lbl}
+        </button>
+      );})}
+    </div>
+  );
+
   const chartBody = (
     <>
 
@@ -4986,7 +5009,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
           <div style={{fontSize:10,color:"#fff",fontWeight:800,width:"100%",textAlign:"center",marginBottom:2}}>
             {fmtDate(hDate)}
           </div>
-          {SERIES.map(({vals,col,lbl})=>{
+          {visSeries.map(({vals,col,lbl})=>{
             const v = vals[hi];
             if(v==null) return null;
             const perf = v-100;
@@ -5015,13 +5038,11 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
           </g>
         ))}
         <line x1={PL} y1={py(100)} x2={W-PR} y2={py(100)} stroke="rgba(255,255,255,.15)" strokeWidth={.8} strokeDasharray="3,3"/>
-        {mkLine(gcB,"#F7931A",true)}{mkLine(gsB,"#EF4444",true)}
-        {mkLine(btcB,"#FBBF24",false)}{mkLine(ethB,"#1E40AF",false)}
-        {mkLine(nqB,"#10B981",false)}{mkLine(msB,"#EC4899",false)}{mkLine(spB,"#6B7280",false)}
+        {visSeries.map(sx=> mkLine(sx.vals, sx.col, !!sx.bold))}
         {/* Crosshair */}
         {hi!=null && <>
           <line x1={px(hi)} y1={2} x2={px(hi)} y2={H} stroke="rgba(255,255,255,.18)" strokeWidth={1} strokeDasharray="3,3"/>
-          {SERIES.map(({vals,col})=>{ const v=vals[hi]; if(v==null)return null; return <g key={col}><circle cx={px(hi)} cy={py(v)} r={4} fill={C.bg1} stroke={col} strokeWidth={2}/><circle cx={px(hi)} cy={py(v)} r={1.6} fill={col}/></g>; })}
+          {visSeries.map(({vals,col})=>{ const v=vals[hi]; if(v==null)return null; return <g key={col}><circle cx={px(hi)} cy={py(v)} r={4} fill={C.bg1} stroke={col} strokeWidth={2}/><circle cx={px(hi)} cy={py(v)} r={1.6} fill={col}/></g>; })}
         </>}
         {dates.map((d,i)=>{
           if(i!==0&&i!==n-1&&i%step!==0) return null;
@@ -5029,19 +5050,6 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
         })}
       </svg>
 
-      {/* Legend */}
-      <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",paddingTop:5,borderTop:`1px solid ${C.border}`}}>
-        {SERIES.map(({col,lbl,vals})=>{
-          const p=lastPerf(vals);
-          return(
-            <div key={lbl} style={{display:"flex",alignItems:"center",gap:3}}>
-              <div style={{width:10,height:2,background:col,borderRadius:1}}/>
-              <span style={{fontSize:8,color:C.gray}}>{lbl}</span>
-              {p!=null&&<span style={{fontSize:8,fontWeight:700,color:p>=0?C.green:C.red}}>{p>=0?"+":""}{p.toFixed(1)}%</span>}
-            </div>
-          );
-        })}
-      </div>
     </>
   );
 
@@ -5054,7 +5062,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
         <span style={{fontSize:13,fontWeight:800,color:C.btc}}>GDB.C · GDB.S · Benchmarks</span>
         <button onClick={()=>setFull(false)} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 14px",color:C.text,fontSize:12,fontWeight:700,cursor:"pointer"}}>✕</button>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column"}}>{tfBar}{chartBody}</div>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column"}}>{tfBar}{chartBody}{tickerBar}</div>
     </div>
   ) : (
     <>
@@ -5068,6 +5076,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
       }}>⛶</button>
       {chartBody}
     </div>
+    {tickerBar}
     </>
   );
 }
@@ -6200,9 +6209,9 @@ function SnapshotModal({onSave, onClose, EFF}){
     const gdbcUSD = src.gdbC||CURRENT.gdbC;
 
     // Stocks prices
-    const sp500  = s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88;
-    const nasdaq = s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88; // proxy
-    const msci   = s.stocks.items.find(x=>x.t==="URTH")?.live || 199.92;
+    const sp500  = src._sp500Live || s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88;
+    const nasdaq = src._sp500Live || s.stocks.items.find(x=>x.t==="QQQ")?.live || 663.88; // proxy
+    const msci   = src._msciLive  || s.stocks.items.find(x=>x.t==="URTH")?.live || 199.92;
     // ETH : priorité au prix live fetchés, stockés dans EFF comme résultat du dernier refresh
     const ethPrice = src._ethLive || src._lastETH || null;
 

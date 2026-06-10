@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.31";
+const APP_VERSION = "v27.32";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1491,6 +1491,25 @@ const Btn=({label,onClick,color,full,outline})=>(
    TICKER MODAL — chart courbe + infos live via Cloudflare proxy
 ═══════════════════════════════════════════════════════════ */
 var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes du modal ticker
+
+// ── Dessins & moyennes mobiles du modal ticker (persistance local + cloud) ──
+var DRAWINGS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_drawings_v1")||"{}")||{}; }catch(e){ return {}; } })();
+function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], tradeZone:d.tradeZone||null, ma:d.ma||{} }; }
+var _drawSaveTimer=null;
+function saveDrawings(t, obj){
+  DRAWINGS[t]=obj;
+  try{ localStorage.setItem("gdb_drawings_v1", JSON.stringify(DRAWINGS)); }catch(e){}
+  if(_drawSaveTimer) clearTimeout(_drawSaveTimer);
+  _drawSaveTimer=setTimeout(function(){
+    fetch(CF_WORKER_URL+"/write-bases",{method:"POST",headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},body:JSON.stringify({gdb_drawings:DRAWINGS}),signal:AbortSignal.timeout(10000)}).catch(function(){});
+  }, 1200);
+}
+function mergeDrawingsKV(kvObj){
+  if(kvObj && typeof kvObj==="object"){
+    DRAWINGS = Object.assign({}, DRAWINGS, kvObj);
+    try{ localStorage.setItem("gdb_drawings_v1", JSON.stringify(DRAWINGS)); }catch(e){}
+  }
+}
 const TF_CONFIG = [
   { label:"1J",  interval:"5m",   range:"1d"   },
   { label:"1S",  interval:"30m",  range:"5d"   },
@@ -1563,7 +1582,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [tf, setTf]         = useState(2);
   const [candleMode, setCandleMode] = useState(false);
   const [full, setFull] = useState(false);
-  const [maOn, setMaOn] = useState({20:false,50:false,100:false,200:false});
+  const [maOn, setMaOn] = useState(function(){ var m=getDrawings(ticker).ma||{}; return {20:!!m[20],50:!!m[50],100:!!m[100],200:!!m[200]}; });
   const win = useWindowSize();
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
@@ -2577,7 +2596,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
                 <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
                   {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
-                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
+                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {ma:n2})); return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
                   );})}
                 </div>
               </div>
@@ -8235,6 +8254,7 @@ function App(){
       if(kv.gdb_ibkr_annex) setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, kv.gdb_ibkr_annex));
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
+      mergeDrawingsKV(kv.gdb_drawings);
       if(kv.gdb_icons&&typeof kv.gdb_icons==="object"){
         // Merger : KV écrase les entrées existantes (KV = vérité cloud)
         // mais on conserve les entrées localStorage qui ne seraient pas dans KV
@@ -8466,6 +8486,7 @@ function App(){
             if(Object.keys(kvYF).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];});
             Object.assign(YF_MAP, kvYF);
           }
+          mergeDrawingsKV(kvData.gdb_drawings);
 
           // Portfolio : injecter l'état matérialisé le plus RÉCENT entre local (miroir v9) et KV.
           // v23.16 — read-side "état matérialisé" : récence par savedAt (estampillé à chaque trade),

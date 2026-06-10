@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.29";
+const APP_VERSION = "v27.30";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1560,6 +1560,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
 
   const [tf, setTf]         = useState(2);
   const [candleMode, setCandleMode] = useState(false);
+  const [full, setFull] = useState(false);
+  const [maOn, setMaOn] = useState({20:false,50:false,100:false,200:false});
+  const win = useWindowSize();
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr]       = useState(null);
@@ -1777,7 +1780,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       return { i:bi, side:String(t.side||"").toUpperCase() };
     }).filter(Boolean);
   })();
-  const W=320, H=110, PAD=6;
+  const W=320, PAD=6;
+  const _availW = Math.max(240, win.w - 16), _availH = Math.max(200, win.h - 200);
+  const H = full ? Math.max(160, Math.round(320*_availH/_availW) - 18) : 110;
   const minV = Math.min(...closes), maxV = Math.max(...closes);
   const rng  = maxV - minV || 1;
   const toY  = v => PAD + (1-(v-minV)/rng)*(H-PAD*2);
@@ -1785,6 +1790,16 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
   const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
   const lineColor = isUp ? C.green : C.red;
+  // Moyennes mobiles (sur les clôtures du TF courant)
+  const MA_COLORS = {20:"#22D3EE",50:"#A78BFA",100:"#F59E0B",200:"#F43F5E"};
+  const maSeries = {};
+  [20,50,100,200].forEach(function(p){
+    if(closes.length>=p){
+      var arr=[], sum=0;
+      for(var i=0;i<closes.length;i++){ sum+=closes[i]; if(i>=p) sum-=closes[i-p]; arr.push(i>=p-1? sum/p : null); }
+      maSeries[p]=arr;
+    } else { maSeries[p]=null; }
+  });
 
   const fmtTs = ts => {
     const d = new Date(ts);
@@ -2389,12 +2404,34 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           </div>
 
           {/* Chart */}
-          <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
+          <div style={full
+            ? {position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column",padding:"6px 8px"}
+            : {background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
+            {full && (
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"2px 2px 8px",flexShrink:0}}>
+                <button onClick={()=>setFull(false)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"4px 10px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
+                <span style={{fontWeight:800,fontSize:14,color:C.text,marginRight:4}}>{ticker}</span>
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
+                </div>
+                <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
+                <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
+                  {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
+                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
+                  );})}
+                </div>
+              </div>
+            )}
+            {!full && (
+              <button onClick={()=>setFull(true)} title="Plein écran" style={{position:"absolute",bottom:8,right:8,zIndex:4,width:28,height:24,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,color:C.text2,fontSize:13}}>⛶</button>
+            )}
+            {!full && (
             <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
               {candleMode
                 ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
                 : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
             </button>
+            )}
             {candleMode && candles.length>0 && (function(){ var cd=crosshair?candles[crosshair.i]:candles[candles.length-1]; if(!cd) return null; var f=function(v){ return v==null?"\u2014":(eur?(v*usdEur):v).toFixed(2); }; return (
               <div style={{display:"flex",gap:10,fontSize:9,color:C.text2,padding:"0 38px 6px 8px"}}>
                 <span>O <b style={{color:C.text}}>{f(cd.o)}</b></span>
@@ -2476,6 +2513,13 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     <polygon points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)} fill={"url(#"+gradId+")"}/>
                     <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
                   </>)}
+                  {/* Moyennes mobiles */}
+                  {[20,50,100,200].map(function(p){
+                    if(!maOn[p]||!maSeries[p]) return null;
+                    var pl=maSeries[p].map(function(v,i){ return v==null?null:toX(i,closes.length).toFixed(1)+","+toY(v).toFixed(1); }).filter(Boolean).join(" ");
+                    if(!pl) return null;
+                    return <polyline key={"ma"+p} points={pl} fill="none" stroke={MA_COLORS[p]} strokeWidth={1} opacity={0.9}/>;
+                  })}
                   {/* Marqueurs achats (vert ▲) / ventes (rouge ▼) */}
                   {chartMarkers.map(function(m,mi){
                     var x=toX(m.i,candles.length); var y=toY(candles[m.i].c);

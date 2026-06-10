@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.34";
+const APP_VERSION = "v27.35";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1587,6 +1587,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [lines, setLines] = useState(function(){ return getDrawings(ticker).lines; });
   const [annos, setAnnos] = useState(function(){ return getDrawings(ticker).annotations; });
   const [pendingPt, setPendingPt] = useState(null);  // 1er point d'une droite
+  const [tradeZone, setTradeZone] = useState(function(){ return getDrawings(ticker).tradeZone; });
+  const [pendingTrade, setPendingTrade] = useState(null); // {entry?, sl?} en cours de saisie
   const win = useWindowSize();
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1848,6 +1850,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const tToX = (t)=> toX(tToFrac(t), candles.length);
   const screenToData = (cx,cy)=>{ const el=svgRef.current; if(!el||!candles.length) return null; const r=el.getBoundingClientRect(); const relX=(cx-r.left)/r.width*W; const relY=(cy-r.top)/r.height*SVG_H2; let frac=(relX-PAD)/((W-PAD*2)||1)*((candles.length-1)||1); frac=Math.max(0,Math.min(candles.length-1,frac)); const lo=Math.floor(frac),hi=Math.ceil(frac),fr=frac-lo; const t=lo===hi?candles[lo].t:(candles[lo].t+fr*(candles[hi].t-candles[lo].t)); const p=minV+(1-(relY-PAD)/((H-PAD*2)||1))*rng; return {t,p}; };
   const persistDraw = (L,A)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:L, annotations:A}));
+  const persistTrade = (TZ)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {tradeZone:TZ}));
   const onSvgClick = (e)=>{
     if(!tool) return;
     const pt=screenToData(e.clientX, e.clientY); if(!pt) return;
@@ -1857,9 +1860,14 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     } else if(tool==="anno"){
       const txt=(window.prompt("Texte de l'annotation :","")||"").trim();
       if(txt){ const na=annos.concat([{t:pt.t,p:pt.p,text:txt}]); setAnnos(na); persistDraw(lines, na); }
+    } else if(tool==="trade"){
+      const pr=pt.p;
+      if(!pendingTrade){ setPendingTrade({entry:pr}); }
+      else if(pendingTrade.sl==null){ setPendingTrade({entry:pendingTrade.entry, sl:pr}); }
+      else { const tz={entry:pendingTrade.entry, sl:pendingTrade.sl, tp:pr}; setTradeZone(tz); setPendingTrade(null); setTool(null); persistTrade(tz); }
     }
   };
-  const clearDraw = ()=>{ setLines([]); setAnnos([]); setPendingPt(null); setTool(null); persistDraw([],[]); };
+  const clearDraw = ()=>{ setLines([]); setAnnos([]); setTradeZone(null); setPendingPt(null); setPendingTrade(null); setTool(null); saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:[], annotations:[], tradeZone:null})); };
 
   const fmtTs = ts => {
     const d = new Date(ts);
@@ -2567,6 +2575,22 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                   {annos.map(function(an,i){ var x=tToX(an.t), y=toY(an.p); return (<g key={"an"+i}><circle cx={x} cy={y} r={2.6} fill="#FBBF24"/><text x={x+4} y={y-3} fontSize={8} fontWeight="700" fill="#FBBF24">{an.text}</text></g>); })}
                   {/* Point en attente (1er point de droite) */}
                   {pendingPt && <circle cx={tToX(pendingPt.t)} cy={toY(pendingPt.p)} r={3.2} fill="#3B82F6" stroke={C.bg0} strokeWidth={1}/>}
+                  {/* Zone de trade (SL / Entrée / TP) */}
+                  {tradeZone && (function(){ var fpx=function(v){ return (eur?(v*usdEur):v).toFixed(2); }; var yE=toY(tradeZone.entry), ySL=toY(tradeZone.sl), yTP=toY(tradeZone.tp); var x0=PAD, x1=W-PAD; var rr=Math.abs(tradeZone.entry-tradeZone.sl)>0?(Math.abs(tradeZone.tp-tradeZone.entry)/Math.abs(tradeZone.entry-tradeZone.sl)):0; return (
+                    <g>
+                      <rect x={x0} y={Math.min(yE,yTP)} width={x1-x0} height={Math.abs(yTP-yE)} fill="#10B98122"/>
+                      <rect x={x0} y={Math.min(yE,ySL)} width={x1-x0} height={Math.abs(ySL-yE)} fill="#EF444422"/>
+                      <line x1={x0} y1={yTP} x2={x1} y2={yTP} stroke="#10B981" strokeWidth={1} strokeDasharray="4 2"/>
+                      <line x1={x0} y1={yE} x2={x1} y2={yE} stroke={C.text2} strokeWidth={1}/>
+                      <line x1={x0} y1={ySL} x2={x1} y2={ySL} stroke="#EF4444" strokeWidth={1} strokeDasharray="4 2"/>
+                      <text x={x1-2} y={yTP-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#10B981">TP {fpx(tradeZone.tp)}</text>
+                      <text x={x1-2} y={yE-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill={C.text2}>Entrée {fpx(tradeZone.entry)}</text>
+                      <text x={x1-2} y={ySL+8} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#EF4444">SL {fpx(tradeZone.sl)}</text>
+                      <text x={x0+2} y={yE-2} fontSize={7.5} fontWeight="800" fill={C.text}>R/R {rr.toFixed(2)}</text>
+                    </g>
+                  ); })()}
+                  {/* Niveaux en cours de saisie de la zone de trade */}
+                  {pendingTrade && [["#9CA3AF",pendingTrade.entry],["#EF4444",pendingTrade.sl]].map(function(it,i){ return it[1]==null?null:<line key={"ptz"+i} x1={PAD} y1={toY(it[1])} x2={W-PAD} y2={toY(it[1])} stroke={it[0]} strokeWidth={1} strokeDasharray="3 3" opacity={0.7}/>; })}
                   {/* Labels X */}
                   {xIdxs.map((ci,i)=>(
                     <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
@@ -2628,9 +2652,10 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 </div>
                 <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
                 <div style={{display:"flex",gap:3}}>
-                  <button onClick={()=>{ setPendingPt(null); setTool(tool==="line"?null:"line"); }} title="Tracer une droite (touchez 2 points)" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="line"?C.blue:C.border),background:tool==="line"?C.blue+"22":"transparent",color:tool==="line"?C.blue:C.text2}}>╱</button>
-                  <button onClick={()=>{ setPendingPt(null); setTool(tool==="anno"?null:"anno"); }} title="Annotation (touchez un point)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="anno"?"#FBBF24":C.border),background:tool==="anno"?"#FBBF2422":"transparent",color:tool==="anno"?"#FBBF24":C.text2}}>T</button>
-                  <button onClick={clearDraw} title="Tout effacer (droites + annotations)" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.red}}>🗑</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setTool(tool==="line"?null:"line"); }} title="Tracer une droite (touchez 2 points)" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="line"?C.blue:C.border),background:tool==="line"?C.blue+"22":"transparent",color:tool==="line"?C.blue:C.text2}}>╱</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setTool(tool==="anno"?null:"anno"); }} title="Annotation (touchez un point)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="anno"?"#FBBF24":C.border),background:tool==="anno"?"#FBBF2422":"transparent",color:tool==="anno"?"#FBBF24":C.text2}}>T</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setTool(tool==="trade"?null:"trade"); }} title="Zone de trade (Entrée → SL → TP)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="trade"?"#10B981":C.border),background:tool==="trade"?"#10B98122":"transparent",color:tool==="trade"?"#10B981":C.text2}}>🎯</button>
+                  <button onClick={clearDraw} title="Tout effacer (droites + annotations + zone)" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.red}}>🗑</button>
                 </div>
                 <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
                   {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
@@ -2642,7 +2667,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             if(full) return ReactDOM.createPortal(
               <div style={{position:"fixed",inset:0,zIndex:100000,background:C.bg,display:"flex",flexDirection:"column"}}>
                 {toolbar}
-                {tool && <div style={{fontSize:11,color:C.btc,fontWeight:700,padding:"0 6px 4px",flexShrink:0}}>{tool==="line"?(pendingPt?"Touchez le 2e point de la droite":"Touchez le 1er point de la droite"):"Touchez l'emplacement de l'annotation"}</div>}
+                {tool && <div style={{fontSize:11,color:C.btc,fontWeight:700,padding:"0 6px 4px",flexShrink:0}}>{tool==="line"?(pendingPt?"Touchez le 2e point de la droite":"Touchez le 1er point de la droite"):tool==="anno"?"Touchez l'emplacement de l'annotation":(!pendingTrade?"Zone de trade : touchez le niveau d'ENTRÉE":pendingTrade.sl==null?"Touchez le STOP-LOSS":"Touchez le TAKE-PROFIT")}</div>}
                 <div style={{flex:1,minHeight:0,position:"relative",display:"flex",flexDirection:"column",padding:"0 6px 6px"}}>
                   {chartCore}
                 </div>

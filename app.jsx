@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.33";
+const APP_VERSION = "v27.34";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1583,6 +1583,10 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [candleMode, setCandleMode] = useState(function(){ return getDrawings(ticker).candleMode; });
   const [full, setFull] = useState(false);
   const [maOn, setMaOn] = useState(function(){ var m=getDrawings(ticker).ma||{}; return {20:!!m[20],50:!!m[50],100:!!m[100],200:!!m[200]}; });
+  const [tool, setTool] = useState(null);            // null | "line" | "anno"
+  const [lines, setLines] = useState(function(){ return getDrawings(ticker).lines; });
+  const [annos, setAnnos] = useState(function(){ return getDrawings(ticker).annotations; });
+  const [pendingPt, setPendingPt] = useState(null);  // 1er point d'une droite
   const win = useWindowSize();
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1838,6 +1842,24 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       maSeries[p]=arr.slice(_maOffset);
     } else { maSeries[p]=null; }
   });
+  // ── Dessins (Phase D) : conversions écran <-> données (timestamp/prix) ──
+  const SVG_H2 = H + 18;
+  const tToFrac = (t)=>{ const nn=candles.length; if(nn<2) return 0; if(t<=candles[0].t) return 0; if(t>=candles[nn-1].t) return nn-1; for(let i=0;i<nn-1;i++){ if(t>=candles[i].t && t<=candles[i+1].t){ const sp=(candles[i+1].t-candles[i].t)||1; return i+(t-candles[i].t)/sp; } } return nn-1; };
+  const tToX = (t)=> toX(tToFrac(t), candles.length);
+  const screenToData = (cx,cy)=>{ const el=svgRef.current; if(!el||!candles.length) return null; const r=el.getBoundingClientRect(); const relX=(cx-r.left)/r.width*W; const relY=(cy-r.top)/r.height*SVG_H2; let frac=(relX-PAD)/((W-PAD*2)||1)*((candles.length-1)||1); frac=Math.max(0,Math.min(candles.length-1,frac)); const lo=Math.floor(frac),hi=Math.ceil(frac),fr=frac-lo; const t=lo===hi?candles[lo].t:(candles[lo].t+fr*(candles[hi].t-candles[lo].t)); const p=minV+(1-(relY-PAD)/((H-PAD*2)||1))*rng; return {t,p}; };
+  const persistDraw = (L,A)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:L, annotations:A}));
+  const onSvgClick = (e)=>{
+    if(!tool) return;
+    const pt=screenToData(e.clientX, e.clientY); if(!pt) return;
+    if(tool==="line"){
+      if(!pendingPt){ setPendingPt(pt); }
+      else { const nl=lines.concat([{a:pendingPt,b:pt,color:"#3B82F6"}]); setLines(nl); setPendingPt(null); persistDraw(nl, annos); }
+    } else if(tool==="anno"){
+      const txt=(window.prompt("Texte de l'annotation :","")||"").trim();
+      if(txt){ const na=annos.concat([{t:pt.t,p:pt.p,text:txt}]); setAnnos(na); persistDraw(lines, na); }
+    }
+  };
+  const clearDraw = ()=>{ setLines([]); setAnnos([]); setPendingPt(null); setTool(null); persistDraw([],[]); };
 
   const fmtTs = ts => {
     const d = new Date(ts);
@@ -2504,7 +2526,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
                   style={full?{display:"block",overflow:"visible",touchAction:"none",width:"100%",height:"100%",flex:1,minHeight:0}:{display:"block",overflow:"visible",touchAction:"none"}}
                   onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
-                  onMouseMove={onMouseMove} onMouseLeave={onMouseLeave}>
+                  onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} onClick={onSvgClick}>
                   <defs>
                     <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
@@ -2539,6 +2561,12 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     var tri=m.side==="BUY" ? (x+","+(yo-4)+" "+(x-4)+","+(yo+3)+" "+(x+4)+","+(yo+3)) : (x+","+(yo+4)+" "+(x-4)+","+(yo-3)+" "+(x+4)+","+(yo-3));
                     return <polygon key={"mk"+mi} points={tri} fill={col} stroke={C.bg1} strokeWidth={0.7}/>;
                   })}
+                  {/* Droites dessinées */}
+                  {lines.map(function(ln,i){ return <line key={"ln"+i} x1={tToX(ln.a.t)} y1={toY(ln.a.p)} x2={tToX(ln.b.t)} y2={toY(ln.b.p)} stroke={ln.color||"#3B82F6"} strokeWidth={1.3} strokeLinecap="round"/>; })}
+                  {/* Annotations */}
+                  {annos.map(function(an,i){ var x=tToX(an.t), y=toY(an.p); return (<g key={"an"+i}><circle cx={x} cy={y} r={2.6} fill="#FBBF24"/><text x={x+4} y={y-3} fontSize={8} fontWeight="700" fill="#FBBF24">{an.text}</text></g>); })}
+                  {/* Point en attente (1er point de droite) */}
+                  {pendingPt && <circle cx={tToX(pendingPt.t)} cy={toY(pendingPt.p)} r={3.2} fill="#3B82F6" stroke={C.bg0} strokeWidth={1}/>}
                   {/* Labels X */}
                   {xIdxs.map((ci,i)=>(
                     <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
@@ -2599,6 +2627,11 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                   {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
                 </div>
                 <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>{ setPendingPt(null); setTool(tool==="line"?null:"line"); }} title="Tracer une droite (touchez 2 points)" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="line"?C.blue:C.border),background:tool==="line"?C.blue+"22":"transparent",color:tool==="line"?C.blue:C.text2}}>╱</button>
+                  <button onClick={()=>{ setPendingPt(null); setTool(tool==="anno"?null:"anno"); }} title="Annotation (touchez un point)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="anno"?"#FBBF24":C.border),background:tool==="anno"?"#FBBF2422":"transparent",color:tool==="anno"?"#FBBF24":C.text2}}>T</button>
+                  <button onClick={clearDraw} title="Tout effacer (droites + annotations)" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.red}}>🗑</button>
+                </div>
                 <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
                   {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
                     <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {ma:n2})); return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
@@ -2609,6 +2642,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             if(full) return ReactDOM.createPortal(
               <div style={{position:"fixed",inset:0,zIndex:100000,background:C.bg,display:"flex",flexDirection:"column"}}>
                 {toolbar}
+                {tool && <div style={{fontSize:11,color:C.btc,fontWeight:700,padding:"0 6px 4px",flexShrink:0}}>{tool==="line"?(pendingPt?"Touchez le 2e point de la droite":"Touchez le 1er point de la droite"):"Touchez l'emplacement de l'annotation"}</div>}
                 <div style={{flex:1,minHeight:0,position:"relative",display:"flex",flexDirection:"column",padding:"0 6px 6px"}}>
                   {chartCore}
                 </div>

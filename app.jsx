@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.30";
+const APP_VERSION = "v27.31";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1504,6 +1504,8 @@ const TF_CONFIG = [
 // Timeframes CoinGecko : days valides = 1,7,14,30,90,180,365,max
 // Mapping TF_CONFIG index → days CoinGecko
 const TF_CG_DAYS = ["1","7","30","180","365","max","max"];
+// Plages étendues pour le warm-up des moyennes mobiles (≥200 bougies avant la fenêtre affichée)
+const EXT_RANGE = ["5d","1mo","2y","2y","2y","10y","max"];
 
 // v27.01 — Ratios financiers : seuils indicatifs, jauges et explications neophytes
 var RATIO_DEFS=[
@@ -1641,7 +1643,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           }
         }
         // ── OHLC : Yahoo Finance (pas de rate-limit) ───────────────────────
-        const { interval, range } = TF_CONFIG[tfIdx];
+        const { interval } = TF_CONFIG[tfIdx];
+        const range = EXT_RANGE[tfIdx];
         const oUrl = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
           + "&interval=" + interval + "&range=" + range;
         const or = await fetch(oUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(10000) });
@@ -1651,7 +1654,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         setData({ ...meta, candles: od.candles || [], ohlcDays: range });
       } else {
         // ── Yahoo Finance path ──────────────────────────────────────────────
-        const { interval, range } = TF_CONFIG[tfIdx];
+        const { interval } = TF_CONFIG[tfIdx];
+        const range = EXT_RANGE[tfIdx];
         const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
           + "&interval=" + interval + "&range=" + range;
         const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
@@ -1766,7 +1770,15 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const fmtPriceV = v => v == null ? "—" : cur+(v>=100 ? Math.round(v).toLocaleString("fr-FR") : v.toFixed(2));
 
   // Chart
-  const candles = data?.candles || [];
+  const candlesAll = data?.candles || [];
+  // Crop : on n'affiche que la fenêtre du TF (le surplus sert au warm-up des MM)
+  const _D=864e5, _SPANS=[1*_D,5*_D,31*_D,186*_D,372*_D,5*372*_D,Infinity];
+  let _ds=0;
+  if(candlesAll.length && isFinite(_SPANS[tf])){
+    const _cut = candlesAll[candlesAll.length-1].t - _SPANS[tf];
+    _ds = candlesAll.findIndex(c=>c.t>=_cut); if(_ds<0) _ds=0;
+  }
+  const candles = candlesAll.slice(_ds);
   const closes  = candles.map(c=>c.c).filter(v=>v!=null);
   // Marqueurs achats/ventes : transactions de l'utilisateur sur ce ticker, dans la fenêtre affichée
   const chartMarkers = (function(){
@@ -1781,7 +1793,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     }).filter(Boolean);
   })();
   const W=320, PAD=6;
-  const _availW = Math.max(240, win.w - 16), _availH = Math.max(200, win.h - 200);
+  const _availW = Math.max(240, win.w - 8), _availH = Math.max(180, win.h - 70);
   const H = full ? Math.max(160, Math.round(320*_availH/_availW) - 18) : 110;
   const minV = Math.min(...closes), maxV = Math.max(...closes);
   const rng  = maxV - minV || 1;
@@ -1790,14 +1802,16 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
   const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
   const lineColor = isUp ? C.green : C.red;
-  // Moyennes mobiles (sur les clôtures du TF courant)
+  // Moyennes mobiles — calculées sur l'historique étendu (candlesAll) pour démarrer dès le début du graphe affiché
   const MA_COLORS = {20:"#22D3EE",50:"#A78BFA",100:"#F59E0B",200:"#F43F5E"};
+  const _closesAll = candlesAll.map(c=>c.c).filter(v=>v!=null);
+  const _maOffset = Math.max(0, _closesAll.length - closes.length);
   const maSeries = {};
   [20,50,100,200].forEach(function(p){
-    if(closes.length>=p){
+    if(_closesAll.length>=p && closes.length){
       var arr=[], sum=0;
-      for(var i=0;i<closes.length;i++){ sum+=closes[i]; if(i>=p) sum-=closes[i-p]; arr.push(i>=p-1? sum/p : null); }
-      maSeries[p]=arr;
+      for(var i=0;i<_closesAll.length;i++){ sum+=_closesAll[i]; if(i>=p) sum-=_closesAll[i-p]; arr.push(i>=p-1? sum/p : null); }
+      maSeries[p]=arr.slice(_maOffset);
     } else { maSeries[p]=null; }
   });
 
@@ -2404,34 +2418,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           </div>
 
           {/* Chart */}
-          <div style={full
-            ? {position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column",padding:"6px 8px"}
-            : {background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
-            {full && (
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"2px 2px 8px",flexShrink:0}}>
-                <button onClick={()=>setFull(false)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"4px 10px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
-                <span style={{fontWeight:800,fontSize:14,color:C.text,marginRight:4}}>{ticker}</span>
-                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                  {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
-                </div>
-                <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
-                <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
-                  {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
-                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
-                  );})}
-                </div>
-              </div>
-            )}
-            {!full && (
-              <button onClick={()=>setFull(true)} title="Plein écran" style={{position:"absolute",bottom:8,right:8,zIndex:4,width:28,height:24,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,color:C.text2,fontSize:13}}>⛶</button>
-            )}
-            {!full && (
-            <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
-              {candleMode
-                ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
-                : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
-            </button>
-            )}
+          {(()=>{
+            const chartCore = (<>
             {candleMode && candles.length>0 && (function(){ var cd=crosshair?candles[crosshair.i]:candles[candles.length-1]; if(!cd) return null; var f=function(v){ return v==null?"\u2014":(eur?(v*usdEur):v).toFixed(2); }; return (
               <div style={{display:"flex",gap:10,fontSize:9,color:C.text2,padding:"0 38px 6px 8px"}}>
                 <span>O <b style={{color:C.text}}>{f(cd.o)}</b></span>
@@ -2490,7 +2478,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
               const gradId = "tcg_"+ticker.replace(/[^a-z0-9]/gi,"_");
               return (
                 <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
-                  style={{display:"block",overflow:"visible",touchAction:"none"}}
+                  style={full?{display:"block",overflow:"visible",touchAction:"none",width:"100%",height:"100%",flex:1,minHeight:0}:{display:"block",overflow:"visible",touchAction:"none"}}
                   onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
                   onMouseMove={onMouseMove} onMouseLeave={onMouseLeave}>
                   <defs>
@@ -2578,7 +2566,41 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 Données insuffisantes
               </div>
             )}
-          </div>
+            </>);
+            const toolbar = (
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"max(6px,env(safe-area-inset-top)) 4px 8px",flexShrink:0}}>
+                <button onClick={()=>setFull(false)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"4px 10px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
+                <span style={{fontWeight:800,fontSize:14,color:C.text,marginRight:4}}>{ticker}</span>
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
+                </div>
+                <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
+                <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
+                  {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
+                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
+                  );})}
+                </div>
+              </div>
+            );
+            if(full) return ReactDOM.createPortal(
+              <div style={{position:"fixed",inset:0,zIndex:100000,background:C.bg,display:"flex",flexDirection:"column"}}>
+                {toolbar}
+                <div style={{flex:1,minHeight:0,position:"relative",display:"flex",flexDirection:"column",padding:"0 6px 6px"}}>
+                  {chartCore}
+                </div>
+              </div>, document.body);
+            return (
+              <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
+                <button onClick={()=>setFull(true)} title="Plein écran" style={{position:"absolute",bottom:8,right:8,zIndex:4,width:28,height:24,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,color:C.text2,fontSize:13}}>⛶</button>
+                <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
+                  {candleMode
+                ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
+                </button>
+                {chartCore}
+              </div>
+            );
+          })()}
 
           {/* ── Actualités ── */}
           {sortedNews.length > 0 && (

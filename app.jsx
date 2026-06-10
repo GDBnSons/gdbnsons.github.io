@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.32";
+const APP_VERSION = "v27.33";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1494,7 +1494,7 @@ var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes 
 
 // ── Dessins & moyennes mobiles du modal ticker (persistance local + cloud) ──
 var DRAWINGS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_drawings_v1")||"{}")||{}; }catch(e){ return {}; } })();
-function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], tradeZone:d.tradeZone||null, ma:d.ma||{} }; }
+function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], tradeZone:d.tradeZone||null, ma:d.ma||{}, tf:(d.tf!=null?d.tf:3), candleMode:(d.candleMode!=null?d.candleMode:true) }; }
 var _drawSaveTimer=null;
 function saveDrawings(t, obj){
   DRAWINGS[t]=obj;
@@ -1579,8 +1579,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
   const yfSym    = YF_MAP[ticker] || ticker;
 
-  const [tf, setTf]         = useState(2);
-  const [candleMode, setCandleMode] = useState(false);
+  const [tf, setTf]         = useState(function(){ return getDrawings(ticker).tf; });
+  const [candleMode, setCandleMode] = useState(function(){ return getDrawings(ticker).candleMode; });
   const [full, setFull] = useState(false);
   const [maOn, setMaOn] = useState(function(){ var m=getDrawings(ticker).ma||{}; return {20:!!m[20],50:!!m[50],100:!!m[100],200:!!m[200]}; });
   const win = useWindowSize();
@@ -1698,6 +1698,11 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     }
   };
 
+  const _tfCmInit = useRef(true);
+  useEffect(() => {
+    if(_tfCmInit.current){ _tfCmInit.current=false; return; }
+    saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {tf:tf, candleMode:candleMode}));
+  }, [tf, candleMode]);
   useEffect(() => { fetchChart(tf); }, [ticker, tf]);
 
   // Tri news par pertinence avec le ticker

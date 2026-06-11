@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.41";
+const APP_VERSION = "v27.42";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7609,6 +7609,7 @@ function PageMarket({ eur=false }){
   const [cong,setCong]=useState(null),[congL,setCongL]=useState(false),[congE,setCongE]=useState(null);
   const [congOpen,setCongOpen]=useState({});
   const [congView,setCongView]=useState("trades");
+  const [fund,setFund]=useState(null),[fundL,setFundL]=useState(false),[fundE,setFundE]=useState(null);
   const [impF,setImpF]=useState({1:false,2:false,3:true});
   const [ccF,setCcF]=useState({us:true});
   function loadSec(p,setD,setLd,setEr,noCache){
@@ -7623,13 +7624,14 @@ function PageMarket({ eur=false }){
     if(sub==="calendar" && cal===null && !calL) loadSec("/market/calendar",setCal,setCalL,setCalE,false);
     if(sub==="hedge"    && hf===null   && !hfL) loadSec("/market/13f",setHf,setHfL,setHfE,false);
     if(sub==="congress" && cong===null && !congL) loadSec("/market/congress",setCong,setCongL,setCongE,false);
+    if(sub==="macro"    && fund===null && !fundL) loadSec("/funding",setFund,setFundL,setFundE,false);
   },[sub]);
   function refresh(){
     if(sub==="movers") loadSec("/market/movers",setMov,setMovL,setMovE,true);
     else if(sub==="calendar") loadSec("/market/calendar",setCal,setCalL,setCalE,true);
     else if(sub==="hedge") loadSec("/market/13f",setHf,setHfL,setHfE,true);
     else if(sub==="congress") loadSec("/market/congress",setCong,setCongL,setCongE,true);
-    else load(true);
+    else { load(true); if(sub==="macro") loadSec("/funding",setFund,setFundL,setFundE,true); }
   }
 
   const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
@@ -7763,6 +7765,30 @@ function PageMarket({ eur=false }){
               {(m.forex||[]).map(quoteRow)}
             </div>
           </div>
+        </div>
+        );
+      })()}
+
+      {sub==="macro" && (function(){
+        if(fundL && !fund) return <div style={{textAlign:"center",color:C.text3,fontSize:11,padding:"10px 0"}}>Chargement funding…</div>;
+        if(fundE && !fund) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:10,color:C.red,fontSize:11,marginTop:12}}>Funding : {fundE} <button onClick={function(){loadSec("/funding",setFund,setFundL,setFundE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
+        if(!fund) return null;
+        var row=function(name,apr,sub2){ return (
+          <div key={name} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div><div style={{fontSize:9,color:C.text3,marginTop:1}}>{sub2}</div></div>
+            <div style={{textAlign:"right"}}><div style={{fontSize:15,fontWeight:800,color:apr==null?C.text3:(apr>=0?C.green:C.red)}}>{apr==null?"—":(apr>=0?"+":"")+apr.toFixed(2)+"%"}</div><div style={{fontSize:8,color:C.text3}}>{name==="Nasdaq (NQ)"?"Basis annualisé":"APR agrégé (pond. OI)"}</div></div>
+          </div>
+        ); };
+        var bt=fund.btc||{}, et=fund.eth||{}, nb=fund.nq_basis;
+        return (
+        <div style={{marginTop:14}}>
+          {sectTitle("Funding rates (perpétuels)")}
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {row("BTC", bt.aggApr!=null?bt.aggApr*100:null, (bt.nPlatforms||0)+" plateformes · OI "+bigMcap(bt.totalOiUsd))}
+            {row("ETH", et.aggApr!=null?et.aggApr*100:null, (et.nPlatforms||0)+" plateformes · OI "+bigMcap(et.totalOiUsd))}
+            {nb && row("Nasdaq (NQ)", nb.annualizedPct, "Basis "+(nb.basisPct>=0?"+":"")+nb.basisPct.toFixed(2)+"% · éch. "+nb.expiry+" ("+nb.daysToExpiry+"j)")}
+          </div>
+          <div style={{fontSize:8,color:C.text3,marginTop:5,textAlign:"right"}}>hors Binance/Bitget (géo-bloqués) · maj {fund.ts?new Date(fund.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
         </div>
         );
       })()}

@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.38";
+const APP_VERSION = "v27.39";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3229,27 +3229,13 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   );
 
   return full ? (
-    /* ── OVERLAY PLEIN ÉCRAN — orientation naturelle du téléphone ── */
-    <div style={{
-      position:"fixed", inset:0, zIndex:1000,
-      background:C.bg,
-      display:"flex", flexDirection:"column",
-    }}>
-      {/* Barre titre */}
-      <div style={{
-        display:"flex", justifyContent:"space-between", alignItems:"center",
-        padding:"12px 16px", flexShrink:0,
-        background:C.bg1, borderBottom:`1px solid ${C.border}`,
-      }}>
-        <span style={{fontSize:14, fontWeight:800, color:C.btc}}>GDB.C · GDB.S · Patrimoine</span>
-        <button onClick={()=>setFull(false)} style={{
-          background:C.bg2, border:`1px solid ${C.border}`,
-          borderRadius:8, padding:"6px 14px",
-          color:C.text, fontSize:12, fontWeight:700, cursor:"pointer",
-        }}>✕ Fermer</button>
+    /* ── OVERLAY PLEIN ÉCRAN — timeframes + fermer, sans barre de titre ── */
+    <div style={{position:"fixed", inset:0, zIndex:1000, background:C.bg, display:"flex", flexDirection:"column"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"max(8px,env(safe-area-inset-top)) 12px 2px",flexShrink:0}}>
+        <div style={{flex:1,minWidth:0,overflowX:"auto"}}>{tfBar}</div>
+        <button onClick={()=>setFull(false)} title="Fermer" style={{flexShrink:0,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 11px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
       </div>
-      {/* Graphique plein écran */}
-      <div style={{flex:1, overflowY:"auto", padding:"12px 16px"}}>
+      <div style={{flex:1, minHeight:0, overflowY:"auto", padding:"2px 12px 12px"}}>
         {chartContent(true)}
       </div>
     </div>
@@ -5258,15 +5244,13 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   );
 
   return full ? (
-    <div style={{
-      position:"fixed",inset:0,zIndex:1000,background:C.bg,
-      display:"flex",flexDirection:"column",
-    }}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 16px",background:C.bg1,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
-        <span style={{fontSize:13,fontWeight:800,color:C.btc}}>GDB.C · GDB.S · Benchmarks</span>
-        <button onClick={()=>setFull(false)} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 14px",color:C.text,fontSize:12,fontWeight:700,cursor:"pointer"}}>✕</button>
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"max(8px,env(safe-area-inset-top)) 12px 2px",flexShrink:0}}>
+        <div style={{flex:1,minWidth:0,overflowX:"auto"}}>{tfBar}</div>
+        <button onClick={()=>setFull(false)} title="Fermer" style={{flexShrink:0,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 11px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column"}}>{tfBar}{chartBody}{tickerBar}</div>
+      <div style={{flex:1,minHeight:0,overflowY:"auto",padding:"2px 12px",display:"flex",flexDirection:"column",justifyContent:"center"}}>{chartBody}</div>
+      <div style={{flexShrink:0,padding:"4px 12px max(8px,env(safe-area-inset-bottom))"}}>{tickerBar}</div>
     </div>
   ) : (
     <>

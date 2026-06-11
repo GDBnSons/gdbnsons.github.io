@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.39";
+const APP_VERSION = "v27.41";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3134,8 +3134,6 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   /* ── Contenu du graphique (partagé entre normal et fullscreen) ── */
   const chartContent = (hFull) => (
     <>
-      {hFull && tfBar}
-
       {/* Tooltip flottant — position fixed au dessus du titre */}
       {hover != null && (
         <div style={{
@@ -4008,7 +4006,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
             </div>
             <div style={{fontSize:9,color:C.gray,marginTop:4,textTransform:"uppercase",letterSpacing:.5}}>
               {(()=>{
-                const src = chosenSource==="cloudflare" ? "BASE CF" : "BASE LOCALE";
+                const src = chosenSource==="cloudflare" ? "CF · " : "";
                 const snapDate = (EFF||CURRENT).date || CURRENT.date;
                 const fmtDate = d => {
                   if(!d) return "—";
@@ -4019,9 +4017,9 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
                 };
                 if(refreshedAt){
                   const refreshDate = refreshedAt.replace(/^(cloudflare|snapshot|locale)\s*/i,"");
-                  return `${src} · REFRESH ${fmtDate(refreshDate)} ⟳`;
+                  return `${src}REFRESH ${fmtDate(refreshDate)} ⟳`;
                 }
-                return `${src} · ${fmtDate(snapDate)} 📂`;
+                return `${src}${fmtDate(snapDate)} 📂`;
               })()}
             </div>
           </div>
@@ -4524,7 +4522,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                   padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center",
                 }}>
                   <div>
-                    <div style={{fontSize:10,color:C.gray,marginBottom:3,textTransform:"uppercase",letterSpacing:.5}}>Total portefeuille</div>
+                    <div style={{fontSize:11,color:C.green,fontWeight:800,marginBottom:2,textTransform:"uppercase",letterSpacing:.5}}>Total Net Worth</div>
                     <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:C.green}}>{msk(cur2+fmt(totalDisplay),hidden)}</div>
                     <div style={{fontSize:13,color:C.gray,marginTop:2}}>{msk(eur?"$"+fmt(totalUSD):"€"+fmt(totalEUR),hidden)}</div>
                   </div>

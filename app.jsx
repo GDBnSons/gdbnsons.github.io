@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.47";
+const APP_VERSION = "v27.48";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7624,13 +7624,27 @@ function PageMarket({ eur=false }){
   }
   function btcHeatColor(h){ return h==null?C.gray:(h<40?C.green:(h<60?C.gold:(h<80?C.orange:C.red))); }
   function fetchOnchainBtc(){
-    var slugs=[["mvrv-zscore","mvrvZscore","mvrvz"],["nupl","nupl","nupl"],["reserve-risk","reserveRisk","reserverisk"]];
-    return Promise.all(slugs.map(function(sg){
-      return fetch("https://bitcoin-data.com/v1/"+sg[0]+"/last",{headers:{Accept:"application/json"}})
-        .then(function(r){ return r.ok?r.json():null; })
-        .then(function(d){ if(!d)return null; if(Array.isArray(d))d=d[d.length-1]; var n=parseFloat(d&&d[sg[1]]); return isFinite(n)?[sg[2],n]:null; })
-        .catch(function(){ return null; });
-    })).then(function(arr){ var o={}; arr.forEach(function(p){ if(p)o[p[0]]=p[1]; }); return o; });
+    var OC=[
+      {key:"mvrvz",slugs:["mvrv-zscore"]},
+      {key:"nupl",slugs:["nupl"]},
+      {key:"reserverisk",slugs:["reserve-risk"]},
+      {key:"rhodl",slugs:["rhodl-ratio"]},
+      {key:"sthmvrv",slugs:["sth-mvrv"]},
+      {key:"asopr",slugs:["sopr","asopr","adjusted-sopr","sopr-adjusted"]},
+      {key:"vdd",slugs:["vdd-multiple","value-days-destroyed-multiple","vdd"]}
+    ];
+    var pick=function(d){ if(!d||typeof d!=="object")return null; for(var k in d){ if(/^(d|unixts|theday|date|time)$/i.test(k))continue; if(/(1m|1w|7d|14d|30d|90d|sma|ema)$/i.test(k))continue; var n=parseFloat(d[k]); if(isFinite(n))return n; } return null; };
+    var one=function(m){
+      var tryslug=function(i){
+        if(i>=m.slugs.length) return Promise.resolve(null);
+        return fetch("https://bitcoin-data.com/v1/"+m.slugs[i]+"/last",{headers:{Accept:"application/json"}})
+          .then(function(r){ return r.ok?r.json():null; })
+          .then(function(d){ if(!d)return tryslug(i+1); if(Array.isArray(d))d=d[d.length-1]; var v=pick(d); return v!=null?[m.key,v]:tryslug(i+1); })
+          .catch(function(){ return tryslug(i+1); });
+      };
+      return tryslug(0);
+    };
+    return Promise.all(OC.map(one)).then(function(arr){ var o={}; arr.forEach(function(p){ if(p)o[p[0]]=p[1]; }); return o; });
   }
   function loadBtc(noCache){
     setBtcSigL(true); setBtcSigE(null);
@@ -7643,9 +7657,14 @@ function PageMarket({ eur=false }){
           var ind=(d.indicators||[]).map(function(o){ return Object.assign({},o); });
           var byk={}; ind.forEach(function(o){ byk[o.key]=o; });
           var patch=function(key,val,heat,zone){ var it=byk[key]; if(it){ it.value=val; it.heat=heat; it.zone=zone; } };
+          var lg=function(v){ return Math.log(v)/Math.LN10; };
           if(oc.mvrvz!=null){ var a=oc.mvrvz; patch("mvrvz",a.toFixed(2),cl(a,0,7),a<1?"Bas — accumulation/bottom":a>7?"Très au-dessus — top":"Neutre"); }
           if(oc.nupl!=null){ var b=oc.nupl; patch("nupl",b.toFixed(2),cl(b,0,0.75),b<0?"Capitulation":b<0.25?"Espoir":b<0.5?"Optimisme":b<0.75?"Croyance":"Euphorie"); }
           if(oc.reserverisk!=null){ var c=oc.reserverisk; patch("reserverisk",c.toFixed(4),cl(c,0.001,0.02),c<0.002?"Confiance forte, prix bas — achat":c>0.02?"Risque élevé — vente":"Neutre"); }
+          if(oc.rhodl!=null){ var e=oc.rhodl; patch("rhodl",String(Math.round(e)),(e>0?cl(lg(e),2.60,4.48):null),e<2000?"Bas — accumulation":e>20000?"Surchauffe — top":"Neutre"); }
+          if(oc.sthmvrv!=null){ var g=oc.sthmvrv; patch("sthmvrv",g.toFixed(2),cl(g,0.85,1.5),g<0.9?"Détenteurs court terme en perte — bottom":g>1.35?"Surchauffe locale — top":"Neutre"); }
+          if(oc.asopr!=null){ var h=oc.asopr; patch("asopr",h.toFixed(3),cl(h,0.97,1.06),h<1?"Vendeurs en perte — capitulation":h>1.04?"Prise de profit soutenue":"Neutre"); }
+          if(oc.vdd!=null){ var j=oc.vdd; patch("vdd",j.toFixed(2),cl(j,0.6,2.9),j<0.6?"Faible — bottom":j>2.9?"Distribution — top":"Neutre"); }
           ind.forEach(function(o){ o.color=btcHeatColor(o.heat); });
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
@@ -8100,7 +8119,7 @@ function PageMarket({ eur=false }){
         var d=btcSig;
         var grad="linear-gradient(90deg,"+C.green+" 0%,"+C.green+" 28%,"+C.gold+" 50%,"+C.orange+" 72%,"+C.red+" 100%)";
         var byKey={}; (d.indicators||[]).forEach(function(o){ byKey[o.key]=o; });
-        var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","reserverisk"]],["Sentiment",["feargreed"]]];
+        var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","sthmvrv","rhodl","reserverisk","asopr","vdd"]],["Sentiment",["feargreed"]]];
         var tog=function(k){ setBtcOpen(function(p){ var n=Object.assign({},p); n[k]=!p[k]; return n; }); };
         var maj=d.ts?new Date(d.ts).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
         return (

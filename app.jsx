@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.45";
+const APP_VERSION = "v27.46";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8120,7 +8120,7 @@ function PageMarket({ eur=false }){
                 {d.aggHeat!=null && <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,d.aggHeat))+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
-              <div style={{fontSize:10,color:C.text2,marginTop:10,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/13 indicateurs · maj {maj}</div>
+              <div style={{fontSize:10,color:C.text2,marginTop:10,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indicateurs · maj {maj}</div>
             </div>
 
             {groups.map(function(g,gi){

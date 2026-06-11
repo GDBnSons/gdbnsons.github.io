@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.42";
+const APP_VERSION = "v27.43";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7782,7 +7782,7 @@ function PageMarket({ eur=false }){
         var bt=fund.btc||{}, et=fund.eth||{}, nb=fund.nq_basis;
         return (
         <div style={{marginTop:14}}>
-          {sectTitle("Funding rates (perpétuels)")}
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Funding rates (perpétuels)</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {row("BTC", bt.aggApr!=null?bt.aggApr*100:null, (bt.nPlatforms||0)+" plateformes · OI "+bigMcap(bt.totalOiUsd))}
             {row("ETH", et.aggApr!=null?et.aggApr*100:null, (et.nPlatforms||0)+" plateformes · OI "+bigMcap(et.totalOiUsd))}

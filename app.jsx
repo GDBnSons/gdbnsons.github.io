@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.43";
+const APP_VERSION = "v27.44";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7610,6 +7610,7 @@ function PageMarket({ eur=false }){
   const [congOpen,setCongOpen]=useState({});
   const [congView,setCongView]=useState("trades");
   const [fund,setFund]=useState(null),[fundL,setFundL]=useState(false),[fundE,setFundE]=useState(null);
+  const [fundOpen,setFundOpen]=useState({});
   const [impF,setImpF]=useState({1:false,2:false,3:true});
   const [ccF,setCcF]=useState({us:true});
   function loadSec(p,setD,setLd,setEr,noCache){
@@ -7746,6 +7747,55 @@ function PageMarket({ eur=false }){
             <Card label="Dominance BTC" value={p.btcDominance!=null?p.btcDominance.toFixed(1)+"%":"—"}/>
           </div>
           <div>
+            {sectTitle("Funding rates (perpétuels)")}
+            {fundL && !fund && <div style={{color:C.text3,fontSize:11,padding:"4px 0"}}>Chargement…</div>}
+            {fundE && !fund && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:10,color:C.red,fontSize:11}}>Funding : {fundE} <button onClick={function(){loadSec("/funding",setFund,setFundL,setFundE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
+            {fund && (function(){
+              var bt=fund.btc||{}, et=fund.eth||{}, nb=fund.nq_basis;
+              var aColor=function(a){ return a==null?C.text3:(a>=0?C.green:C.red); };
+              var aTxt=function(a){ return a==null?"—":(a>=0?"+":"")+a.toFixed(2)+"%"; };
+              var cryptoRow=function(name,d){
+                var apr=d.aggApr!=null?d.aggApr*100:null; var open=!!fundOpen[name];
+                return (
+                  <div key={name} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
+                    <button onClick={function(){ setFundOpen(function(o){ var n2=Object.assign({},o); n2[name]=!o[name]; return n2; }); }} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{textAlign:"left"}}><div style={{fontSize:13,fontWeight:800,color:C.text}}>{name} <span style={{fontSize:9,color:C.text3}}>{open?"▾":"▸"}</span></div><div style={{fontSize:9,color:C.text3,marginTop:1}}>{(d.nPlatforms||0)+" plateformes · OI "+bigMcap(d.totalOiUsd)+" · Vol "+bigMcap(d.totalVolUsd)}</div></div>
+                      <div style={{textAlign:"right"}}><div style={{fontSize:15,fontWeight:800,color:aColor(apr)}}>{aTxt(apr)}</div><div style={{fontSize:8,color:C.text3}}>APR agrégé (pond. OI)</div></div>
+                    </button>
+                    {open && (
+                      <div style={{borderTop:"1px solid "+C.border,padding:"4px 12px 8px"}}>
+                        <div style={{display:"flex",fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:0.4,padding:"4px 0",borderBottom:"1px solid "+C.border+"55"}}>
+                          <span style={{flex:1.5}}>Plateforme</span><span style={{flex:1,textAlign:"right"}}>APR</span><span style={{flex:1,textAlign:"right"}}>OI</span><span style={{flex:1,textAlign:"right"}}>Vol 24h</span>
+                        </div>
+                        {(d.platforms||[]).map(function(pl){ var a2=pl.apr!=null?pl.apr*100:null; return (
+                          <div key={pl.name} style={{display:"flex",alignItems:"center",fontSize:11,padding:"5px 0",borderBottom:"1px solid "+C.border+"22"}}>
+                            <span style={{flex:1.5,color:C.text,fontWeight:600}}>{pl.name}{pl.intervalH?<span style={{fontSize:8,color:C.text3,fontWeight:400}}> {pl.intervalH}h</span>:null}</span>
+                            <span style={{flex:1,textAlign:"right",fontWeight:700,color:aColor(a2)}}>{aTxt(a2)}</span>
+                            <span style={{flex:1,textAlign:"right",color:C.text2}}>{pl.oiUsd!=null?bigMcap(pl.oiUsd):"—"}</span>
+                            <span style={{flex:1,textAlign:"right",color:C.text2}}>{pl.volUsd!=null?bigMcap(pl.volUsd):"—"}</span>
+                          </div>
+                        );})}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {cryptoRow("BTC",bt)}
+                  {cryptoRow("ETH",et)}
+                  {nb && (
+                    <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div><div style={{fontSize:13,fontWeight:800,color:C.text}}>Nasdaq (NQ)</div><div style={{fontSize:9,color:C.text3,marginTop:1}}>{"Basis "+(nb.basisPct>=0?"+":"")+nb.basisPct.toFixed(2)+"% · éch. "+nb.expiry+" ("+nb.daysToExpiry+"j)"}</div></div>
+                      <div style={{textAlign:"right"}}><div style={{fontSize:15,fontWeight:800,color:aColor(nb.annualizedPct)}}>{aTxt(nb.annualizedPct)}</div><div style={{fontSize:8,color:C.text3}}>Basis annualisé</div></div>
+                    </div>
+                  )}
+                  <div style={{fontSize:8,color:C.text3,textAlign:"right"}}>hors Binance/Bitget (géo-bloqués) · maj {fund.ts?new Date(fund.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+                </div>
+              );
+            })()}
+          </div>
+          <div>
             {sectTitle("Rendements obligataires US")}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
               {(m.treasury||[]).map(function(it){ return (
@@ -7765,30 +7815,6 @@ function PageMarket({ eur=false }){
               {(m.forex||[]).map(quoteRow)}
             </div>
           </div>
-        </div>
-        );
-      })()}
-
-      {sub==="macro" && (function(){
-        if(fundL && !fund) return <div style={{textAlign:"center",color:C.text3,fontSize:11,padding:"10px 0"}}>Chargement funding…</div>;
-        if(fundE && !fund) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:10,color:C.red,fontSize:11,marginTop:12}}>Funding : {fundE} <button onClick={function(){loadSec("/funding",setFund,setFundL,setFundE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
-        if(!fund) return null;
-        var row=function(name,apr,sub2){ return (
-          <div key={name} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div><div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div><div style={{fontSize:9,color:C.text3,marginTop:1}}>{sub2}</div></div>
-            <div style={{textAlign:"right"}}><div style={{fontSize:15,fontWeight:800,color:apr==null?C.text3:(apr>=0?C.green:C.red)}}>{apr==null?"—":(apr>=0?"+":"")+apr.toFixed(2)+"%"}</div><div style={{fontSize:8,color:C.text3}}>{name==="Nasdaq (NQ)"?"Basis annualisé":"APR agrégé (pond. OI)"}</div></div>
-          </div>
-        ); };
-        var bt=fund.btc||{}, et=fund.eth||{}, nb=fund.nq_basis;
-        return (
-        <div style={{marginTop:14}}>
-          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Funding rates (perpétuels)</div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {row("BTC", bt.aggApr!=null?bt.aggApr*100:null, (bt.nPlatforms||0)+" plateformes · OI "+bigMcap(bt.totalOiUsd))}
-            {row("ETH", et.aggApr!=null?et.aggApr*100:null, (et.nPlatforms||0)+" plateformes · OI "+bigMcap(et.totalOiUsd))}
-            {nb && row("Nasdaq (NQ)", nb.annualizedPct, "Basis "+(nb.basisPct>=0?"+":"")+nb.basisPct.toFixed(2)+"% · éch. "+nb.expiry+" ("+nb.daysToExpiry+"j)")}
-          </div>
-          <div style={{fontSize:8,color:C.text3,marginTop:5,textAlign:"right"}}>hors Binance/Bitget (géo-bloqués) · maj {fund.ts?new Date(fund.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
         </div>
         );
       })()}

@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.48";
+const APP_VERSION = "v27.49";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7630,7 +7630,7 @@ function PageMarket({ eur=false }){
       {key:"reserverisk",slugs:["reserve-risk"]},
       {key:"rhodl",slugs:["rhodl-ratio"]},
       {key:"sthmvrv",slugs:["sth-mvrv"]},
-      {key:"asopr",slugs:["sopr","asopr","adjusted-sopr","sopr-adjusted"]},
+      {key:"asopr",slugs:["asopr","sopr"]},
       {key:"vdd",slugs:["vdd-multiple","value-days-destroyed-multiple","vdd"]}
     ];
     var pick=function(d){ if(!d||typeof d!=="object")return null; for(var k in d){ if(/^(d|unixts|theday|date|time)$/i.test(k))continue; if(/(1m|1w|7d|14d|30d|90d|sma|ema)$/i.test(k))continue; var n=parseFloat(d[k]); if(isFinite(n))return n; } return null; };

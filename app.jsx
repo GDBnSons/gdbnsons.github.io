@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.49";
+const APP_VERSION = "v27.50";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7623,7 +7623,8 @@ function PageMarket({ eur=false }){
       .catch(function(e){ setEr((e&&e.message)||"Erreur réseau"); setLd(false); });
   }
   function btcHeatColor(h){ return h==null?C.gray:(h<40?C.green:(h<60?C.gold:(h<80?C.orange:C.red))); }
-  function fetchOnchainBtc(){
+  function fetchOnchainBtc(force){
+    var CK="gdb_btc_onchain_v1";
     var OC=[
       {key:"mvrvz",slugs:["mvrv-zscore"]},
       {key:"nupl",slugs:["nupl"]},
@@ -7633,18 +7634,33 @@ function PageMarket({ eur=false }){
       {key:"asopr",slugs:["asopr","sopr"]},
       {key:"vdd",slugs:["vdd-multiple","value-days-destroyed-multiple","vdd"]}
     ];
+    var cached={}, cachedTs=0;
+    try{ var raw=localStorage.getItem(CK); if(raw){ var pj=JSON.parse(raw); cached=pj.vals||{}; cachedTs=pj.ts||0; } }catch(e){}
+    var fresh=(Date.now()-cachedTs)<6*3600*1000;
+    var haveAll=OC.every(function(m){ return cached[m.key]!=null; });
+    if(!force && fresh && haveAll) return Promise.resolve(Object.assign({},cached));
     var pick=function(d){ if(!d||typeof d!=="object")return null; for(var k in d){ if(/^(d|unixts|theday|date|time)$/i.test(k))continue; if(/(1m|1w|7d|14d|30d|90d|sma|ema)$/i.test(k))continue; var n=parseFloat(d[k]); if(isFinite(n))return n; } return null; };
-    var one=function(m){
-      var tryslug=function(i){
-        if(i>=m.slugs.length) return Promise.resolve(null);
-        return fetch("https://bitcoin-data.com/v1/"+m.slugs[i]+"/last",{headers:{Accept:"application/json"}})
-          .then(function(r){ return r.ok?r.json():null; })
-          .then(function(d){ if(!d)return tryslug(i+1); if(Array.isArray(d))d=d[d.length-1]; var v=pick(d); return v!=null?[m.key,v]:tryslug(i+1); })
-          .catch(function(){ return tryslug(i+1); });
-      };
-      return tryslug(0);
-    };
-    return Promise.all(OC.map(one)).then(function(arr){ var o={}; arr.forEach(function(p){ if(p)o[p[0]]=p[1]; }); return o; });
+    var sleep=function(ms){ return new Promise(function(r){ setTimeout(r,ms); }); };
+    var out=Object.assign({},cached);
+    var seq=OC.reduce(function(prev,m){
+      return prev.then(function(){
+        var attempt=function(i,retried){
+          if(i>=m.slugs.length) return Promise.resolve(null);
+          return fetch("https://bitcoin-data.com/v1/"+m.slugs[i]+"/last",{headers:{Accept:"application/json"}})
+            .then(function(r){
+              if(r.status===429){ return (!retried? sleep(700).then(function(){return attempt(i,true);}) : attempt(i+1,false)); }
+              if(!r.ok) return attempt(i+1,false);
+              return r.json().then(function(d){ if(Array.isArray(d))d=d[d.length-1]; var v=pick(d); return v!=null?v:attempt(i+1,false); });
+            })
+            .catch(function(){ return (!retried? sleep(500).then(function(){return attempt(i,true);}) : null); });
+        };
+        return attempt(0,false).then(function(v){ if(v!=null) out[m.key]=v; return sleep(250); });
+      });
+    }, Promise.resolve());
+    return seq.then(function(){
+      try{ localStorage.setItem(CK, JSON.stringify({ts:Date.now(), vals:out})); }catch(e){}
+      return out;
+    });
   }
   function loadBtc(noCache){
     setBtcSigL(true); setBtcSigE(null);
@@ -7672,7 +7688,7 @@ function PageMarket({ eur=false }){
           setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok}));
           setBtcSigL(false);
         };
-        fetchOnchainBtc().then(finish).catch(function(){ finish({}); });
+        fetchOnchainBtc(noCache).then(finish).catch(function(){ finish({}); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
   }

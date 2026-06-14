@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.53";
+const APP_VERSION = "v27.54";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7640,6 +7640,7 @@ function PageMarket({ eur=false }){
   const [btcSig,setBtcSig]=useState(null),[btcSigL,setBtcSigL]=useState(false),[btcSigE,setBtcSigE]=useState(null);
   const [btcOpen,setBtcOpen]=useState({});
   const [btcChartOpen,setBtcChartOpen]=useState(true);
+  const [btcTF,setBtcTF]=useState("ALL");
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
@@ -7694,7 +7695,7 @@ function PageMarket({ eur=false }){
       .then(function(d){
         if(d&&d.error){ setBtcSigE(String(d.error)); setBtcSigL(false); return; }
         var cl=function(v,lo,hi){ return Math.max(0,Math.min(100,(v-lo)/(hi-lo)*100)); };
-        var finish=function(oc, series){
+        var finish=function(oc, hf){
           var ind=(d.indicators||[]).map(function(o){ return Object.assign({},o); });
           var byk={}; ind.forEach(function(o){ byk[o.key]=o; });
           var patch=function(key,val,heat,zone){ var it=byk[key]; if(it){ it.value=val; it.heat=heat; it.zone=zone; } };
@@ -7710,6 +7711,7 @@ function PageMarket({ eur=false }){
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
+          var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z]}); }
           setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series}));
           setBtcSigL(false);
           if(ah!=null){ fetch(CF_WORKER_URL+"/btc-history-record",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({h:ah,reco:reco})}).catch(function(){}); }
@@ -7717,7 +7719,7 @@ function PageMarket({ eur=false }){
         Promise.all([
           fetchOnchainBtc(noCache).catch(function(){ return {}; }),
           fetch(CF_WORKER_URL+"/btc-history-full",{headers:{"X-Auth-Key":CF_AUTH_KEY}}).then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
-        ]).then(function(arr){ finish(arr[0]||{}, (arr[1]&&arr[1].series)||[]); }).catch(function(){ finish({}, []); });
+        ]).then(function(arr){ finish(arr[0]||{}, arr[1]); }).catch(function(){ finish({}, null); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
   }
@@ -8186,7 +8188,13 @@ function PageMarket({ eur=false }){
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span><span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span></div>
               {btcChartOpen && d._series && d._series.length>1 && (function(){
-                var S=d._series, W=320, HH=170, padL=26, padR=20, padT=10, padB=16;
+                var full=d._series, nowT=full[full.length-1].t, cutoff;
+                if(btcTF==="ALL") cutoff=-Infinity;
+                else if(btcTF==="YTD") cutoff=Date.UTC(new Date(nowT).getUTCFullYear(),0,1);
+                else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
+                var S=full.filter(function(p){ return p.t>=cutoff; });
+                if(S.length<2) S=full.slice(-2);
+                var W=320, HH=215, padL=30, padR=24, padT=12, padB=20;
                 var t0=S[0].t, t1=S[S.length-1].t;
                 var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
                 var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
@@ -8195,26 +8203,40 @@ function PageMarket({ eur=false }){
                 var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
                 var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
                 var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
-                var SCORECOL="#60A5FA";
+                var areaPath=scorePath+" L"+X(t1).toFixed(1)+" "+YS(0).toFixed(1)+" L"+X(t0).toFixed(1)+" "+YS(0).toFixed(1)+" Z";
                 var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
                 var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
-                var yrs=[], seen={}; S.forEach(function(p){ var y=new Date(p.t).getUTCFullYear(); if(!seen[y]){ seen[y]=1; yrs.push({y:y,t:p.t}); } });
-                var yrShow=yrs.filter(function(_,i){ return i%2===0; });
+                var spanDays=(t1-t0)/864e5;
+                var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
+                var fmtX=function(t){ var dt=new Date(t); var dd=("0"+dt.getUTCDate()).slice(-2),mm=("0"+(dt.getUTCMonth()+1)).slice(-2); if(spanDays<=60) return dd+"/"+mm; if(spanDays<=800) return mm+"/"+String(dt.getUTCFullYear()).slice(2); return String(dt.getUTCFullYear()); };
+                var TFB=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
                 return (
                   <div style={{marginTop:12}} onClick={function(ev){ev.stopPropagation();}}>
-                    <div style={{display:"flex",gap:14,marginBottom:4,fontSize:9,fontWeight:700}}>
-                      <span style={{color:C.btc}}>● Prix BTC (log)</span>
-                      <span style={{color:SCORECOL}}>● Score de cycle</span>
+                    <div style={{display:"flex",gap:4,marginBottom:8}}>
+                      {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?d.recoColor:C.border),background:on?d.recoColor+"22":"transparent",color:on?d.recoColor:C.text3,cursor:"pointer"}}>{tf}</button>; })}
+                    </div>
+                    <div style={{display:"flex",gap:14,marginBottom:4,fontSize:10,fontWeight:700}}>
+                      <span style={{color:C.text}}>━ Prix BTC (log)</span>
+                      <span style={{color:C.gold}}>━ Score (vert=achat · rouge=vente)</span>
                     </div>
                     <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
-                      {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.25}/>; })}
-                      <path d={pricePath} fill="none" stroke={C.btc} strokeWidth="1.4" strokeLinejoin="round"/>
-                      <path d={scorePath} fill="none" stroke={SCORECOL} strokeWidth="1.4" strokeLinejoin="round"/>
-                      {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-2} y={YP(pv)+2} textAnchor="end" fontSize="6.5" fill={C.btc}>{fmtP(pv)}</text>; })}
-                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+2} y={YS(sv)+2} textAnchor="start" fontSize="6.5" fill={SCORECOL}>{sv}</text>; })}
-                      {yrShow.map(function(yo,i){ return <text key={"y"+i} x={X(yo.t)} y={HH-4} textAnchor="middle" fontSize="6.5" fill={C.text3}>{yo.y}</text>; })}
+                      <defs>
+                        <linearGradient id="btcScoreStroke" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stopColor={C.red}/><stop offset="28%" stopColor={C.orange}/><stop offset="50%" stopColor={C.gold}/><stop offset="72%" stopColor={C.green}/><stop offset="100%" stopColor={C.green}/>
+                        </linearGradient>
+                        <linearGradient id="btcScoreFill" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stopColor={C.red} stopOpacity="0.28"/><stop offset="28%" stopColor={C.orange} stopOpacity="0.20"/><stop offset="50%" stopColor={C.gold} stopOpacity="0.15"/><stop offset="72%" stopColor={C.green} stopOpacity="0.12"/><stop offset="100%" stopColor={C.green} stopOpacity="0.05"/>
+                        </linearGradient>
+                      </defs>
+                      {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.22}/>; })}
+                      <path d={areaPath} fill="url(#btcScoreFill)" stroke="none"/>
+                      <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>
+                      <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>
+                      {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
+                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.gold}>{sv}</text>; })}
+                      {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
                     </svg>
-                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix) sur ~{Math.round((t1-t0)/(365*864e5))} ans · bas = zone d'achat, haut = zone de vente.</div>
+                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>
                   </div>
                 );
               })()}

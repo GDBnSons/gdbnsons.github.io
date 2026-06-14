@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.50";
+const APP_VERSION = "v27.51";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7429,6 +7429,25 @@ function PageData(
     {name:"CUSTOM_ICONS",dbKey:"CUSTOM_ICONS", count:Object.keys(ICON_DB).length, last:"icones"},
   ];
 
+  var exp_state = useState(null); var expMsg = exp_state[0]; var setExpMsg = exp_state[1];
+  function exportJSON(){
+    setExpMsg("Export…");
+    fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY}})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+      .then(function(d){
+        var blob = new Blob([JSON.stringify(d,null,2)], {type:"application/json"});
+        var u = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        var dt = new Date();
+        var stamp = dt.getFullYear()+"-"+("0"+(dt.getMonth()+1)).slice(-2)+"-"+("0"+dt.getDate()).slice(-2);
+        a.href = u; a.download = "gdb-sons-backup-"+stamp+".json";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(u); }, 1000);
+        setExpMsg("\u2713 Export\u00e9"); setTimeout(function(){ setExpMsg(null); }, 3000);
+      })
+      .catch(function(e){ setExpMsg("Erreur : "+((e&&e.message)||"")); });
+  }
+
   return(
     <div>
       <div style={{display:"flex",gap:6,background:C.bg2,borderRadius:10,padding:4,marginBottom:12}}>
@@ -7443,6 +7462,11 @@ function PageData(
             }}>{l}</button>
           );
         })}
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <button onClick={exportJSON} style={{flex:1,padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\u2b07\ufe0f"} Exporter JSON (sauvegarde)</button>
+        {expMsg && <span style={{fontSize:10,fontWeight:700,whiteSpace:"nowrap",color: expMsg.indexOf("Erreur")>=0?C.red:C.green}}>{expMsg}</span>}
       </div>
 
       {viewMode==="local" ? (

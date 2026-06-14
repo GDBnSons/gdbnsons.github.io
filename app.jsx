@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.52";
+const APP_VERSION = "v27.53";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7639,6 +7639,7 @@ function PageMarket({ eur=false }){
   const [ccF,setCcF]=useState({us:true});
   const [btcSig,setBtcSig]=useState(null),[btcSigL,setBtcSigL]=useState(false),[btcSigE,setBtcSigE]=useState(null);
   const [btcOpen,setBtcOpen]=useState({});
+  const [btcChartOpen,setBtcChartOpen]=useState(true);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
@@ -7693,7 +7694,7 @@ function PageMarket({ eur=false }){
       .then(function(d){
         if(d&&d.error){ setBtcSigE(String(d.error)); setBtcSigL(false); return; }
         var cl=function(v,lo,hi){ return Math.max(0,Math.min(100,(v-lo)/(hi-lo)*100)); };
-        var finish=function(oc, hist){
+        var finish=function(oc, series){
           var ind=(d.indicators||[]).map(function(o){ return Object.assign({},o); });
           var byk={}; ind.forEach(function(o){ byk[o.key]=o; });
           var patch=function(key,val,heat,zone){ var it=byk[key]; if(it){ it.value=val; it.heat=heat; it.zone=zone; } };
@@ -7709,17 +7710,14 @@ function PageMarket({ eur=false }){
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
-          var hist2=(hist||[]).slice();
-          var hd=new Date(); var hstamp=hd.getUTCFullYear()+("0"+(hd.getUTCMonth()+1)).slice(-2)+("0"+hd.getUTCDate()).slice(-2);
-          if(ah!=null){ if(hist2.length && hist2[hist2.length-1].d===hstamp){ hist2[hist2.length-1]={d:hstamp,h:Math.round(ah),reco:reco}; } else { hist2.push({d:hstamp,h:Math.round(ah),reco:reco}); } }
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_history:hist2}));
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series}));
           setBtcSigL(false);
           if(ah!=null){ fetch(CF_WORKER_URL+"/btc-history-record",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({h:ah,reco:reco})}).catch(function(){}); }
         };
         Promise.all([
           fetchOnchainBtc(noCache).catch(function(){ return {}; }),
-          fetch(CF_WORKER_URL+"/btc-history",{headers:{"X-Auth-Key":CF_AUTH_KEY}}).then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
-        ]).then(function(arr){ finish(arr[0]||{}, (arr[1]&&arr[1].history)||[]); }).catch(function(){ finish({}, []); });
+          fetch(CF_WORKER_URL+"/btc-history-full",{headers:{"X-Auth-Key":CF_AUTH_KEY}}).then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
+        ]).then(function(arr){ finish(arr[0]||{}, (arr[1]&&arr[1].series)||[]); }).catch(function(){ finish({}, []); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
   }
@@ -8171,7 +8169,7 @@ function PageMarket({ eur=false }){
         var maj=d.ts?new Date(d.ts).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
         return (
           <div>
-            <div style={{background:d.recoColor+"18",border:"1px solid "+d.recoColor+"55",borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+            <div onClick={function(){setBtcChartOpen(function(v){return !v;});}} style={{background:d.recoColor+"18",border:"1px solid "+d.recoColor+"55",borderRadius:14,padding:"14px 16px",marginBottom:16,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                 <div>
                   <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5}}>Recommandation</div>
@@ -8186,47 +8184,58 @@ function PageMarket({ eur=false }){
                 {d.aggHeat!=null && <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,d.aggHeat))+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
-              <div style={{fontSize:10,color:C.text2,marginTop:10,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indicateurs · maj {maj}</div>
-            </div>
-
-            {d._history && d._history.length>=2 && (function(){
-              var H=d._history, W=300, HT=44, P=4;
-              var xs=function(i){ return P + i*(W-2*P)/(H.length-1); };
-              var ys=function(v){ return P + (100-v)/100*(HT-2*P); };
-              var pth=H.map(function(p,i){ return (i?"L":"M")+xs(i).toFixed(1)+" "+ys(p.h).toFixed(1); }).join(" ");
-              var lastH=H[H.length-1].h, fmtD=function(s){ return s.slice(6,8)+"/"+s.slice(4,6); };
-              return (
-                <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"10px 12px",marginBottom:16}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                    <span style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:0.5}}>Évolution du score</span>
-                    <span style={{fontSize:10,color:C.text3}}>{H.length} j</span>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span><span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span></div>
+              {btcChartOpen && d._series && d._series.length>1 && (function(){
+                var S=d._series, W=320, HH=170, padL=26, padR=20, padT=10, padB=16;
+                var t0=S[0].t, t1=S[S.length-1].t;
+                var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
+                var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
+                var X=function(t){ return padL+(t-t0)/((t1-t0)||1)*(W-padL-padR); };
+                var YP=function(pr){ var v=Math.log(pr)/Math.LN10; return padT+(pMax-v)/((pMax-pMin)||1)*(HH-padT-padB); };
+                var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
+                var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
+                var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
+                var SCORECOL="#60A5FA";
+                var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
+                var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
+                var yrs=[], seen={}; S.forEach(function(p){ var y=new Date(p.t).getUTCFullYear(); if(!seen[y]){ seen[y]=1; yrs.push({y:y,t:p.t}); } });
+                var yrShow=yrs.filter(function(_,i){ return i%2===0; });
+                return (
+                  <div style={{marginTop:12}} onClick={function(ev){ev.stopPropagation();}}>
+                    <div style={{display:"flex",gap:14,marginBottom:4,fontSize:9,fontWeight:700}}>
+                      <span style={{color:C.btc}}>● Prix BTC (log)</span>
+                      <span style={{color:SCORECOL}}>● Score de cycle</span>
+                    </div>
+                    <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
+                      {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.25}/>; })}
+                      <path d={pricePath} fill="none" stroke={C.btc} strokeWidth="1.4" strokeLinejoin="round"/>
+                      <path d={scorePath} fill="none" stroke={SCORECOL} strokeWidth="1.4" strokeLinejoin="round"/>
+                      {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-2} y={YP(pv)+2} textAnchor="end" fontSize="6.5" fill={C.btc}>{fmtP(pv)}</text>; })}
+                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+2} y={YS(sv)+2} textAnchor="start" fontSize="6.5" fill={SCORECOL}>{sv}</text>; })}
+                      {yrShow.map(function(yo,i){ return <text key={"y"+i} x={X(yo.t)} y={HH-4} textAnchor="middle" fontSize="6.5" fill={C.text3}>{yo.y}</text>; })}
+                    </svg>
+                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix) sur ~{Math.round((t1-t0)/(365*864e5))} ans · bas = zone d'achat, haut = zone de vente.</div>
                   </div>
-                  <svg viewBox={"0 0 "+W+" "+HT} preserveAspectRatio="none" style={{width:"100%",height:44,display:"block"}}>
-                    <line x1={P} y1={ys(50)} x2={W-P} y2={ys(50)} stroke={C.border} strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke"/>
-                    <path d={pth} fill="none" stroke={btcHeatColor(lastH)} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
-                    <circle cx={xs(H.length-1)} cy={ys(lastH)} r="2.5" fill={btcHeatColor(lastH)}/>
-                  </svg>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:2}}><span>{fmtD(H[0].d)}</span><span>aujourd'hui</span></div>
-                </div>
-              );
-            })()}
+                );
+              })()}
+            </div>
 
             {groups.map(function(g,gi){
               return (
-                <div key={gi} style={{marginBottom:14}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{g[0]}</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div key={gi} style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{g[0]}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
                     {g[1].map(function(k){
                       var o=byKey[k]; if(!o) return null; var open=!!btcOpen[k];
                       return (
                         <div key={k} style={{background:C.bg1,border:"1px solid "+C.border,borderLeft:"3px solid "+o.color,borderRadius:10,overflow:"hidden"}}>
-                          <div onClick={function(){tog(k);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",cursor:"pointer",gap:8}}>
+                          <div onClick={function(){tog(k);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",cursor:"pointer",gap:8}}>
                             <div style={{minWidth:0}}>
-                              <div style={{fontSize:13,fontWeight:700,color:C.text}}>{o.name}</div>
-                              <div style={{fontSize:10,color:o.color,marginTop:2,fontWeight:600}}>{o.zone}</div>
+                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{o.name}</div>
+                              <div style={{fontSize:9,color:o.color,marginTop:1,fontWeight:600}}>{o.zone}</div>
                             </div>
-                            <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-                              <span style={{fontSize:15,fontWeight:800,color:C.text}}>{o.value}</span>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                              <span style={{fontSize:14,fontWeight:800,color:C.text}}>{o.value}</span>
                               <span style={{width:9,height:9,borderRadius:"50%",background:o.color,flexShrink:0}}/>
                               <span style={{fontSize:10,color:C.text3}}>{open?"▾":"▸"}</span>
                             </div>

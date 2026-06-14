@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.54";
+const APP_VERSION = "v27.55";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8194,7 +8194,7 @@ function PageMarket({ eur=false }){
                 else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
                 var S=full.filter(function(p){ return p.t>=cutoff; });
                 if(S.length<2) S=full.slice(-2);
-                var W=320, HH=215, padL=30, padR=24, padT=12, padB=20;
+                var W=320, HH=215, padL=26, padR=20, padT=12, padB=20;
                 var t0=S[0].t, t1=S[S.length-1].t;
                 var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
                 var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
@@ -8203,7 +8203,6 @@ function PageMarket({ eur=false }){
                 var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
                 var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
                 var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
-                var areaPath=scorePath+" L"+X(t1).toFixed(1)+" "+YS(0).toFixed(1)+" L"+X(t0).toFixed(1)+" "+YS(0).toFixed(1)+" Z";
                 var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
                 var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
                 var spanDays=(t1-t0)/864e5;
@@ -8211,25 +8210,21 @@ function PageMarket({ eur=false }){
                 var fmtX=function(t){ var dt=new Date(t); var dd=("0"+dt.getUTCDate()).slice(-2),mm=("0"+(dt.getUTCMonth()+1)).slice(-2); if(spanDays<=60) return dd+"/"+mm; if(spanDays<=800) return mm+"/"+String(dt.getUTCFullYear()).slice(2); return String(dt.getUTCFullYear()); };
                 var TFB=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
                 return (
-                  <div style={{marginTop:12}} onClick={function(ev){ev.stopPropagation();}}>
+                  <div style={{marginTop:12,marginLeft:-12,marginRight:-12}} onClick={function(ev){ev.stopPropagation();}}>
                     <div style={{display:"flex",gap:4,marginBottom:8}}>
                       {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?d.recoColor:C.border),background:on?d.recoColor+"22":"transparent",color:on?d.recoColor:C.text3,cursor:"pointer"}}>{tf}</button>; })}
                     </div>
                     <div style={{display:"flex",gap:14,marginBottom:4,fontSize:10,fontWeight:700}}>
                       <span style={{color:C.text}}>━ Prix BTC (log)</span>
-                      <span style={{color:C.gold}}>━ Score (vert=achat · rouge=vente)</span>
+                      <span style={{color:C.gold}}>━ Score de l'indicateur</span>
                     </div>
                     <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
                       <defs>
                         <linearGradient id="btcScoreStroke" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
                           <stop offset="0%" stopColor={C.red}/><stop offset="28%" stopColor={C.orange}/><stop offset="50%" stopColor={C.gold}/><stop offset="72%" stopColor={C.green}/><stop offset="100%" stopColor={C.green}/>
                         </linearGradient>
-                        <linearGradient id="btcScoreFill" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
-                          <stop offset="0%" stopColor={C.red} stopOpacity="0.28"/><stop offset="28%" stopColor={C.orange} stopOpacity="0.20"/><stop offset="50%" stopColor={C.gold} stopOpacity="0.15"/><stop offset="72%" stopColor={C.green} stopOpacity="0.12"/><stop offset="100%" stopColor={C.green} stopOpacity="0.05"/>
-                        </linearGradient>
                       </defs>
                       {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.22}/>; })}
-                      <path d={areaPath} fill="url(#btcScoreFill)" stroke="none"/>
                       <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>
                       <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>
                       {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}

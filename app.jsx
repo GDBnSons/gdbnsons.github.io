@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.51";
+const APP_VERSION = "v27.52";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7693,7 +7693,7 @@ function PageMarket({ eur=false }){
       .then(function(d){
         if(d&&d.error){ setBtcSigE(String(d.error)); setBtcSigL(false); return; }
         var cl=function(v,lo,hi){ return Math.max(0,Math.min(100,(v-lo)/(hi-lo)*100)); };
-        var finish=function(oc){
+        var finish=function(oc, hist){
           var ind=(d.indicators||[]).map(function(o){ return Object.assign({},o); });
           var byk={}; ind.forEach(function(o){ byk[o.key]=o; });
           var patch=function(key,val,heat,zone){ var it=byk[key]; if(it){ it.value=val; it.heat=heat; it.zone=zone; } };
@@ -7709,10 +7709,17 @@ function PageMarket({ eur=false }){
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok}));
+          var hist2=(hist||[]).slice();
+          var hd=new Date(); var hstamp=hd.getUTCFullYear()+("0"+(hd.getUTCMonth()+1)).slice(-2)+("0"+hd.getUTCDate()).slice(-2);
+          if(ah!=null){ if(hist2.length && hist2[hist2.length-1].d===hstamp){ hist2[hist2.length-1]={d:hstamp,h:Math.round(ah),reco:reco}; } else { hist2.push({d:hstamp,h:Math.round(ah),reco:reco}); } }
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_history:hist2}));
           setBtcSigL(false);
+          if(ah!=null){ fetch(CF_WORKER_URL+"/btc-history-record",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({h:ah,reco:reco})}).catch(function(){}); }
         };
-        fetchOnchainBtc(noCache).then(finish).catch(function(){ finish({}); });
+        Promise.all([
+          fetchOnchainBtc(noCache).catch(function(){ return {}; }),
+          fetch(CF_WORKER_URL+"/btc-history",{headers:{"X-Auth-Key":CF_AUTH_KEY}}).then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
+        ]).then(function(arr){ finish(arr[0]||{}, (arr[1]&&arr[1].history)||[]); }).catch(function(){ finish({}, []); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
   }
@@ -8181,6 +8188,28 @@ function PageMarket({ eur=false }){
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
               <div style={{fontSize:10,color:C.text2,marginTop:10,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indicateurs · maj {maj}</div>
             </div>
+
+            {d._history && d._history.length>=2 && (function(){
+              var H=d._history, W=300, HT=44, P=4;
+              var xs=function(i){ return P + i*(W-2*P)/(H.length-1); };
+              var ys=function(v){ return P + (100-v)/100*(HT-2*P); };
+              var pth=H.map(function(p,i){ return (i?"L":"M")+xs(i).toFixed(1)+" "+ys(p.h).toFixed(1); }).join(" ");
+              var lastH=H[H.length-1].h, fmtD=function(s){ return s.slice(6,8)+"/"+s.slice(4,6); };
+              return (
+                <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"10px 12px",marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <span style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:0.5}}>Évolution du score</span>
+                    <span style={{fontSize:10,color:C.text3}}>{H.length} j</span>
+                  </div>
+                  <svg viewBox={"0 0 "+W+" "+HT} preserveAspectRatio="none" style={{width:"100%",height:44,display:"block"}}>
+                    <line x1={P} y1={ys(50)} x2={W-P} y2={ys(50)} stroke={C.border} strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke"/>
+                    <path d={pth} fill="none" stroke={btcHeatColor(lastH)} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+                    <circle cx={xs(H.length-1)} cy={ys(lastH)} r="2.5" fill={btcHeatColor(lastH)}/>
+                  </svg>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:2}}><span>{fmtD(H[0].d)}</span><span>aujourd'hui</span></div>
+                </div>
+              );
+            })()}
 
             {groups.map(function(g,gi){
               return (

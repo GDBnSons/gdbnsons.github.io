@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.57";
+const APP_VERSION = "v27.58";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7430,6 +7430,16 @@ function PageData(
   ];
 
   var exp_state = useState(null); var expMsg = exp_state[0]; var setExpMsg = exp_state[1];
+  var rst_open=useState(false); var rstOpen=rst_open[0]; var setRstOpen=rst_open[1];
+  var rst_dates=useState([]); var rstDates=rst_dates[0]; var setRstDates=rst_dates[1];
+  var rst_mode=useState("cloud"); var rstMode=rst_mode[0]; var setRstMode=rst_mode[1];
+  var rst_sel=useState(""); var rstSel=rst_sel[0]; var setRstSel=rst_sel[1];
+  var rst_blob=useState(null); var rstBlob=rst_blob[0]; var setRstBlob=rst_blob[1];
+  var rst_fname=useState(""); var rstFname=rst_fname[0]; var setRstFname=rst_fname[1];
+  var rst_word=useState(""); var rstWord=rst_word[0]; var setRstWord=rst_word[1];
+  var rst_busy=useState(false); var rstBusy=rst_busy[0]; var setRstBusy=rst_busy[1];
+  var rst_msg=useState(null); var rstMsg=rst_msg[0]; var setRstMsg=rst_msg[1];
+  var rst_safe=useState(function(){try{return localStorage.getItem("gdb_last_restore_safety")||"";}catch(e){return "";}}); var rstSafety=rst_safe[0]; var setRstSafety=rst_safe[1];
   function exportJSON(){
     setExpMsg("Export…");
     fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY}})
@@ -7446,6 +7456,48 @@ function PageData(
         setExpMsg("\u2713 Export\u00e9"); setTimeout(function(){ setExpMsg(null); }, 3000);
       })
       .catch(function(e){ setExpMsg("Erreur : "+((e&&e.message)||"")); });
+  }
+
+  function toggleRestore(){
+    var nx=!rstOpen; setRstOpen(nx);
+    if(nx && !rstDates.length){
+      fetch(CF_WORKER_URL+"/backups",{headers:{"X-Auth-Key":CF_AUTH_KEY}})
+        .then(function(r){return r.json();})
+        .then(function(d){ var bs=((d&&d.backups)||[]).slice().sort().reverse(); setRstDates(bs); if(bs.length) setRstSel(bs[0]); })
+        .catch(function(){});
+    }
+  }
+  function onRstFile(ev){
+    var fl=ev.target.files&&ev.target.files[0]; if(!fl) return;
+    var rd=new FileReader();
+    rd.onload=function(){ try{ var j=JSON.parse(rd.result); setRstBlob(j); setRstFname(fl.name); setRstMsg(null); }catch(e){ setRstBlob(null); setRstFname(""); setRstMsg({type:"err",text:"Fichier JSON invalide"}); } };
+    rd.readAsText(fl);
+  }
+  function doRestore(){
+    if(rstWord!=="RESTAURER") return;
+    var body;
+    if(rstMode==="cloud"){ if(!rstSel){ setRstMsg({type:"err",text:"Choisis une date"}); return; } body={date:rstSel}; }
+    else { if(!rstBlob){ setRstMsg({type:"err",text:"Importe un fichier"}); return; } body={blob:rstBlob}; }
+    setRstBusy(true); setRstMsg(null);
+    fetch(CF_WORKER_URL+"/restore",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        setRstBusy(false);
+        if(d&&d.ok){
+          try{ localStorage.setItem("gdb_last_restore_safety", d.safetyBackup||""); }catch(e){}
+          setRstSafety(d.safetyBackup||""); setRstWord("");
+          setRstMsg({type:"ok",text:"Restaur\u00e9 : "+d.restored+" table(s)"+(d.skipped?" \u00b7 "+d.skipped+" ignor\u00e9e(s)":"")});
+        } else { setRstMsg({type:"err",text:(d&&d.error)||"\u00c9chec"}); }
+      })
+      .catch(function(e){ setRstBusy(false); setRstMsg({type:"err",text:(e&&e.message)||"Erreur r\u00e9seau"}); });
+  }
+  function undoRestore(){
+    if(!rstSafety) return;
+    setRstBusy(true); setRstMsg(null);
+    fetch(CF_WORKER_URL+"/restore",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({key:rstSafety})})
+      .then(function(r){return r.json();})
+      .then(function(d){ setRstBusy(false); if(d&&d.ok){ setRstMsg({type:"ok",text:"Annulation effectu\u00e9e : "+d.restored+" table(s) restaur\u00e9es"}); } else { setRstMsg({type:"err",text:(d&&d.error)||"\u00c9chec"}); } })
+      .catch(function(e){ setRstBusy(false); setRstMsg({type:"err",text:(e&&e.message)||"Erreur r\u00e9seau"}); });
   }
 
   return(
@@ -7467,6 +7519,46 @@ function PageData(
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <button onClick={exportJSON} style={{flex:1,padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\u2b07\ufe0f"} Exporter JSON (sauvegarde)</button>
         {expMsg && <span style={{fontSize:10,fontWeight:700,whiteSpace:"nowrap",color: expMsg.indexOf("Erreur")>=0?C.red:C.green}}>{expMsg}</span>}
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <button onClick={toggleRestore} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\u267b\ufe0f"} Restaurer une sauvegarde {rstOpen?"\u25b2":"\u25bc"}</button>
+        {rstOpen && (
+          <div style={{marginTop:8,background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"12px"}}>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
+              {[["cloud","Sauvegarde cloud"],["file","Fichier JSON"]].map(function(m){ var on=rstMode===m[0]; return <button key={m[0]} onClick={function(){setRstMode(m[0]); setRstMsg(null);}} style={{flex:1,padding:"6px 0",borderRadius:7,fontSize:10,fontWeight:700,border:"1px solid "+(on?C.btc:C.border),background:on?C.btc+"22":"transparent",color:on?C.btc:C.text3,cursor:"pointer"}}>{m[1]}</button>; })}
+            </div>
+            {rstMode==="cloud" ? (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:10,color:C.text3,marginBottom:4}}>Date de la sauvegarde</div>
+                <select value={rstSel} onChange={function(e){setRstSel(e.target.value);}} style={{width:"100%",padding:"7px",borderRadius:7,background:C.bg,color:C.text,border:"1px solid "+C.border,fontSize:12,boxSizing:"border-box"}}>
+                  {rstDates.length===0 && <option value="">(aucune)</option>}
+                  {rstDates.map(function(dd){ return <option key={dd} value={dd}>{dd.slice(0,4)+"-"+dd.slice(4,6)+"-"+dd.slice(6,8)}</option>; })}
+                </select>
+              </div>
+            ) : (
+              <div style={{marginBottom:10}}>
+                <input type="file" accept="application/json,.json" onChange={onRstFile} style={{fontSize:11,color:C.text,width:"100%"}}/>
+                {rstFname && <div style={{fontSize:10,color:C.green,marginTop:4}}>{"\u2713 "+rstFname}</div>}
+              </div>
+            )}
+            <div style={{fontSize:10,color:C.text3,lineHeight:1.5,marginBottom:8,padding:"8px",background:C.bg,borderRadius:7,border:"1px solid "+C.border}}>{"\u26a0\ufe0f La restauration r\u00e9\u00e9crit tes tables avec les valeurs de la sauvegarde (les valeurs vides ne sont jamais \u00e9cras\u00e9es). Un backup de s\u00e9curit\u00e9 de l'\u00e9tat actuel est pris automatiquement \u2014 annulation possible."}</div>
+            <div style={{fontSize:10,color:C.text3,marginBottom:4}}>Pour confirmer, tape <b style={{color:C.text}}>RESTAURER</b></div>
+            <input value={rstWord} onChange={function(e){setRstWord(e.target.value);}} placeholder="RESTAURER" style={{width:"100%",padding:"7px",borderRadius:7,background:C.bg,color:C.text,border:"1px solid "+(rstWord==="RESTAURER"?C.green:C.border),fontSize:12,marginBottom:8,boxSizing:"border-box"}}/>
+            <button onClick={doRestore} disabled={rstBusy||rstWord!=="RESTAURER"} style={{width:"100%",padding:"9px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",cursor:(rstBusy||rstWord!=="RESTAURER")?"not-allowed":"pointer",background:(rstWord==="RESTAURER"&&!rstBusy)?C.red:C.border,color:"#fff",opacity:rstBusy?0.6:1}}>{rstBusy?"\u2026":"Restaurer maintenant"}</button>
+            {rstMsg && (
+              <div style={{marginTop:10,fontSize:11,fontWeight:700,color:rstMsg.type==="ok"?C.green:C.red}}>
+                {rstMsg.text}
+                {rstMsg.type==="ok" && (
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    {rstSafety && <button onClick={undoRestore} disabled={rstBusy} style={{flex:1,padding:"7px 0",borderRadius:7,fontSize:10,fontWeight:700,border:"1px solid "+C.border,background:C.bg,color:C.text,cursor:"pointer"}}>{"\u21a9\ufe0f"} Annuler</button>}
+                    <button onClick={function(){window.location.reload();}} style={{flex:1,padding:"7px 0",borderRadius:7,fontSize:10,fontWeight:700,border:"none",background:C.green,color:"#000",cursor:"pointer"}}>{"\u21bb"} Recharger l'app</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {viewMode==="local" ? (

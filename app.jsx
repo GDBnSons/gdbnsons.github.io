@@ -740,7 +740,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.55";
+const APP_VERSION = "v27.57";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8216,7 +8216,7 @@ function PageMarket({ eur=false }){
                     </div>
                     <div style={{display:"flex",gap:14,marginBottom:4,fontSize:10,fontWeight:700}}>
                       <span style={{color:C.text}}>━ Prix BTC (log)</span>
-                      <span style={{color:C.gold}}>━ Score de l'indicateur</span>
+                      <span style={{color:C.green}}>━ Score de l'indicateur</span>
                     </div>
                     <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
                       <defs>
@@ -8228,7 +8228,7 @@ function PageMarket({ eur=false }){
                       <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>
                       <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>
                       {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
-                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.gold}>{sv}</text>; })}
+                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.green}>{sv}</text>; })}
                       {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
                     </svg>
                     <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>

@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.61";
+const APP_VERSION = "v27.62";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7385,6 +7385,8 @@ function PageData(
   var rst_busy=useState(false); var rstBusy=rst_busy[0]; var setRstBusy=rst_busy[1];
   var rst_msg=useState(null); var rstMsg=rst_msg[0]; var setRstMsg=rst_msg[1];
   var rst_safe=useState(function(){try{return localStorage.getItem("gdb_last_restore_safety")||"";}catch(e){return "";}}); var rstSafety=rst_safe[0]; var setRstSafety=rst_safe[1];
+  var push_busy=useState(false); var pushBusy=push_busy[0]; var setPushBusy=push_busy[1];
+  var push_msg=useState(null); var pushMsg=push_msg[0]; var setPushMsg=push_msg[1];
   function exportJSON(){
     setExpMsg("Export…");
     cfGet("/read")
@@ -7436,6 +7438,18 @@ function PageData(
       })
       .catch(function(e){ setRstBusy(false); setRstMsg({type:"err",text:(e&&e.message)||"Erreur r\u00e9seau"}); });
   }
+  function pushLocalToCloud(){
+    setPushBusy(true); setPushMsg(null);
+    var targets=[["gdb_dd",_DD],["gdb_gdbs",_GDBS],["gdb_gc",_GC],["gdb_gsb",_GSB],["gdb_bench",_BENCH],["gdb_inv",_INV],["gdb_futures",_FUT],["gdb_ibkr_annex",_ANX]];
+    function isEmpty(v){ return v==null || (Array.isArray(v)&&v.length===0) || (typeof v==="object"&&!Array.isArray(v)&&Object.keys(v).length===0); }
+    cfGet("/read").then(function(r){return r.json();}).then(function(kv){
+      var jobs=[], pushed=[];
+      targets.forEach(function(t){ var key=t[0], local=t[1]; if(isEmpty(kv[key]) && !isEmpty(local)){ pushed.push(key); jobs.push(saveBase(key, local)); } });
+      if(!jobs.length){ setPushBusy(false); setPushMsg({type:"ok",text:"Rien \u00e0 pousser : le cloud est d\u00e9j\u00e0 complet."}); return; }
+      Promise.all(jobs).then(function(){ setPushBusy(false); setPushMsg({type:"ok",text:pushed.length+" base(s) pouss\u00e9e(s) : "+pushed.join(", ")+" \u2014 rechargez pour voir."}); })
+        .catch(function(e){ setPushBusy(false); setPushMsg({type:"err",text:(e&&e.message)||"\u00c9chec de l'envoi"}); });
+    }).catch(function(e){ setPushBusy(false); setPushMsg({type:"err",text:"Lecture KV impossible : "+((e&&e.message)||"")}); });
+  }
   function undoRestore(){
     if(!rstSafety) return;
     setRstBusy(true); setRstMsg(null);
@@ -7464,6 +7478,11 @@ function PageData(
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <button onClick={exportJSON} style={{flex:1,padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\u2b07\ufe0f"} Exporter JSON (sauvegarde)</button>
         {expMsg && <span style={{fontSize:10,fontWeight:700,whiteSpace:"nowrap",color: expMsg.indexOf("Erreur")>=0?C.red:C.green}}>{expMsg}</span>}
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <button onClick={pushLocalToCloud} disabled={pushBusy} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:pushBusy?"default":"pointer",background:C.bg2,color:C.text,opacity:pushBusy?0.6:1}}>{pushBusy?"\u2026":"\u2601\ufe0f Pousser les bases locales manquantes vers le cloud"}</button>
+        {pushMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:pushMsg.type==="ok"?C.green:C.red}}>{pushMsg.text}</div>}
       </div>
 
       <div style={{marginBottom:12}}>
@@ -7608,7 +7627,7 @@ function PageData(
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:11,color:C.gray}}>Données stockées dans Cloudflare KV</div>
-              <div style={{fontSize:10,fontWeight:700,color:C.btc}}>16 bases</div>
+              <div style={{fontSize:10,fontWeight:700,color:C.btc}}>19 bases</div>
             </div>
             <button onClick={doLoadCloud} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"5px 12px",color:C.teal,fontSize:11,fontWeight:700,cursor:"pointer"}}>Actualiser</button>
           </div>

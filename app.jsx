@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.60";
+const APP_VERSION = "v27.61";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7781,7 +7781,7 @@ function PageMarket({ eur=false }){
   const pctFmt=function(p){ return p==null?"\u2014":((p>0?"+":"")+p.toFixed(2)+"%"); };
   const fgColor=function(v){ return v==null?C.text3:(v<25?C.red:(v<45?C.orange:(v<55?C.text2:(v<75?C.green:C.teal)))); };
   const num=function(n,d){ if(n==null)return "\u2014"; return Number(n).toLocaleString("fr-FR",{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); };
-  const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; return "$"+num(n,0); };
+  const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; if(n>=1e6)return "$"+(n/1e6).toFixed(0)+" M"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
   const SUBS=[["macro","Macro"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"]];

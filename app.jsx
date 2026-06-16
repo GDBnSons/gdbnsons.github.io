@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.62";
+const APP_VERSION = "v27.63";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1104,17 +1104,22 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
     return{vals:vals.slice(si),dates:allDates.slice(si)};
   };
 
-  /* Build sliced series */
-  const sliced=series.map(s=>{
-    const{vals:sv,dates:sd}=sliceByTF(s.vals,dates,tf);
-    return{...s,vals:sv,_dates:sd};
-  });
-
-  const allY=sliced.flatMap(s=>s.vals.filter(v=>v!=null));
-  if(!allY.length)return null;
-  const mn=Math.min(...allY),mx=Math.max(...allY),rng=mx-mn||1;
-  const W=300,n=Math.max(...sliced.map(s=>s.vals.length));
-  if(n<2)return null;
+  /* Build sliced series — mémoïsé : évite de tout recalculer à chaque survol (hover) */
+  const _M=React.useMemo(function(){
+    const sliced=series.map(s=>{
+      const{vals:sv,dates:sd}=sliceByTF(s.vals,dates,tf);
+      return{...s,vals:sv,_dates:sd};
+    });
+    const allY=sliced.flatMap(s=>s.vals.filter(v=>v!=null));
+    if(!allY.length)return null;
+    const mn=Math.min(...allY),mx=Math.max(...allY),rng=mx-mn||1;
+    const n=Math.max(...sliced.map(s=>s.vals.length));
+    if(n<2)return null;
+    return{sliced,mn,mx,rng,n};
+  },[series,dates,tf]);
+  if(!_M)return null;
+  const{sliced,mn,mx,rng,n}=_M;
+  const W=300;
   const px=i=>i/(n-1)*W;
   const py=v=>h-((v-mn)/rng)*(h-6)+3;
 

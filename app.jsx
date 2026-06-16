@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.63";
+const APP_VERSION = "v27.64";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7702,6 +7702,30 @@ function PageMarket({ eur=false }){
   const [btcOpen,setBtcOpen]=useState({});
   const [btcChartOpen,setBtcChartOpen]=useState(true);
   const [btcTF,setBtcTF]=useState("ALL");
+  // Graphe BTC : calcul lourd (filtre ~2920 pts + 2 chemins SVG) mémoïsé → recalcul uniquement si la série ou la timeframe change.
+  var btcChartMemo = React.useMemo(function(){
+    var full = btcSig && btcSig._series;
+    if(!full || full.length<2) return null;
+    var nowT=full[full.length-1].t, cutoff;
+    if(btcTF==="ALL") cutoff=-Infinity;
+    else if(btcTF==="YTD") cutoff=Date.UTC(new Date(nowT).getUTCFullYear(),0,1);
+    else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
+    var S=full.filter(function(p){ return p.t>=cutoff; });
+    if(S.length<2) S=full.slice(-2);
+    var W=320, HH=215, padL=26, padR=20, padT=12, padB=20;
+    var t0=S[0].t, t1=S[S.length-1].t;
+    var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
+    var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
+    var X=function(t){ return padL+(t-t0)/((t1-t0)||1)*(W-padL-padR); };
+    var YP=function(pr){ var v=Math.log(pr)/Math.LN10; return padT+(pMax-v)/((pMax-pMin)||1)*(HH-padT-padB); };
+    var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
+    var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
+    var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
+    var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
+    var spanDays=(t1-t0)/864e5;
+    var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
+    return {W:W,HH:HH,padL:padL,padR:padR,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt};
+  }, [btcSig && btcSig._series, btcTF]);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
@@ -8248,26 +8272,11 @@ function PageMarket({ eur=false }){
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span><span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span></div>
-              {btcChartOpen && d._series && d._series.length>1 && (function(){
-                var full=d._series, nowT=full[full.length-1].t, cutoff;
-                if(btcTF==="ALL") cutoff=-Infinity;
-                else if(btcTF==="YTD") cutoff=Date.UTC(new Date(nowT).getUTCFullYear(),0,1);
-                else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
-                var S=full.filter(function(p){ return p.t>=cutoff; });
-                if(S.length<2) S=full.slice(-2);
-                var W=320, HH=215, padL=26, padR=20, padT=12, padB=20;
-                var t0=S[0].t, t1=S[S.length-1].t;
-                var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
-                var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
-                var X=function(t){ return padL+(t-t0)/((t1-t0)||1)*(W-padL-padR); };
-                var YP=function(pr){ var v=Math.log(pr)/Math.LN10; return padT+(pMax-v)/((pMax-pMin)||1)*(HH-padT-padB); };
-                var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
-                var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
-                var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
+              {btcChartOpen && btcChartMemo && (function(){
+                var m=btcChartMemo;
+                var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
+                var X=m.X, YP=m.YP, YS=m.YS, pricePath=m.pricePath, scorePath=m.scorePath, pTicks=m.pTicks, spanDays=m.spanDays, xt=m.xt;
                 var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
-                var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
-                var spanDays=(t1-t0)/864e5;
-                var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
                 var fmtX=function(t){ var dt=new Date(t); var dd=("0"+dt.getUTCDate()).slice(-2),mm=("0"+(dt.getUTCMonth()+1)).slice(-2); if(spanDays<=60) return dd+"/"+mm; if(spanDays<=800) return mm+"/"+String(dt.getUTCFullYear()).slice(2); return String(dt.getUTCFullYear()); };
                 var TFB=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
                 return (

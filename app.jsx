@@ -280,10 +280,7 @@ const EU_YAHOO_TICKERS = new Set(["AVIO.MI","AI.PA","GOLD.PA","JEDI.L","AIA"]);
 async function fetchYahooCF(symbol){
   // Via Cloudflare Worker — pas de CORS, supporte les bourses EU
   try{
-    const res = await fetch(`${CF_WORKER_URL}/yahoo?symbol=${encodeURIComponent(symbol)}`,{
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal: AbortSignal.timeout(10000),
-    });
+    const res = await cfGet("/yahoo?symbol="+encodeURIComponent(symbol),{timeout:10000});
     if(!res.ok) return null;
     const data = await res.json();
     return data?.price ?? null;
@@ -335,8 +332,7 @@ async function fetchYahooHist(symbol, fromDate, toDate){
   var range=pickRange(fromDate);
   var out=[];
   try{
-    var res=await fetch(`${CF_WORKER_URL}/yahoo-chart?symbol=${encodeURIComponent(symbol)}&interval=1d&range=${range}&no_logo=1`,
-      {headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(12000)});
+    var res=await cfGet("/yahoo-chart?symbol="+encodeURIComponent(symbol)+"&interval=1d&range="+range+"&no_logo=1",{timeout:12000});
     if(res.ok){
       var d=await res.json();
       var candles=(d&&d.candles)||[];
@@ -612,10 +608,7 @@ async function fetchAllPrices(){
   // 1) Appel groupé (1 requête pour tous les symboles)
   let got = {};
   try{
-    const res = await fetch(`${CF_WORKER_URL}/yahoo-quotes?symbols=${encodeURIComponent(symbols.join(","))}`, {
-      headers:{ "X-Auth-Key": CF_AUTH_KEY },
-      signal: AbortSignal.timeout(20000),
-    });
+    const res = await cfGet("/yahoo-quotes?symbols="+encodeURIComponent(symbols.join(",")),{timeout:20000});
     if(res.ok){ const d = await res.json(); got = (d && d.quotes) || {}; }
   }catch(e){ /* on bascule sur le fallback par-ticker ci-dessous */ }
   Object.keys(got).forEach(function(sym){
@@ -740,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.58";
+const APP_VERSION = "v27.60";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -757,15 +750,29 @@ const uid=()=>"t"+Date.now();
 /* ── Cloudflare Worker Storage ─────────────────────────────────── */
 const CF_WORKER_URL = "https://still-moon-9884.fgodbille.workers.dev";
 const CF_AUTH_KEY   = "gdb-sons-secret-2026";
+
+/* Helpers d'appel au worker : centralisent URL + cle + en-tetes (migration = 1 ligne).
+   Renvoient la promesse fetch brute (les .ok/.json()/.catch restent au site d'appel). */
+function cfFetch(path, opts){
+  opts = opts || {};
+  var headers = Object.assign({ "X-Auth-Key": CF_AUTH_KEY }, opts.headers || {});
+  var init = { headers: headers };
+  if(opts.method) init.method = opts.method;
+  if(opts.body !== undefined && opts.body !== null){
+    init.body = (typeof opts.body === "string") ? opts.body : JSON.stringify(opts.body);
+    if(!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  }
+  if(opts.timeout) init.signal = AbortSignal.timeout(opts.timeout);
+  return fetch(CF_WORKER_URL + path, init);
+}
+function cfGet(path, opts){ return cfFetch(path, opts); }
+function cfPost(path, body, opts){ opts = Object.assign({}, opts); opts.method = "POST"; opts.body = body; return cfFetch(path, opts); }
 const LS_KEY     = "gdb_sons_v8";
 
 /* Lit le Gist complet — retourne l'objet JSON ou null */
 async function cfRead(){
   try{
-    const res = await fetch(`${CF_WORKER_URL}/read`,{
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal: AbortSignal.timeout(8000),
-    });
+    const res = await cfGet("/read",{timeout:8000});
     if(!res.ok){
       const txt = await res.text().catch(()=>"");
       return {_error:true, status:res.status, statusText:res.statusText, body:txt.slice(0,200)};
@@ -780,12 +787,7 @@ const gistRead = cfRead;
 /* Écrit l'objet complet dans Cloudflare KV */
 async function cfWrite(obj){
   try{
-    const res = await fetch(`${CF_WORKER_URL}/write`,{
-      method:"POST",
-      headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},
-      body: JSON.stringify(obj),
-      signal: AbortSignal.timeout(10000),
-    });
+    const res = await cfPost("/write", obj, {timeout:10000});
     return res.ok;
   }catch{ return false; }
 }
@@ -793,10 +795,7 @@ const gistWrite = cfWrite;
 
 async function cfPing(){
   try{
-    const res = await fetch(`${CF_WORKER_URL}/ping`,{
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal: AbortSignal.timeout(5000),
-    });
+    const res = await cfGet("/ping",{timeout:5000});
     if(!res.ok) return {_error:true, status:res.status, statusText:res.statusText, body:""};
     const data = await res.json();
     return data?.ok ? null : {_error:true, status:200, statusText:"Réponse inattendue", body:JSON.stringify(data)};
@@ -927,12 +926,7 @@ function lsv9MarkDirty(key){ try{ const s=lsv9DirtyList(); if(s.indexOf(key)<0){
 function lsv9ClearDirty(key){ try{ const s=lsv9DirtyList().filter(function(k){return k!==key;}); localStorage.setItem(LSV9_DIRTY_FLAG, JSON.stringify(s)); }catch{} }
 // Pousse UNE base vers le Worker (même contrat que doSnapUpload)
 async function cfWriteBase(key, value){
-  const res = await fetch(`${CF_WORKER_URL}/write-bases`, {
-    method:"POST",
-    headers:{ "Content-Type":"application/json", "X-Auth-Key": CF_AUTH_KEY },
-    body: JSON.stringify({ [key]: value }),
-    signal: AbortSignal.timeout(15000),
-  });
+  const res = await cfPost("/write-bases", { [key]: value }, {timeout:15000});
   if(!res.ok) throw new Error("HTTP "+res.status);
   return true;
 }
@@ -1041,7 +1035,6 @@ async function save(k, v){
 /* ─── DAILY DATA from Excel Chart sheet ────────────────
    DD:        [date, wallet_crypto€, total_hors_immo€, BTC$, GDB.S$]
               col AO "TOTAL € hors immo" utilisée pour le total
-   DB:        [date, GDB&Sons, BTC, SP500, Nasdaq, ETH] base100=Jan2023
    GDBS:      [date, GDB.S actual$, GDB.C actual$]  daily from jan 2026
    PORT_B100: [date, portfolio_hors_immo_base100]  base=Jan2026=€313 653
 ─────────────────────────────────────────────────────── */
@@ -1072,18 +1065,6 @@ const fmtDate=d=>{
 /* Filter DD by timeframe key → returns filtered DD rows */
 function filterByTF(tf){
   const all=DD.filter(r=>r[0]<=TODAY);
-  if(tf==="ALL")return all;
-  const last=TODAY;
-  if(tf==="1W") return all.filter(r=>diffDays(last,r[0])<=7);
-  if(tf==="1M") return all.filter(r=>diffDays(last,r[0])<=31);
-  if(tf==="MTD")return all.filter(r=>r[0].slice(0,7)===TODAY.slice(0,7));
-  if(tf==="YTD")return all.filter(r=>r[0].startsWith(TODAY.slice(0,4)));
-  if(tf==="1Y") return all.filter(r=>diffDays(last,r[0])<=365);
-  if(tf==="2Y") return all.filter(r=>diffDays(last,r[0])<=730);
-  return all;
-}
-function filterDB(tf){
-  const all=DB.filter(r=>r[0]<=TODAY);
   if(tf==="ALL")return all;
   const last=TODAY;
   if(tf==="1W") return all.filter(r=>diffDays(last,r[0])<=7);
@@ -1501,7 +1482,7 @@ function saveDrawings(t, obj){
   try{ localStorage.setItem("gdb_drawings_v1", JSON.stringify(DRAWINGS)); }catch(e){}
   if(_drawSaveTimer) clearTimeout(_drawSaveTimer);
   _drawSaveTimer=setTimeout(function(){
-    fetch(CF_WORKER_URL+"/write-bases",{method:"POST",headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},body:JSON.stringify({gdb_drawings:DRAWINGS}),signal:AbortSignal.timeout(10000)}).catch(function(){});
+    cfPost("/write-bases",{gdb_drawings:DRAWINGS},{timeout:10000}).catch(function(){});
   }, 1200);
 }
 function mergeDrawingsKV(kvObj){
@@ -1614,7 +1595,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   useEffect(function(){
     if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setIns(null); return; }
     setInsL(true); setIns(null);
-    fetch(CF_WORKER_URL + "/market/insiders?symbol=" + encodeURIComponent(ticker), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+    cfGet("/market/insiders?symbol=" + encodeURIComponent(ticker), { timeout: 25000 })
       .then(function(r){ return r.json(); })
       .then(function(d){ setIns(d && d.trades ? d : { trades: [] }); setInsL(false); })
       .catch(function(){ setIns({ trades: [] }); setInsL(false); });
@@ -1622,14 +1603,14 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   useEffect(function(){
     var nm = data && data.name;
     if (!nm || cat === "Crypto" || /[-=]/.test(ticker)) { setHold13f(null); return; }
-    fetch(CF_WORKER_URL + "/market/13f?holder=" + encodeURIComponent(nm), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+    cfGet("/market/13f?holder=" + encodeURIComponent(nm), { timeout: 25000 })
       .then(function(r){ return r.json(); })
       .then(function(d){ setHold13f(d && d.funds ? d.funds : []); })
       .catch(function(){ setHold13f([]); });
   }, [data && data.name, cat]);
   useEffect(function(){
     if (!ticker || cat === "Crypto" || /[-=]/.test(ticker)) { setCongT(null); return; }
-    fetch(CF_WORKER_URL + "/market/congress?ticker=" + encodeURIComponent(ticker), { headers: { "X-Auth-Key": CF_AUTH_KEY }, signal: AbortSignal.timeout(25000) })
+    cfGet("/market/congress?ticker=" + encodeURIComponent(ticker), { timeout: 25000 })
       .then(function(r){ return r.json(); })
       .then(function(d){ setCongT(d && d.trades ? d.trades : []); })
       .catch(function(){ setCongT([]); });
@@ -1653,9 +1634,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         // ── Métriques : uniquement si pas encore chargées ──────────────────
         let meta = cgMeta;
         if(!meta){
-          const mUrl = CF_WORKER_URL + "/coingecko-coin?id=" + encodeURIComponent(cgId)
+          const mUrl = "/coingecko-coin?id=" + encodeURIComponent(cgId)
             + "&symbol=" + encodeURIComponent(ticker);
-          const mr = await fetch(mUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(15000) });
+          const mr = await cfGet(mUrl, { timeout:15000 });
           const md = await mr.json();
           if(md.error) throw new Error("CoinGecko meta ["+cgId+"] : "+md.error);
           meta = md;
@@ -1663,18 +1644,15 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           // Logo CoinGecko → ICON_DB.fmp
           if(md.logoUrl && !ICON_DB[ticker]?.fmp){
             setIconDb(ticker, { fmp: md.logoUrl });
-            fetch(CF_WORKER_URL+"/write-bases", {
-              method:"POST", headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-              body:JSON.stringify({gdb_icons:serializeIconDb()}), signal:AbortSignal.timeout(10000),
-            }).catch(()=>{});
+            cfPost("/write-bases", {gdb_icons:serializeIconDb()}, {timeout:10000}).catch(()=>{});
           }
         }
         // ── OHLC : Yahoo Finance (pas de rate-limit) ───────────────────────
         const { interval } = TF_CONFIG[tfIdx];
         const range = EXT_RANGE[tfIdx];
-        const oUrl = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
+        const oUrl = "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
           + "&interval=" + interval + "&range=" + range;
-        const or = await fetch(oUrl, { headers:{"X-Auth-Key":CF_AUTH_KEY}, signal:AbortSignal.timeout(10000) });
+        const or = await cfGet(oUrl, { timeout:10000 });
         const od = await or.json();
         if(od.error) throw new Error("Yahoo chart ["+yfSym+"] : "+od.error);
         // Fusionner métriques CoinGecko + candles Yahoo
@@ -1683,19 +1661,14 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         // ── Yahoo Finance path ──────────────────────────────────────────────
         const { interval } = TF_CONFIG[tfIdx];
         const range = EXT_RANGE[tfIdx];
-        const url = CF_WORKER_URL + "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
+        const url = "/yahoo-chart?symbol=" + encodeURIComponent(yfSym)
           + "&interval=" + interval + "&range=" + range;
-        const r = await fetch(url, { headers: { "X-Auth-Key": CF_AUTH_KEY } });
+        const r = await cfGet(url);
         const d = await r.json();
         if(d.error) throw new Error(d.error);
         if(d.logoUrl && !ICON_DB[ticker]?.fmp){
           setIconDb(ticker, { fmp: d.logoUrl });
-          fetch(CF_WORKER_URL+"/write-bases", {
-            method:"POST",
-            headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-            body: JSON.stringify({ gdb_icons: serializeIconDb() }),
-            signal: AbortSignal.timeout(10000),
-          }).catch(()=>{});
+          cfPost("/write-bases", { gdb_icons: serializeIconDb() }, {timeout:10000}).catch(()=>{});
         }
         setData(d);
       }
@@ -3633,12 +3606,7 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVer
     setSaving(true);
     setIconDb(ticker, patch);
     try {
-      await fetch(CF_WORKER_URL+"/write-bases", {
-        method:"POST",
-        headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-        body: JSON.stringify({ gdb_icons: serializeIconDb() }),
-        signal: AbortSignal.timeout(10000),
-      });
+      await cfPost("/write-bases", { gdb_icons: serializeIconDb() }, {timeout:10000});
     } catch(e){}
     setSaving(false);
     setOpen(false);
@@ -5742,10 +5710,7 @@ function YahooTickerSearch({onSelect}){
     if(!q2||q2.length<2){setResults([]);return;}
     setLoading(true); setError(null);
     // Passer par le worker Cloudflare qui n'a pas de contrainte CORS
-    fetch(CF_WORKER_URL+"/search?q="+encodeURIComponent(q2),{
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal:AbortSignal.timeout(8000),
-    })
+    cfGet("/search?q="+encodeURIComponent(q2),{timeout:8000})
       .then(function(r){return r.json();})
       .then(function(data){
         if(data.error) throw new Error(data.error);
@@ -5860,12 +5825,7 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
       if(form.newIcon) {
         setIconDb(resolvedTicker, { user: form.newIcon });
         // Sauvegarde immédiate en KV (sans attendre le snapshot)
-        fetch(CF_WORKER_URL+"/write-bases", {
-          method:"POST",
-          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-          body: JSON.stringify({ gdb_icons: serializeIconDb(), gdb_yfmap: YF_MAP }),
-          signal: AbortSignal.timeout(10000),
-        }).catch(()=>{});
+        cfPost("/write-bases", { gdb_icons: serializeIconDb(), gdb_yfmap: YF_MAP }, {timeout:10000}).catch(()=>{});
       }
     }
     // v23.20 — catégorie d'une VENTE = catégorie réelle de l'actif vendu.
@@ -6708,7 +6668,6 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_gc",        label:"GC_FULL (GDB.C historique)"},
     {key:"gdb_gsb",       label:"GS_B100_EXT"},
     {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
-    {key:"gdb_db",        label:"DB (base historique locale)"},
     {key:"gdb_cm",        label:"CRYPTO_MONTHLY"},
     {key:"gdb_sm",        label:"STOCKS_MONTHLY"},
     {key:"gdb_tm",        label:"TOTAL_MONTHLY"},
@@ -6743,11 +6702,7 @@ function CloudKeyList({data, onRefresh}){
     setDeleting(all ? "all" : keys[0]);
     setDelMsg(null);
     var body = all ? JSON.stringify({all:true}) : JSON.stringify({keys:keys});
-    fetch(CF_WORKER_URL+"/delete", {
-      method:"POST",
-      headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-      body: body,
-    })
+    cfPost("/delete", body)
       .then(function(r){ return r.json(); })
       .then(function(d){
         setDeleting(null);
@@ -7193,10 +7148,7 @@ function PageData(
   function doLoadCloud(){
     setCloudLoading(true);
     setCloudError(null);
-    fetch(CF_WORKER_URL+"/read", {
-      headers:{"X-Auth-Key":CF_AUTH_KEY},
-      signal: AbortSignal.timeout(10000),
-    })
+    cfGet("/read", {timeout:10000})
       .then(function(r){
         return r.json().then(function(d){
           if(!r.ok) throw new Error("HTTP "+r.status+" — "+(d.error||"erreur inconnue"));
@@ -7222,7 +7174,7 @@ function PageData(
   function saveEdit(kv){
     setEditSaving(true); setEditMsg(null);
     var payload={}; payload[kv]=buildTyped(editData);
-    fetch(CF_WORKER_URL+"/write-bases",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify(payload),signal:AbortSignal.timeout(15000)})
+    cfPost("/write-bases",payload,{timeout:15000})
       .then(function(r){return r.json();})
       .then(function(d){ setEditSaving(false);
         if(d&&d.ok){ setEditMsg("Enregistré ✓ — recharge l'app pour propager aux calculs."); }
@@ -7269,12 +7221,6 @@ function PageData(
       desc:"BTC/ETH/SP500/NASDAQ/MSCI World depuis 2020 ("+_BENCH.length+" points)",
       headers:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"],
       rows: _BENCH.slice().reverse().map(function(r){return[r[0],fmtF(r[1],0),fmtF(r[2],2),fmtF(r[3],2),fmtF(r[4],2),fmtF(r[5],2)];}),
-    },
-    "DB": {
-      label:"DB — Indices base 100",
-      desc:"Indices base 100 depuis 2023 ("+DB.length+" points)",
-      headers:["Date","Port","Idx1","Idx2","Idx3","Idx4","Idx5"],
-      rows: DB.slice().reverse().map(function(r){return[r[0]].concat(r.slice(1).map(function(v){return fmtF(v,1);}));}),
     },
     "PORTFOLIO": {
       label:"Portfolio — Vue unifiee",
@@ -7408,7 +7354,6 @@ function PageData(
     {name:"GC_FULL",     dbKey:"GC_FULL",      count:_GC.length,              last:getLast(_GC)},
     {name:"GS_B100_EXT", dbKey:"GS_B100",      count:_GSB.length,             last:getLast(_GSB)},
     {name:"BENCH_IDX",   dbKey:"BENCH_IDX",    count:_BENCH.length,           last:getLast(_BENCH)},
-    {name:"DB",          dbKey:"DB",           count:DB.length,               last:getLast(DB)},
     // Monthly
     {name:"CRYPTO_M",    dbKey:"MONTHLY",      count:countMonthly(_CM),       last:lastMonthly(_CM)},
     {name:"STOCKS_M",    dbKey:"STOCKS_M",     count:countMonthly(_SM),       last:lastMonthly(_SM)},
@@ -7442,7 +7387,7 @@ function PageData(
   var rst_safe=useState(function(){try{return localStorage.getItem("gdb_last_restore_safety")||"";}catch(e){return "";}}); var rstSafety=rst_safe[0]; var setRstSafety=rst_safe[1];
   function exportJSON(){
     setExpMsg("Export…");
-    fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY}})
+    cfGet("/read")
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
       .then(function(d){
         var blob = new Blob([JSON.stringify(d,null,2)], {type:"application/json"});
@@ -7461,7 +7406,7 @@ function PageData(
   function toggleRestore(){
     var nx=!rstOpen; setRstOpen(nx);
     if(nx && !rstDates.length){
-      fetch(CF_WORKER_URL+"/backups",{headers:{"X-Auth-Key":CF_AUTH_KEY}})
+      cfGet("/backups")
         .then(function(r){return r.json();})
         .then(function(d){ var bs=((d&&d.backups)||[]).slice().sort().reverse(); setRstDates(bs); if(bs.length) setRstSel(bs[0]); })
         .catch(function(){});
@@ -7479,7 +7424,7 @@ function PageData(
     if(rstMode==="cloud"){ if(!rstSel){ setRstMsg({type:"err",text:"Choisis une date"}); return; } body={date:rstSel}; }
     else { if(!rstBlob){ setRstMsg({type:"err",text:"Importe un fichier"}); return; } body={blob:rstBlob}; }
     setRstBusy(true); setRstMsg(null);
-    fetch(CF_WORKER_URL+"/restore",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)})
+    cfPost("/restore",body)
       .then(function(r){return r.json();})
       .then(function(d){
         setRstBusy(false);
@@ -7494,7 +7439,7 @@ function PageData(
   function undoRestore(){
     if(!rstSafety) return;
     setRstBusy(true); setRstMsg(null);
-    fetch(CF_WORKER_URL+"/restore",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({key:rstSafety})})
+    cfPost("/restore",{key:rstSafety})
       .then(function(r){return r.json();})
       .then(function(d){ setRstBusy(false); if(d&&d.ok){ setRstMsg({type:"ok",text:"Annulation effectu\u00e9e : "+d.restored+" table(s) restaur\u00e9es"}); } else { setRstMsg({type:"err",text:(d&&d.error)||"\u00c9chec"}); } })
       .catch(function(e){ setRstBusy(false); setRstMsg({type:"err",text:(e&&e.message)||"Erreur r\u00e9seau"}); });
@@ -7711,7 +7656,7 @@ function PageMarket({ eur=false }){
 
   function load(noCache){
     setLoading(true); setErr(null);
-    fetch(CF_WORKER_URL+"/market/overview"+(noCache?"?no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(22000)})
+    cfGet("/market/overview"+(noCache?"?no_cache=1":""),{timeout:22000})
       .then(function(r){return r.json();})
       .then(function(d){ if(d&&d.error){setErr(String(d.error));} else {setMkt(d);} setLoading(false); })
       .catch(function(e){ setErr((e&&e.message)||"Erreur reseau"); setLoading(false); });
@@ -7735,7 +7680,7 @@ function PageMarket({ eur=false }){
   const [btcTF,setBtcTF]=useState("ALL");
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
-    fetch(CF_WORKER_URL+p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
+    cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
       .then(function(r){return r.json();})
       .then(function(d){ if(d&&d.error){setEr(String(d.error));} else {setD(d);} setLd(false); })
       .catch(function(e){ setEr((e&&e.message)||"Erreur réseau"); setLd(false); });
@@ -7782,7 +7727,7 @@ function PageMarket({ eur=false }){
   }
   function loadBtc(noCache){
     setBtcSigL(true); setBtcSigE(null);
-    fetch(CF_WORKER_URL+"/btc-signals"+(noCache?"?no_cache=1":""),{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(25000)})
+    cfGet("/btc-signals"+(noCache?"?no_cache=1":""),{timeout:25000})
       .then(function(r){return r.json();})
       .then(function(d){
         if(d&&d.error){ setBtcSigE(String(d.error)); setBtcSigL(false); return; }
@@ -7806,11 +7751,11 @@ function PageMarket({ eur=false }){
           var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z]}); }
           setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series}));
           setBtcSigL(false);
-          if(ah!=null){ fetch(CF_WORKER_URL+"/btc-history-record",{method:"POST",headers:{"X-Auth-Key":CF_AUTH_KEY,"Content-Type":"application/json"},body:JSON.stringify({h:ah,reco:reco})}).catch(function(){}); }
+          if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
         Promise.all([
           fetchOnchainBtc(noCache).catch(function(){ return {}; }),
-          fetch(CF_WORKER_URL+"/btc-history-full",{headers:{"X-Auth-Key":CF_AUTH_KEY}}).then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
+          cfGet("/btc-history-full").then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
         ]).then(function(arr){ finish(arr[0]||{}, arr[1]); }).catch(function(){ finish({}, null); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
@@ -8674,7 +8619,7 @@ function App(){
         } : prev);
       }
       try {
-        const res=await fetch(CF_WORKER_URL+"/read",{headers:{"X-Auth-Key":CF_AUTH_KEY},signal:AbortSignal.timeout(8000)});
+        const res=await cfGet("/read",{timeout:8000});
         if(res.ok){
           const kv=await res.json();
           // Phase 1 v23.01 — seeder le miroir local v9 depuis KV (écriture additive)
@@ -8805,10 +8750,7 @@ function App(){
 
       // ── Charger les bases depuis Cloudflare KV (remplace les constantes statiques) ─
       try {
-        const res = await fetch(CF_WORKER_URL+"/read",{
-          headers:{"X-Auth-Key":CF_AUTH_KEY},
-          signal: AbortSignal.timeout(10000),
-        });
+        const res = await cfGet("/read",{timeout:10000});
         if(res.ok){
           const kvData = await res.json();
           // Phase 3 v23.05 — réconciliation des transactions (fusion par id).
@@ -9358,12 +9300,7 @@ function App(){
           gdb_yfmap: YF_MAP,
           gdb_icons: serializeIconDb(),
         };
-        const res = await fetch(CF_WORKER_URL+"/write-bases", {
-          method:"POST",
-          headers:{"Content-Type":"application/json","X-Auth-Key":CF_AUTH_KEY},
-          body: JSON.stringify(bases),
-          signal: AbortSignal.timeout(30000),
-        });
+        const res = await cfPost("/write-bases", bases, {timeout:30000});
         const data = await res.json();
         if(!res.ok) throw new Error("HTTP "+res.status+" — "+(data.error||""));
         const written = new Set(data.written||[]);

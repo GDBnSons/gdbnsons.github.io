@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.64";
+const APP_VERSION = "v27.66";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2960,12 +2960,15 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   // Valeurs live depuis EFF (ou CURRENT si pas encore refreshé)
   // v23.25 — point "aujourd'hui" du chart : lire EFF.gdbS/gdbC (valeur officielle posée
   // au boot/refresh/trade) et non calcGdbPrices(src) qui recalcule sur prix périmés.
+  const cur = eur ? "€" : "$";
+
+  // Bloc de données mémoïsé : filtres, base 100 et surtout portAbs (O(n²)) ne sont plus recalculés à chaque survol.
+  const _GM = React.useMemo(function(){
   const gcLive = src.gdbC || calcGdbPrices(src).gdbC;
   const gsLive = src.gdbS || calcGdbPrices(src).gdbS;
   const portTodayEUR = src.totalEUR;
   const portTodayUSD = src.totalUSD;
   const portToday = eur ? portTodayEUR : portTodayUSD;
-  const cur = eur ? "€" : "$";
 
   /* ── Cutoff dynamique ── */
   const cutoff = days => {
@@ -3024,6 +3027,10 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
 
   const p0abs = portAbs.find(v => v != null);
   const portB = portAbs.map(v => v != null && p0abs ? round2(v / p0abs * 100) : null);
+    return { gSlice:gSlice, dates:dates, n:n, gsB:gsB, gcB:gcB, portAbs:portAbs, portB:portB, p0abs:p0abs };
+  }, [src, tf, eur, _DD, _GDBS, chartData]);
+  if(!_GM) return null;
+  const { gSlice, dates, n, gsB, gcB, portAbs, portB, p0abs } = _GM;
 
   // Exposer portAbs au parent pour la sparkline
   useEffect(()=>{ onSparkData&&onSparkData(portAbs); }, [tf, portAbs.join(",")]); // eslint-disable-line
@@ -5030,6 +5037,8 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const _GDBS_data = liveGDBS || GDBS;
   const _BENCH_data = liveBench || BENCH_IDX;
   // BENCH_IDX cols: [date, BTC, ETH, SP500, NASDAQ, MSCI]
+  // Bloc de données mémoïsé (filtres, rebases, gsRaw en O(n²)) : indépendant du survol et du toggle de visibilité.
+  const _GCD = React.useMemo(function(){
   const lastGSB = _GSB_data.length > 0 ? _GSB_data[_GSB_data.length-1][0] : todayNC();
   const cutFn = days => { const d=new Date(new Date(lastGSB).getTime() - days*864e5); return d.toISOString().slice(0,10); };
   const TF_CUTS = {
@@ -5080,8 +5089,11 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
     {vals:msB,  col:"#EC4899", lbl:"MSCI"},
     {vals:spB,  col:"#6B7280", lbl:"S&P"},
   ];
-  const visSeries = SERIES.filter(sx=>!hiddenSeries[sx.lbl]);
   const anyVals = [...gcB,...gsB,...btcB,...spB,...nqB,...ethB,...msB].filter(v=>v!=null);
+    return { dates:dates, n:n, SERIES:SERIES, anyVals:anyVals, gcB:gcB, gsB:gsB, btcB:btcB, spB:spB, nqB:nqB, ethB:ethB, msB:msB };
+  }, [tf, _GSB_data, _GDBS_data, _BENCH_data, liveGC]);
+  const { dates, n, SERIES, anyVals, gcB, gsB, btcB, spB, nqB, ethB, msB } = _GCD;
+  const visSeries = SERIES.filter(sx=>!hiddenSeries[sx.lbl]);
   if(!n||!anyVals.length) return null;
   // Échelle Y adaptée aux SEULES courbes visibles
   const visVals = visSeries.flatMap(sx=>sx.vals).filter(v=>v!=null);

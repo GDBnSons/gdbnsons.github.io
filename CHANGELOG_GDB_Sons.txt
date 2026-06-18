@@ -180,92 +180,209 @@ v21.96   Debug Yahoo masqué si données présentes (qsStatus:200 + hasResult:tr
          ⭐ Base stable v21.96
 
 
-DISCUSSION 5 — Storage Engine v9 (v22.00–v22.18) — ABANDONNÉE
-─────────────────────────────────────────────────────────────
-Tentative d'un Storage Engine v9 : miroir localStorage des clés KV + merge
-bidirectionnel (séries temporelles, txns, dictionnaires, snapshots), séparation
-gdb_snapshots / gdb_dd, visualisation enrichie des bases, refonte du header.
-Série jugée instable (calculs portfolio cassés, BTC classé en stocks, refresh
-plantant, splash supprimé trop tôt) → retour définitif à v21.96 comme base stable.
-Concepts conservés pour reprise incrémentale ultérieure.
+DISCUSSION 5 — Storage Engine v9 & refonte architecture (v22.00–v22.18)
+─────────────────────────────────────────────────────────────────────────
+CONTEXTE
+  Les v22.xx ont tenté d'introduire un Storage Engine v9 (localStorage miroir de KV),
+  un merge bidirectionnel intelligent, et diverses améliorations UI.
+  Cette série s'est avérée instable — régression des calculs portfolio, BTC mal classé
+  dans stocks, refresh plantant, bases locales corrompues.
+  Décision finale : retour à v21.96 comme base stable pour la v23.
+
+v22.00   Storage Engine v9 introduit :
+         LS_V9_KEY = "gdb_sons_v9" — miroir exact des 15 clés KV
+         lsv9Read/Write/WriteMany, migrateV8toV9()
+         Phase 1 (local immédiat) + Phase 2 (KV async)
+         ⚠ Bloquait sur l'écran de chargement (bug format snapshots)
+
+v22.01   Merge bidirectionnel :
+         mergeTimeSeries (séries temporelles, union par date)
+         mergeTxns (union par id)
+         mergeDict (dictionnaires, KV gagne sur conflit)
+         mergeSnapshot (plus récent par date)
+         mergeAndSync : si local plus riche → push vers KV
+         ⚠ lsReadIcons manquant → crash au démarrage
+
+v22.02   Fix crash démarrage : normalizeDD() convertit [[]] → {} pour snapshots
+         finally { setReady(true) } garantit sortie du splash
+         ⚠ Onglet Data plantait (écran noir)
+
+v22.03   Séparation gdb_snapshots (objets {d,ao…}) ≠ gdb_dd (tableaux [[date,…]])
+         SK.chart = "gdb_snapshots" (distinct de "gdb_dd")
+         Correction de toutes les fonctions qui confondaient les deux formats
+         ⚠ gdb_snapshots absent des listes ALLOWED/KEYS worker
+
+v22.04   Worker v38 : gdb_snapshots ajouté dans KEYS (/read) et ALLOWED (/write-bases)
+         ⚠ Logs snapshot KV incorrects (format des bases mal lu)
+
+v22.05   Logs snapshot corrigés :
+         BENCH_IDX : r[1]/r[2] au lieu de .BTC/.ETH
+         GDBS : r[1]/r[2] au lieu de ["GDB.S"]/["GDB.C"]
+         Monthly : accès par année/mois objet au lieu de tableau
+         gdb_snapshots et localStorage confirmés dans les logs
+
+v22.06   Visualisation bases KV : fmtCell() remplace String()
+         Objets imbriqués : résumé lisible (ex: "€331k · 8 tickers")
+         Monthly renderer : déplie {année:{m:[],bom:[]}} en lignes
+         JSON brut affiché si aucune ligne exploitable
+
+v22.07   Suppression écran splash (choix local/KV) — démarrage direct
+         Header agrandi + version orange sous "GDB & Sons"
+         Boutons 28→32px avec couleurs thème
+         Fallback portfolio TradeModal sur CURRENT si EFF vide
+         ⚠ Blocs orphelins (setLocalData) → crash syntax
+
+v22.08   portfolioTickers réactif dans TradeModal (recalculé à chaque render)
+         Tri alphabétique de la liste des tickers
+         Vente totale → ticker disparaît du dropdown
+         Achat nouveau → ticker apparaît immédiatement
+
+v22.10   Retour base v22.05 stable pour les fixes UI
+         Debug Yahoo : fcStatus:404 ignoré si qsStatus:200 + hasResult:true
+         portfolioTickers réactif + trié alphabétiquement + fallback CURRENT
+
+v22.11   Header agrandi (padding 13px), boutons 32px, version sous titre
+         TickerModal : overlay opacité 0.75→0.96, fond panel opaque C.bg
+
+v22.12   Header sans bordure (borderBottom supprimé)
+         Refresh ⟳→↺, boutons droite 32px avec couleurs thème
+         €/$ → C.gold, 👁/🎨 → C.purple, border 1.5px
+
+v22.13   Visualisation bases : renderers spécifiques par type
+         Portfolio : résumé sous-objets lisible
+         Monthly : tableau année/mois/BOM/EOM/PNL
+
+v22.14   Phase 1 chargement portfolio sans condition de date stricte
+         Snapshot → localStorage : extraction correcte _portfolio.crypto/stocks/bank
+         Phase 2 KV : persist local après chargement KV
+         ⚠ Priorité KV absolue — perdait les données offline
+
+v22.15   Priorité portfolio : max(dateKV, dateLocal), KV gagne à égalité
+         Si local plus récent (offline) → push local vers KV
+         ⭐ Dernière version v22 jugée stable
+
+v22.16   LOCAL_SUMMARY : 17 bases (+Crypto, +Stocks, +Banque)
+         countMonthly/lastMonthly helpers
+         ⚠ Cassait les formules portfolio → abandonné
+
+v22.17   Reprise depuis v22.15. LOCAL_SUMMARY 17 bases (sans casser la logique)
+         dbKey intégré dans la définition des bases (plus de map séparé)
+
+v22.18   Fix crash refresh : setLocalData orphelin supprimé de handleRefresh
+         Nettoyage KV : cryptos mal classées dans stocks → déplacées vers crypto
+         ⚠ Toujours instable — BTC dans stocks, portfolio vide en local
+         ⚠ Régression majeure constatée → retour définitif à v21.96
+
+BILAN v22.xx
+  ✅ Concepts validés : Storage Engine v9, merge bidirectionnel, séparation
+     gdb_snapshots/gdb_dd, visualisation bases, header redesign
+  ❌ Instabilité persistante : données KV corrompues, BTC mal classé,
+     setLocalData orphelins, écran splash supprimé trop tôt
+  📋 À reprendre ultérieurement de manière incrémentale depuis une base propre
 
 
 WORKERS CLOUDFLARE
 ──────────────────
-v1–v26   Enrichissements progressifs (proxy Yahoo, FMP logos, ETF holdings,
+v1–v26  Enrichissements progressifs (proxy Yahoo, FMP logo, ETF holdings,
          crumb Yahoo, benchmarks, retry, CORS headers)
-v27–v38  ALLOWED/KEYS étendus (gdb_bench, gdb_icons, gdb_snapshots) ; endpoints
-         /coingecko-coin & /coingecko-ohlc (cache 1h) ; fix /search ; prix robuste
-v39–v42  Endpoints Market (/market/overview, /market/movers) + ratios financiers
-         (financialData) dans /yahoo
-v43–v51  /market/calendar : sources testées (FMP / Forex Factory / Trading
-         Economics mortes) → Nasdaq retenu ; drapeaux flagcdn ; impact par mots-clés
-v52–v54  /market/insiders : Form 4 SEC EDGAR (fix préfixe XSL → XML brut)
-v55–v57  /market/13f : tables 13F (namespaces tolérés), index byIssuer, décodage
-         entités HTML, résolution issuer→ticker
-v58–v64  /market/congress : House Stock Watcher (GitHub), matching strict des noms,
-         portefeuille estimé ; Sénat abandonné (Capitol Trades 503, eFD Akamai 403)
+v27     Base discussion 4
+v28     ALLOWED : gdb_bench + gdb_icons dans /write-bases
+v29     Entête de version dans le code
+v30     KEYS /read : gdb_icons + gdb_bench
+v31     Paramètre no_logo=1
+v32     Prix robuste depuis dernier candle, quoteType ETF/ETC fix
+v33     Endpoint /coingecko-coin (métriques + OHLC + news + dominance BTC)
+v34     _cgDebug dans réponse CoinGecko
+v35     Headers navigateur CoinGecko (anti-403), close OHLC marché fermé
+v36     /coingecko-coin avec cache KV 1h, /coingecko-ohlc séparé
+v37     Fix /search : chemin sData.quotes (nouvelle API Yahoo)
+v38     gdb_snapshots dans KEYS (/read) et ALLOWED (/write-bases)
 
 
-DISCUSSION 5 SUITE — Retour à la stabilité (v21.97 → v23.00)
+DISCUSSION 5 SUITE — Retour à la stabilité (v21.97–v23.00)
 ────────────────────────────────────────────────────────────
-v21.97   Retour à v21.96 + nouveau header (fond sans bordure, ↺, version orange
-         monospace, boutons 32px). Base stable de la v23.
-v23.00   Onglet Data exhaustif (17 bases dont Crypto/Stocks/Banque), helpers
-         mensuels, dbKey intégré, gdb_snapshots dans les clés cloud. Icône €/$
-         verte en mode EUR. Achat/vente : EUR/USD en bas de liste, tri alpha.
-         Pull-to-refresh plus réactif (seuil 50px).
+v21.97   Retour à v21.96. Nouveau design header :
+         Fond sans bordure (C.bg pur, backdropFilter blur)
+         ↺ remplace ⟳, boutons 28→32px, border 1.5px
+         Version "v21.97" en monospace orange sous "GDB & Sons"
+         €/$ → C.gold, 👁/🎨 → C.purple, tous 32×32px
+         ⭐ Base stable pour la v23
+
+v23.00   Nouvelle série stable depuis v21.97 :
+
+         ONGLET DATA — EXHAUSTIVITÉ
+         ▸ LOCAL_SUMMARY passe de 14 à 17 bases :
+           Crypto (src.crypto.items), Stocks (src.stocks.items),
+           Banque (src.bank.breakdown) ajoutées
+         ▸ countMonthly() : compte les mois réels (pas les années)
+           lastMonthly() : affiche "2026 MAI" au lieu de "2026 ans"
+         ▸ Compteur "17 bases" / "16 bases" affiché au-dessus de chaque liste
+         ▸ gdb_snapshots ajouté dans CLOUD_KEYS (remplace gdb_data obsolète)
+         ▸ dbKey intégré dans LOCAL_SUMMARY (suppression du map intermédiaire)
+
+         HEADER
+         ▸ Icône €/$ : verte (C.green) quand mode EUR actif, dorée sinon
+
+         MODULE ACHAT/VENTE
+         ▸ Clic "Nouveau ticker" → dropdown tickers masqué
+         ▸ EUR et USD ajoutés en bas de la liste des tickers (IBKR EUR/USD)
+         ▸ Liste triée alphabétiquement
+
+         PULL-TO-REFRESH
+         ▸ PULL_THRESHOLD : 70 → 50px (plus réactif)
+         ▸ scrollY===0 → scrollY<=2 (tolérance scroll résiduel)
+         ▸ Seuil preventDefault : dy>10 → dy>5 (détection plus tôt)
 
 
-DISCUSSION 6+ — Market, données externes & confort (v23 → v27.17)
-───────────────────────────────────────────────────────────────────
-ONGLET MARKET (nouveau — 7ᵉ onglet ❖)
-  Pouls       Fear & Greed (crypto + traditionnel), VIX, dominance BTC
-  Macro       Indices, taux (treasuries), forex
-  Secteurs    Heatmap des 11 secteurs (ETF sectoriels)
-  Top/Flop    Plus fortes hausses/baisses (CoinGecko crypto + FMP actions)
-  Calendrier  Calendrier économique (Nasdaq), filtre par impact, drapeaux flagcdn
+v23.x    FIABILISATION DU STOCKAGE (zéro perte, multi-appareils)
+         ▸ Miroir local v9 (lsv9) + saveBase : écriture locale immédiate,
+           puis push KV avec retry et marquage "dirty" si hors-ligne
+         ▸ Réconciliation au boot par FUSION PAR DATE de toutes les séries
+           (dd, gdbs, gc, gsb, bench) et des mensuels (cm/sm/tm)
+         ▸ Persistance des positions après un trade (modèle "état matérialisé")
+           — achats/ventes survivent au rechargement sans nouveau snapshot
 
-ANALYSE TITRE (TickerModal enrichi — accordéons)
-  Ratios       P/E, P/B, P/S, EV/EBITDA, PEG, FCF/EV, ROE, marges, dette nette,
-               liquidité, croissance — jauges colorées + explications néophytes
-  Initiés      Transactions d'initiés SEC EDGAR (Form 4), codes traduits
-  Détenu par   Fonds 13F détenant le titre
-  Congrès      « Tradé par le Congrès » : élus suivis ayant tradé ce titre
+v27      ONGLET MARKET
+         ▸ Macro (Fear & Greed, VIX, taux US, indices mondiaux, forex)
+         ▸ Secteurs (heatmap), Tops/Flops, Calendrier économique
+         ▸ Initiés (SEC EDGAR Form 4) + Hedge Funds (13F) + "Détenu par"
+         ▸ Ratios financiers dans l'analyse titre (P/E, EV/EBITDA, ROE…)
 
-HEDGE FUNDS (13F — SEC EDGAR)
-  Sous-onglet : 11 fonds suivis (Berkshire/Buffett, Scion/Burry, Pershing/Ackman,
-  Bridgewater/Dalio, Renaissance, Soros, Duquesne/Druckenmiller, Citadel/Griffin,
-  Millennium, Elliott/Singer, Situational Awareness/Aschenbrenner) → top positions,
-  poids %, valeur ; positions cliquables (résolution ticker).
+v27.4x   TABLEAU DE BORD BTC
+         ▸ Fiche sentiment : 20 indicateurs (cycle/valorisation, tendance,
+           on-chain, sentiment) → score agrégé pondéré OI + recommandation
+         ▸ Graphe historique double-axe : prix BTC (log) + score reconstitué
+           sur 10 ans (préfix-sums worker), sélecteur de période 1W→ALL
 
-CONGRÈS (STOCK Act)
-  Sous-onglet : trades déclarés des représentants suivis (House Stock Watcher),
-  achats/ventes colorés, montants ; vue « Portefeuille estimé » reconstituée
-  (net achats − ventes par titre). Sources Sénat (eFD, Capitol Trades) bloquées
-  en fetch serveur → Chambre uniquement.
+v27.5x   SAUVEGARDE & SÉCURITÉ
+         ▸ Restauration (cloud daté ou fichier) avec backup de sécurité préalable
+         ▸ Pare-feu d'écriture par origine (ALLOWED_WRITE_ORIGINS) côté worker
+         ▸ Versioning centralisé du cache (CACHE_KEYS)
+         ▸ Cron : pré-chauffage horaire + sauvegarde quotidienne dédupliquée
 
-CONFORT & RÉGLAGES
-  - Édition de cellule dans les bases time-series (DD, GDBS, GC, GS_B100,
-    BENCH_IDX) → réécriture KV via /write-bases.
-  - Accordéons (Hedge Funds, Congrès) repliés par défaut.
-  - v27.17 : menu Paramètres (engrenage) remplaçant l'icône palette → Thèmes,
-    Bases de données (ancien onglet Data), Changelog, À propos. Onglet Data
-    retiré de la barre du bas (6 onglets).
-  - v27.18 : pull-to-refresh désactivé ; fusion Pouls + Macro (Fear & Greed, VIX,
-    taux US, indices mondiaux + forex avec drapeaux flagcdn) ; bases locales/cloud
-    alignées (mêmes 20 bases, dont DB) ; correction des variations GDB.S/GDB.C dans
-    l'onglet GDB (même formule que Home).
+v27.6x   REFACTOR & CORRECTIONS
+         ▸ Helper d'appels worker unifié (cfGet/cfPost) — URL/clé centralisées
+         ▸ Mémoïsation des 4 graphes (survol fluide, moins de recalculs O(n²))
+         ▸ Tops/Flops actions filtrés > 500 M$ de capitalisation
+         ▸ Funding affiché en millions (M)
+         ▸ Persistance YF_MAP fiabilisée à l'ajout d'un nouveau ticker
+         ▸ Retrait de la base figée DB (gdb_db), redondante
+
+v28.00   VERSION SANCTUARISÉE
+         ▸ Base de référence stable : stockage fiabilisé, graphes optimisés,
+           onglet Market complet, tableau de bord BTC
+         ▸ Module achat/vente : Note + Contrepartie côte à côte
 
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 (Babel standalone) + JSX — GitHub Pages (noindex)
-Storage    localStorage (offline) + Cloudflare KV (cloud)
-APIs       Yahoo Finance (cours, news, fondamentaux), CoinGecko (crypto),
-           FMP (logos, movers), SEC EDGAR (Form 4, 13F), Nasdaq (calendrier éco),
-           House Stock Watcher (trades du Congrès)
-Worker     Cloudflare Worker v65 (proxy API, KV store, endpoints Market, no CORS)
+Storage    Miroir local v9 (lsv9) + Cloudflare KV — fusion par date, retry/dirty
+APIs       Yahoo Finance (cours, news, fondamentaux), FMP (logos),
+           CoinGecko (crypto), SEC EDGAR (initiés/13F), Nasdaq (calendrier),
+           bitcoin-data.com (on-chain BTC)
+Worker     Cloudflare Worker v93 (proxy API, KV, pare-feu d'écriture, cron)
+Version    v28.00
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
 BASES KV (19 clés)
@@ -285,6 +402,6 @@ BASES KV (19 clés)
   gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
   gdb_yfmap       YF_MAP {ticker: yahooSymbol}
   gdb_icons       ICON_DB {ticker: {user, fmp}}
-  gdb_inv         INV — mouvements de parts fonds [{date, fonds, holder, io, shares...}]
-  gdb_futures     FUTURES — trades futures clôturés
-  gdb_ibkr_annex  ANNEX — lignes IBKR (div./intérêts/taxes/frais)
+  gdb_inv         INV — parts investisseurs
+  gdb_futures     FUTURES — positions à terme
+  gdb_ibkr_annex  IBKR annexe

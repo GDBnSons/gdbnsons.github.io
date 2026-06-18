@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.68";
+const APP_VERSION = "v28.00";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8382,6 +8382,10 @@ function PageChangelog(){
     ["v27.14 — Édition des bases", "Édition de cellule dans les bases time-series (DD, GDBS, GC, GS_B100, BENCH_IDX) → réécriture KV via /write-bases."],
     ["v27.17 — Menu Paramètres", "Engrenage regroupant Thèmes, Bases de données, Changelog et À propos. Onglet Data retiré de la barre du bas (6 onglets)."],
     ["v27.18 — Ajustements", "Pull-to-refresh désactivé (déclenchements involontaires). Fusion Pouls + Macro en un seul Macro (Fear & Greed, VIX, taux US, indices mondiaux + forex avec drapeaux). Bases locales/cloud alignées (mêmes 20 bases). Correction des variations GDB.S/GDB.C dans l'onglet GDB (même formule que Home)."],
+    ["v27 — Tableau de bord BTC", "Fiche sentiment : 20 indicateurs (cycle/valorisation, tendance/momentum, on-chain, sentiment) → score agrégé pondéré OI + recommandation (Acheter→Vendre). Graphe historique double-axe : prix BTC (log) + score reconstitué sur 10 ans, sélecteur de période."],
+    ["v27 — Sauvegarde & sécurité", "Restauration des sauvegardes (cloud daté ou fichier, avec backup de sécurité préalable). Pare-feu d'écriture par origine côté worker. Versioning centralisé du cache. Pré-chauffage horaire + sauvegarde quotidienne dédupliquée (cron)."],
+    ["v27 — Refactor & performance", "Helper d'appels worker unifié (URL/clé centralisées). Mémoïsation des 4 graphes (survol fluide). Tops/Flops actions filtrés > 500 M$. Funding affiché en millions (M). Persistance YF_MAP fiabilisée à l'ajout d'un ticker. Retrait de la base figée DB."],
+    ["v28 — Version sanctuarisée", "Base de référence stable : stockage fiabilisé (fusion par date des séries, persistance des positions après un trade), graphes optimisés, onglet Market complet (Macro, Secteurs, Tops/Flops, Initiés & 13F, BTC). Module achat/vente affiné (Note + Contrepartie côte à côte)."],
   ];
   return (
     <div style={{paddingBottom:40}}>

@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v27.66";
+const APP_VERSION = "v27.68";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5839,11 +5839,11 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
     if(form.ticker==="NOUVEAU"){
       const yahooSym = (form.yahooSymbol||"").trim() || resolvedTicker;
       YF_MAP[resolvedTicker] = yahooSym;
-      if(form.newIcon) {
-        setIconDb(resolvedTicker, { user: form.newIcon });
-        // Sauvegarde immédiate en KV (sans attendre le snapshot)
-        cfPost("/write-bases", { gdb_icons: serializeIconDb(), gdb_yfmap: YF_MAP }, {timeout:10000}).catch(()=>{});
-      }
+      if(form.newIcon) setIconDb(resolvedTicker, { user: form.newIcon });
+      // v27.67 — FIX : persister YF_MAP TOUJOURS (avant, c'était imbriqué dans if(form.newIcon),
+      // donc un nouveau ticker sans icône n'était jamais sauvegardé → perdu au rechargement).
+      saveBase('gdb_yfmap', {...YF_MAP});
+      if(form.newIcon) saveBase('gdb_icons', serializeIconDb());
     }
     // v23.20 — catégorie d'une VENTE = catégorie réelle de l'actif vendu.
     // Sinon form.cat reste "Picking" → txn mal classée ET applyTrade ne route pas
@@ -6069,8 +6069,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
               }
               setForm({...form, currency:v, price:newPrice});
             }} options={["USD","EUR"]}/>
-            <div style={{gridColumn:"1/-1"}}><FI label="Note" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="DCA, TP..."/></div>
-            <div style={{gridColumn:"1/-1"}}>
+            <div style={{gridColumn:"1/-1",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <FI label="Note" value={form.note} onChange={v=>setForm({...form,note:v})} placeholder="DCA, TP..."/>
               <FS label="Contrepartie" value={form.bank||"Aucune"}
                 onChange={v=>setForm({...form,bank:v})}
                 options={["Aucune","BCI","Bourso","DeBlock","KuCoin","IBKR"]}/>

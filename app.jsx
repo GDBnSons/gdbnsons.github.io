@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.00";
+const APP_VERSION = "v28.01";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7127,8 +7127,115 @@ function PageLegend(
     </div>
   );
 }
+function IbkrImportModal({ txns, setTxns, annex, setAnnex, onClose }){
+  const [phase,setPhase]=React.useState("loading");
+  const [err,setErr]=React.useState("");
+  const [data,setData]=React.useState(null);
+  const [showList,setShowList]=React.useState(false);
+  const [busy,setBusy]=React.useState(false);
+  const [doneMsg,setDoneMsg]=React.useState("");
+
+  React.useEffect(function(){
+    let alive=true;
+    cfGet("/ibkr/flex").then(function(r){return r.json();}).then(function(d){
+      if(!alive) return;
+      if(!d||!d.ok){ setErr((d&&d.error)||"R\u00e9ponse invalide"); setPhase("error"); return; }
+      function sig(t){ return [t.date,(t.ticker||"").toUpperCase(),t.side,Math.round((t.qty||0)*1e6),Math.round((t.price||0)*1e4)].join("|"); }
+      var exIds=new Set((txns||[]).map(function(t){return t.id;}));
+      var exSig=new Set((txns||[]).filter(function(t){return t.src==="ibkr";}).map(sig));
+      var newTrades=(d.trades||[]).filter(function(t){ return !exIds.has(t.id)&&!exSig.has(sig(t)); });
+      function asig(a){ return [a.date,a.type,Math.round((a.amount||0)*100)].join("|"); }
+      var exAId=new Set((annex||[]).map(function(a){return a.id;}));
+      var exASig=new Set((annex||[]).map(asig));
+      var newAnnex=(d.annex||[]).filter(function(a){ return !exAId.has(a.id)&&!exASig.has(asig(a)); });
+      var newTickers=Array.from(new Set(newTrades.map(function(t){return t.ticker;}).filter(function(tk){return tk&&!YF_MAP[tk];})));
+      var byT={}; newTrades.forEach(function(t){ var sgn=t.side==="SELL"?-1:1; byT[t.ticker]=(byT[t.ticker]||0)+sgn*(t.qty||0); });
+      var netCash=newTrades.reduce(function(acc,t){ var sgn=t.side==="SELL"?1:-1; return acc+sgn*(t.qty||0)*(t.price||0); },0);
+      var comm=newTrades.reduce(function(acc,t){ return acc+(t.commission||0); },0);
+      setData({newTrades:newTrades,newAnnex:newAnnex,newTickers:newTickers,meta:d.meta||{},byTicker:byT,netCash:netCash,comm:comm});
+      setPhase("ready");
+    }).catch(function(e){ if(alive){ setErr((e&&e.message)||"Erreur r\u00e9seau"); setPhase("error"); } });
+    return function(){ alive=false; };
+  },[]);
+
+  function integrate(){
+    if(!data) return; setBusy(true);
+    try{
+      if(data.newTrades.length){ var nt=unionTxnsById(data.newTrades,txns||[]); setTxns(nt); save(SK.txns,nt); saveBase('gdb_txns',nt); }
+      if(data.newAnnex.length){ var na=unionTxnsById(data.newAnnex,annex||[]); setAnnex(na); saveBase('gdb_ibkr_annex',na); }
+      if(data.newTickers.length){ data.newTickers.forEach(function(tk){ if(!YF_MAP[tk]) YF_MAP[tk]=tk; }); saveBase('gdb_yfmap',Object.assign({},YF_MAP)); }
+      setDoneMsg(data.newTrades.length+" trade(s) \u00b7 "+data.newAnnex.length+" annexe"+(data.newTickers.length?" \u00b7 "+data.newTickers.length+" ticker(s)":""));
+      setPhase("done");
+    }catch(e){ setErr((e&&e.message)||"\u00c9chec de l'int\u00e9gration"); setPhase("error"); }
+    setBusy(false);
+  }
+
+  var money=function(n){ return (n>=0?"+":"")+Math.round(n).toLocaleString("fr-FR")+" $"; };
+
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:440,maxHeight:"86vh",overflowY:"auto",padding:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:15,fontWeight:800,color:C.text}}>{"\ud83d\udce5 Import IBKR"}</div>
+          <div onClick={onClose} style={{cursor:"pointer",color:C.gray,fontSize:20,fontWeight:700,lineHeight:1}}>{"\u00d7"}</div>
+        </div>
+
+        {phase==="loading" && <div style={{padding:"24px 0",textAlign:"center",color:C.gray,fontSize:13}}>{"R\u00e9cup\u00e9ration depuis IBKR\u2026"}</div>}
+
+        {phase==="error" && <div style={{padding:"12px",borderRadius:8,background:C.red+"22",color:C.red,fontSize:12,fontWeight:600}}>{err}</div>}
+
+        {phase==="ready" && data && (
+          (data.newTrades.length===0 && data.newAnnex.length===0)
+          ? <div style={{padding:"20px 0",textAlign:"center",color:C.green,fontSize:13,fontWeight:700}}>{"\u2713 Tout est d\u00e9j\u00e0 \u00e0 jour, rien \u00e0 int\u00e9grer."}</div>
+          : <div>
+              <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:2}}>{data.newTrades.length+" nouveau(x) trade(s) \u00b7 "+data.newAnnex.length+" annexe"}</div>
+              <div style={{fontSize:11,color:C.gray,marginBottom:10}}>{"P\u00e9riode "+(data.meta.fromDate||"?")+" \u2192 "+(data.meta.toDate||"?")}</div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                <div style={{background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:9,color:C.gray}}>{"Cash net"}</div><div style={{fontSize:13,fontWeight:700,color:data.netCash>=0?C.green:C.red}}>{money(data.netCash)}</div></div>
+                <div style={{background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:9,color:C.gray}}>{"Commissions"}</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{money(data.comm)}</div></div>
+              </div>
+
+              {Object.keys(data.byTicker).length>0 && <div style={{marginBottom:10}}>
+                <div style={{fontSize:10,color:C.gray,marginBottom:4}}>{"Net par ticker"}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {Object.keys(data.byTicker).map(function(tk){ var q=data.byTicker[tk]; return <span key={tk} style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:6,background:C.bg,color:q>=0?C.green:C.red}}>{tk+" "+(q>=0?"+":"")+(+q.toFixed(4))}</span>; })}
+                </div>
+              </div>}
+
+              {data.newTickers.length>0 && <div style={{marginBottom:10,fontSize:11,color:C.btc,fontWeight:700}}>{"\u2295 Nouveaux tickers \u2192 YF_MAP : "+data.newTickers.join(", ")}</div>}
+
+              <div onClick={function(){setShowList(!showList);}} style={{cursor:"pointer",fontSize:11,color:C.gray,marginBottom:6}}>{(showList?"\u25bc":"\u25b6")+" D\u00e9tail des trades"}</div>
+              {showList && <div style={{maxHeight:180,overflowY:"auto",marginBottom:10}}>
+                {data.newTrades.map(function(t,i){ return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11,padding:"3px 0",borderBottom:"1px solid "+C.border}}>
+                  <span style={{color:C.gray}}>{t.date}</span>
+                  <span style={{color:t.side==="SELL"?C.red:C.green,fontWeight:700}}>{t.side}</span>
+                  <span style={{color:C.text,fontWeight:700,flex:1,textAlign:"center"}}>{t.ticker}</span>
+                  <span style={{color:C.gray}}>{(+t.qty)+" @ "+(+t.price)}</span>
+                </div>; })}
+              </div>}
+
+              <div style={{fontSize:10,color:C.gray,marginBottom:10,lineHeight:1.4}}>{"Int\u00e9gration au registre (transactions + annexe). Le portefeuille n'est pas mouvement\u00e9 \u2014 cette option arrive \u00e0 l'\u00e9tape suivante."}</div>
+
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={onClose} style={{flex:1,padding:"9px 0",borderRadius:8,fontSize:12,fontWeight:700,border:"1px solid "+C.border,background:C.bg,color:C.text,cursor:"pointer"}}>{"Annuler"}</button>
+                <button onClick={integrate} disabled={busy} style={{flex:2,padding:"9px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.green,color:"#00150c",cursor:busy?"default":"pointer",opacity:busy?0.6:1}}>{busy?"\u2026":"Int\u00e9grer \u00e0 l'historique"}</button>
+              </div>
+            </div>
+        )}
+
+        {phase==="done" && <div style={{padding:"16px 0",textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:800,color:C.green,marginBottom:6}}>{"\u2713 Int\u00e9gr\u00e9"}</div>
+          <div style={{fontSize:12,color:C.text,marginBottom:14}}>{doneMsg}</div>
+          <button onClick={onClose} style={{width:"100%",padding:"9px 0",borderRadius:8,fontSize:12,fontWeight:700,border:"1px solid "+C.border,background:C.bg2,color:C.text,cursor:"pointer"}}>{"Fermer"}</button>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7500,6 +7607,10 @@ function PageData(
       <div style={{marginBottom:12}}>
         <button onClick={pushLocalToCloud} disabled={pushBusy} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:pushBusy?"default":"pointer",background:C.bg2,color:C.text,opacity:pushBusy?0.6:1}}>{pushBusy?"\u2026":"\u2601\ufe0f Pousser les bases locales manquantes vers le cloud"}</button>
         {pushMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:pushMsg.type==="ok"?C.green:C.red}}>{pushMsg.text}</div>}
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <button onClick={onImportIbkr} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\ud83d\udce5 Importer les trades IBKR"}</button>
       </div>
 
       <div style={{marginBottom:12}}>
@@ -8466,6 +8577,7 @@ function App(){
   const[ready,setReady]=useState(false);
   const[showSnap,setShowSnap]=useState(false);
   const[showTrade,setShowTrade]=useState(false);
+  const[ibkrOpen,setIbkrOpen]=useState(false);
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
   const[live,setLive]=useState(()=>{
@@ -9833,6 +9945,7 @@ function App(){
         </div>
       )}
       {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF} holders={invHolders} onInvestApplied={applyInvestment}/>}
+      {ibkrOpen&&<IbkrImportModal txns={txns} setTxns={setTxns} annex={liveIbkrAnnex} setAnnex={setLiveIbkrAnnex} onClose={()=>setIbkrOpen(false)}/>}
       {showGistDiag&&(
         <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowGistDiag(false)}>
@@ -9977,7 +10090,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

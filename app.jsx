@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.03";
+const APP_VERSION = "v28.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7160,8 +7160,9 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
       var pitems=(eff&&eff.portfolio&&eff.portfolio.items)?eff.portfolio.items:[];
       var appByT={};
       pitems.forEach(function(i){ var c=i.cat||""; if(EQ.indexOf(c)<0) return; appByT[(i.t||"").toUpperCase()]={ticker:(i.t||"").toUpperCase(),cat:c,qty:i.qty||0,pru:i.pa||0}; });
+      var eurUsd=(eff&&eff.eurUsd)||1.16;
       var ibByT={};
-      (d.positions||[]).forEach(function(p){ var t=(p.ticker||"").toUpperCase(); if(!t) return; ibByT[t]={ticker:t,qty:p.qty||0,pru:p.pru||0,mark:p.mark||0,assetCat:p.assetCat||""}; });
+      (d.positions||[]).forEach(function(p){ var t=(p.ticker||"").toUpperCase(); if(!t) return; var fx=(p.ccy==="EUR")?eurUsd:1; ibByT[t]={ticker:t,qty:p.qty||0,pru:(p.pru||0)*fx,mark:(p.mark||0)*fx,assetCat:p.assetCat||"",ccy:p.ccy||""}; });
       var allT={}; Object.keys(appByT).forEach(function(t){allT[t]=1;}); Object.keys(ibByT).forEach(function(t){allT[t]=1;});
       var posRows=Object.keys(allT).map(function(t){
         var a=appByT[t], ib=ibByT[t];
@@ -7267,7 +7268,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
             !data.hasPos
             ? <div style={{padding:"16px 8px",fontSize:12,color:C.gray,lineHeight:1.5}}>{"Aucune position renvoyée par IBKR. Ajoute la section Open Positions (niveau Summary) à ta requête Flex."}</div>
             : <div>
-                <div style={{fontSize:11,color:C.gray,marginBottom:8}}>{"Comparaison IBKR ↔ appli (qty + PRU). Tolérance : qty exacte, PRU ±0,5 %."}</div>
+                <div style={{fontSize:11,color:C.gray,marginBottom:8,lineHeight:1.4}}>{"Positions IBKR au "+(data.meta.toDate||"?")+" (clôture J-1). PRU converti en $ selon la devise IBKR · tolérance qty exacte, PRU ±0,5 %. Les achats/ventes du jour passent par l\u0027onglet Trades."}</div>
                 {posCount===0 && <div style={{padding:"14px 0",textAlign:"center",color:C.green,fontSize:13,fontWeight:700}}>{"✓ Positions alignées avec IBKR."}</div>}
 
                 {diverg.map(function(row){

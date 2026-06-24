@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.04";
+const APP_VERSION = "v28.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7170,7 +7170,10 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
         if(ib){ return {type:"ibkr",ticker:t,cat:(ib.assetCat==="CRYPTO"?"Crypto":"Picking"),ib:ib}; }
         return {type:"app",ticker:t,cat:a.cat,app:a};
       });
-      setData({newTrades:newTrades,newAnnex:newAnnex,newTickers:newTickers,meta:d.meta||{},byTicker:byT,netCash:netCash,comm:comm,posRows:posRows,hasPos:(d.positions||[]).length>0});
+      var pitemsFull=(eff&&eff.portfolio&&eff.portfolio.items)||[];
+      function findCash(cc){ var keys=cc==="EUR"?["EURO","EUR"]:["USD","DOLLAR"]; return pitemsFull.find(function(i){ if(i.cat!=="Cash") return false; var t=(i.t||"").toUpperCase(); return keys.some(function(k){return t===k||t.indexOf(k)>=0;}); }); }
+      var cashRows=(d.cash||[]).filter(function(c){return c.ccy==="EUR"||c.ccy==="USD";}).map(function(c){ var ap=findCash(c.ccy); var aq=ap?ap.qty:null; return {ccy:c.ccy,ticker:ap?ap.t:(c.ccy==="EUR"?"EURO":"USD"),appQty:aq,ibQty:c.ending,diverge:(ap?(Math.abs((aq||0)-c.ending)>1):true),exists:!!ap}; });
+      setData({newTrades:newTrades,newAnnex:newAnnex,newTickers:newTickers,meta:d.meta||{},byTicker:byT,netCash:netCash,comm:comm,posRows:posRows,hasPos:(d.positions||[]).length>0,cashRows:cashRows,hasCash:(d.cash||[]).length>0});
       setPhase("ready");
     }).catch(function(e){ if(alive){ setErr((e&&e.message)||"Erreur réseau"); setPhase("error"); } });
     return function(){ alive=false; };
@@ -7192,7 +7195,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
     var recon=[], adds=[];
     ups.forEach(function(u){
       if(u.action==="delete"){ recon.push({ticker:u.ticker,action:"delete"}); }
-      else { recon.push({ticker:u.ticker,cat:u.cat,qty:u.qty,pru:u.pru,mark:u.mark}); if(u.action==="create"&&!YF_MAP[u.ticker]) adds.push(u.ticker); }
+      else { recon.push({ticker:u.ticker,cat:u.cat,qty:u.qty,pru:u.pru,mark:u.mark,kind:u.kind,ccy:u.ccy}); if(u.action==="create"&&!YF_MAP[u.ticker]) adds.push(u.ticker); }
     });
     if(recon.length&&onReconcile) onReconcile(recon);
     if(adds.length){ adds.forEach(function(tk){YF_MAP[tk]=tk;}); saveBase('gdb_yfmap',Object.assign({},YF_MAP)); }
@@ -7210,7 +7213,8 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
   var appDel = data?data.posRows.filter(function(r){return r.type==="app"&&["Indices","Picking","Or"].indexOf(r.cat)>=0;}):[];
   var alignedN = data?data.posRows.filter(function(r){return r.type==="both"&&!r.diverge;}).length:0;
   var horsN = data?data.posRows.filter(function(r){return r.type==="app"&&r.cat==="Crypto";}).length:0;
-  var posCount = diverg.length+appDel.length;
+  var cashDiv = data?(data.cashRows||[]).filter(function(r){return r.diverge;}).length:0;
+  var posCount = diverg.length+appDel.length+cashDiv;
 
   return ReactDOM.createPortal(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:100000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -7314,7 +7318,26 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
                     : <button onClick={function(){ applyUpdates(diverg.map(function(row){ var isC=row.type==="ibkr"; var ct=isC?(createCat[row.ticker]||row.cat):row.cat; return {ticker:row.ticker,cat:ct,qty:row.ib.qty,pru:row.ib.pru,mark:row.ib.mark,action:isC?"create":"set"}; })); }} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{"Confirmer : aligner "+diverg.length+" ligne(s)"}</button>}
                 </div>}
 
-                <div style={{fontSize:10,color:C.gray,marginTop:6,lineHeight:1.4}}>{(alignedN?(alignedN+" alignée(s) · "):"")+horsN+" crypto hors IBKR · cash non comparé (mapping à venir)"}</div>
+                {data.hasCash && data.cashRows.length>0 && <div style={{marginTop:6}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>{"Cash IBKR"}</div>
+                  {data.cashRows.map(function(row){
+                    var done=applied[row.ticker]; var dv=row.diverge;
+                    return <div key={"c_"+row.ccy} style={{background:C.bg,border:"1px solid "+(done?C.green:C.border),borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <span style={{fontSize:13,fontWeight:800,color:C.text}}>{row.ccy+" "}<span style={{fontSize:9,color:C.gray,fontWeight:600}}>{"→ "+row.ticker}</span></span>
+                        {done ? <span style={{fontSize:11,color:C.green,fontWeight:700}}>{"✓ aligné"}</span>
+                          : (dv ? <button onClick={function(){ applyUpdates([{ticker:row.ticker,kind:"cash",ccy:row.ccy,qty:row.ibQty}]); }} style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{"Aligner ← IBKR"}</button>
+                            : <span style={{fontSize:11,color:C.green,fontWeight:700}}>{"✓"}</span>)}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11}}>
+                        <div style={{color:C.gray}}>{"Appli : "+(row.appQty!=null?nf(row.appQty):"—")+" "+row.ccy}</div>
+                        <div style={{color:C.text,fontWeight:700,textAlign:"right"}}>{"IBKR : "+nf(row.ibQty)+" "+row.ccy}</div>
+                      </div>
+                    </div>;
+                  })}
+                </div>}
+                {!data.hasCash && <div style={{fontSize:10,color:C.gray,marginTop:6,lineHeight:1.4}}>{"Cash non renvoyé — ajoute la section Cash Report à ta requête Flex pour comparer EUR/USD."}</div>}
+                <div style={{fontSize:10,color:C.gray,marginTop:6,lineHeight:1.4}}>{(alignedN?(alignedN+" alignée(s) · "):"")+horsN+" crypto hors IBKR"}</div>
               </div>
           )}
         </div>}
@@ -9719,6 +9742,15 @@ function App(){
       (updates||[]).forEach(function(u){
         const tU=(u.ticker||"").toUpperCase();
         if(u.action==="delete"){ items=items.filter(function(x){return (x.t||"").toUpperCase()!==tU;}); return; }
+        if(u.kind==="cash"){
+          const eurUsd=b.eurUsd||1/(b.usdEur||0.86);
+          let cidx=items.findIndex(function(x){return (x.t||"").toUpperCase()===tU;});
+          const isE=u.ccy==="EUR"; const lvc=isE?eurUsd:1;
+          const valc=Math.round(u.qty*lvc); const valEc=isE?Math.round(u.qty):Math.round(u.qty*usdEur);
+          if(cidx<0){ items.push({t:u.ticker,cat:"Cash",qty:u.qty,pa:isE?1.17:1,live:lvc,val:valc,pnl:0,pct:0,valEUR:valEc}); }
+          else{ items[cidx]={...items[cidx],qty:u.qty,live:lvc,val:valc,pnl:0,pct:0,valEUR:valEc}; }
+          return;
+        }
         let idx=items.findIndex(function(x){return (x.t||"").toUpperCase()===tU;});
         const lv=(idx>=0?(items[idx].live||u.mark||u.pru):(u.mark||u.pru))||0;
         const val=Math.round(u.qty*lv);

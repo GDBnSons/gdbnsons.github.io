@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.02";
+const APP_VERSION = "v28.03";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7136,6 +7136,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
   const [busy,setBusy]=React.useState(false);
   const [doneMsg,setDoneMsg]=React.useState("");
   const [applied,setApplied]=React.useState({});
+  const [createCat,setCreateCat]=React.useState({});
   const [confirmAll,setConfirmAll]=React.useState(false);
 
   React.useEffect(function(){
@@ -7155,18 +7156,17 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
       var byT={}; newTrades.forEach(function(t){ var sgn=t.side==="SELL"?-1:1; byT[t.ticker]=(byT[t.ticker]||0)+sgn*(t.qty||0); });
       var netCash=newTrades.reduce(function(acc,t){ var sgn=t.side==="SELL"?1:-1; return acc+sgn*(t.qty||0)*(t.price||0); },0);
       var comm=newTrades.reduce(function(acc,t){ return acc+(t.commission||0); },0);
-      var appPos=[].concat(
-        ((eff&&eff.crypto&&eff.crypto.items)||[]).map(function(i){return {ticker:(i.t||"").toUpperCase(),cat:"Crypto",qty:i.qty||0,pru:i.pa||0};}),
-        ((eff&&eff.stocks&&eff.stocks.items)||[]).map(function(i){return {ticker:(i.t||"").toUpperCase(),cat:i.cat||"Picking",qty:i.qty||0,pru:i.pa||0};})
-      );
-      var appByT={}; appPos.forEach(function(p){appByT[p.ticker]=p;});
-      var ibPos=(d.positions||[]).map(function(p){var c=p.assetCat==="CRYPTO"?"Crypto":"Picking"; return {ticker:(p.ticker||"").toUpperCase(),cat:c,qty:p.qty||0,pru:p.pru||0,mark:p.mark||0};});
-      var ibByT={}; ibPos.forEach(function(p){ibByT[p.ticker]=p;});
+      var EQ=["Crypto","Indices","Picking","Or"];
+      var pitems=(eff&&eff.portfolio&&eff.portfolio.items)?eff.portfolio.items:[];
+      var appByT={};
+      pitems.forEach(function(i){ var c=i.cat||""; if(EQ.indexOf(c)<0) return; appByT[(i.t||"").toUpperCase()]={ticker:(i.t||"").toUpperCase(),cat:c,qty:i.qty||0,pru:i.pa||0}; });
+      var ibByT={};
+      (d.positions||[]).forEach(function(p){ var t=(p.ticker||"").toUpperCase(); if(!t) return; ibByT[t]={ticker:t,qty:p.qty||0,pru:p.pru||0,mark:p.mark||0,assetCat:p.assetCat||""}; });
       var allT={}; Object.keys(appByT).forEach(function(t){allT[t]=1;}); Object.keys(ibByT).forEach(function(t){allT[t]=1;});
       var posRows=Object.keys(allT).map(function(t){
         var a=appByT[t], ib=ibByT[t];
-        if(a&&ib){ var qd=Math.abs(a.qty-ib.qty)>1e-6; var pd=a.pru>0?(Math.abs(a.pru-ib.pru)/a.pru>0.005):(ib.pru>0); return {type:"both",ticker:t,cat:ib.cat,app:a,ib:ib,diverge:(qd||pd)}; }
-        if(ib){ return {type:"ibkr",ticker:t,cat:ib.cat,ib:ib}; }
+        if(a&&ib){ var qd=Math.abs(a.qty-ib.qty)>1e-6; var pd=a.pru>0?(Math.abs(a.pru-ib.pru)/a.pru>0.005):(ib.pru>0); return {type:"both",ticker:t,cat:a.cat,app:a,ib:ib,diverge:(qd||pd)}; }
+        if(ib){ return {type:"ibkr",ticker:t,cat:(ib.assetCat==="CRYPTO"?"Crypto":"Picking"),ib:ib}; }
         return {type:"app",ticker:t,cat:a.cat,app:a};
       });
       setData({newTrades:newTrades,newAnnex:newAnnex,newTickers:newTickers,meta:d.meta||{},byTicker:byT,netCash:netCash,comm:comm,posRows:posRows,hasPos:(d.positions||[]).length>0});
@@ -7187,15 +7187,15 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
     setBusy(false);
   }
 
-  function applyRows(rows){
-    var us=[], adds=[];
-    rows.forEach(function(row){
-      us.push({ticker:row.ib.ticker,cat:row.cat,qty:row.ib.qty,pru:row.ib.pru,mark:row.ib.mark});
-      if(row.type==="ibkr"&&!YF_MAP[row.ticker]) adds.push(row.ticker);
+  function applyUpdates(ups){
+    var recon=[], adds=[];
+    ups.forEach(function(u){
+      if(u.action==="delete"){ recon.push({ticker:u.ticker,action:"delete"}); }
+      else { recon.push({ticker:u.ticker,cat:u.cat,qty:u.qty,pru:u.pru,mark:u.mark}); if(u.action==="create"&&!YF_MAP[u.ticker]) adds.push(u.ticker); }
     });
-    if(us.length && onReconcile) onReconcile(us);
+    if(recon.length&&onReconcile) onReconcile(recon);
     if(adds.length){ adds.forEach(function(tk){YF_MAP[tk]=tk;}); saveBase('gdb_yfmap',Object.assign({},YF_MAP)); }
-    setApplied(function(p){ var n=Object.assign({},p); us.forEach(function(u){n[u.ticker]=true;}); return n; });
+    setApplied(function(p){ var n=Object.assign({},p); ups.forEach(function(u){n[u.ticker]=true;}); return n; });
     setConfirmAll(false);
   }
 
@@ -7203,13 +7203,16 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
   var nf=function(n){ return (+(+n).toFixed(4)); };
   var pf=function(n){ return (+(+n).toFixed(2)); };
   var tabBtn=function(on){ return {flex:1,padding:"7px 0",borderRadius:8,fontSize:12,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:on?C.btc:C.bg,color:on?"#0a0a0a":C.text}; };
+  var CATS=["Crypto","Indices","Picking","Or"];
 
-  var actionable = data ? data.posRows.filter(function(r){ return (r.type==="both"&&r.diverge)||r.type==="ibkr"; }) : [];
-  var alignedN = data ? data.posRows.filter(function(r){ return r.type==="both"&&!r.diverge; }).length : 0;
-  var appOnlyN = data ? data.posRows.filter(function(r){ return r.type==="app"; }).length : 0;
+  var diverg = data?data.posRows.filter(function(r){return (r.type==="both"&&r.diverge)||r.type==="ibkr";}):[];
+  var appDel = data?data.posRows.filter(function(r){return r.type==="app"&&["Indices","Picking","Or"].indexOf(r.cat)>=0;}):[];
+  var alignedN = data?data.posRows.filter(function(r){return r.type==="both"&&!r.diverge;}).length:0;
+  var horsN = data?data.posRows.filter(function(r){return r.type==="app"&&r.cat==="Crypto";}).length:0;
+  var posCount = diverg.length+appDel.length;
 
-  return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+  return ReactDOM.createPortal(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:100000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:460,maxHeight:"88vh",overflowY:"auto",padding:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div style={{fontSize:15,fontWeight:800,color:C.text}}>{"📥 Import IBKR"}</div>
@@ -7227,7 +7230,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
         {phase==="ready" && data && <div>
           <div style={{display:"flex",gap:6,marginBottom:12}}>
             <button onClick={function(){setTab("trades");}} style={tabBtn(tab==="trades")}>{"Trades"+(data.newTrades.length?" ("+data.newTrades.length+")":"")}</button>
-            <button onClick={function(){setTab("positions");}} style={tabBtn(tab==="positions")}>{"Positions"+(actionable.length?" ("+actionable.length+")":"")}</button>
+            <button onClick={function(){setTab("positions");}} style={tabBtn(tab==="positions")}>{"Positions"+(posCount?" ("+posCount+")":"")}</button>
           </div>
 
           {tab==="trades" && (
@@ -7262,36 +7265,61 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 
           {tab==="positions" && (
             !data.hasPos
-            ? <div style={{padding:"16px 8px",fontSize:12,color:C.gray,lineHeight:1.5}}>{"Aucune position renvoyée par IBKR. Ajoute la section Open Positions (niveau Summary) à ta requête Flex pour activer la comparaison."}</div>
+            ? <div style={{padding:"16px 8px",fontSize:12,color:C.gray,lineHeight:1.5}}>{"Aucune position renvoyée par IBKR. Ajoute la section Open Positions (niveau Summary) à ta requête Flex."}</div>
             : <div>
                 <div style={{fontSize:11,color:C.gray,marginBottom:8}}>{"Comparaison IBKR ↔ appli (qty + PRU). Tolérance : qty exacte, PRU ±0,5 %."}</div>
-                {actionable.length===0 && <div style={{padding:"14px 0",textAlign:"center",color:C.green,fontSize:13,fontWeight:700}}>{"✓ Positions alignées avec IBKR."}</div>}
-                {actionable.map(function(row){
+                {posCount===0 && <div style={{padding:"14px 0",textAlign:"center",color:C.green,fontSize:13,fontWeight:700}}>{"✓ Positions alignées avec IBKR."}</div>}
+
+                {diverg.map(function(row){
                   var done=applied[row.ticker]; var ib=row.ib, ap=row.app;
+                  var isCreate=row.type==="ibkr";
+                  var cat=isCreate?(createCat[row.ticker]||row.cat):row.cat;
                   return <div key={row.ticker} style={{background:C.bg,border:"1px solid "+(done?C.green:C.border),borderRadius:8,padding:"8px 10px",marginBottom:8}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <span style={{fontSize:13,fontWeight:800,color:C.text}}>{row.ticker+" "}<span style={{fontSize:9,color:C.gray,fontWeight:600}}>{row.type==="ibkr"?"(IBKR seul)":row.cat}</span></span>
+                      <span style={{fontSize:13,fontWeight:800,color:C.text}}>{row.ticker+" "}<span style={{fontSize:9,color:C.gray,fontWeight:600}}>{isCreate?"(IBKR seul)":cat}</span></span>
                       {done
-                        ? <span style={{fontSize:11,color:C.green,fontWeight:700}}>{"✓ aligné"}</span>
-                        : <button onClick={function(){applyRows([row]);}} style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{row.type==="ibkr"?"Créer":"Aligner ← IBKR"}</button>}
+                        ? <span style={{fontSize:11,color:C.green,fontWeight:700}}>{"✓ "+(isCreate?"créé":"aligné")}</span>
+                        : <button onClick={function(){ applyUpdates([{ticker:row.ticker,cat:cat,qty:ib.qty,pru:ib.pru,mark:ib.mark,action:isCreate?"create":"set"}]); }} style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{isCreate?"Créer":"Aligner ← IBKR"}</button>}
                     </div>
+                    {isCreate&&!done&&<div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:10,color:C.gray}}>{"Catégorie :"}</span>
+                      <select value={cat} onChange={function(e){var v=e.target.value; setCreateCat(function(p){var n=Object.assign({},p); n[row.ticker]=v; return n;});}} style={{background:C.bg2,color:C.text,border:"1px solid "+C.border,borderRadius:6,fontSize:11,padding:"3px 6px"}}>
+                        {CATS.map(function(c){return <option key={c} value={c}>{c}</option>;})}
+                      </select>
+                    </div>}
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11}}>
                       <div style={{color:C.gray}}>{"Appli : "+(ap?(nf(ap.qty)+" @ "+pf(ap.pru)):"—")}</div>
                       <div style={{color:C.text,fontWeight:700,textAlign:"right"}}>{"IBKR : "+nf(ib.qty)+" @ "+pf(ib.pru)}</div>
                     </div>
                   </div>;
                 })}
-                {actionable.length>0 && <div style={{marginTop:4,marginBottom:8}}>
+
+                {appDel.map(function(row){
+                  var done=applied[row.ticker]; var ap=row.app;
+                  return <div key={row.ticker} style={{background:C.bg,border:"1px solid "+(done?C.green:C.orange),borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                      <span style={{fontSize:13,fontWeight:800,color:C.text}}>{row.ticker+" "}<span style={{fontSize:9,color:C.gray,fontWeight:600}}>{row.cat+" · absent IBKR"}</span></span>
+                      {done
+                        ? <span style={{fontSize:11,color:C.green,fontWeight:700}}>{"✓ supprimé"}</span>
+                        : <button onClick={function(){ applyUpdates([{ticker:row.ticker,action:"delete"}]); }} style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,border:"1px solid "+C.red,background:"transparent",color:C.red,cursor:"pointer"}}>{"Supprimer"}</button>}
+                    </div>
+                    <div style={{fontSize:11,color:C.gray}}>{"Appli : "+nf(ap.qty)+" @ "+pf(ap.pru)+" — plus chez IBKR"}</div>
+                  </div>;
+                })}
+
+                {diverg.length>0 && <div style={{marginTop:4,marginBottom:8}}>
                   {!confirmAll
-                    ? <button onClick={function(){setConfirmAll(true);}} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:700,border:"1px solid "+C.border,background:C.bg2,color:C.text,cursor:"pointer"}}>{"Tout aligner sur IBKR"}</button>
-                    : <button onClick={function(){applyRows(actionable);}} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{"Confirmer : aligner "+actionable.length+" ligne(s) sur IBKR"}</button>}
+                    ? <button onClick={function(){setConfirmAll(true);}} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:700,border:"1px solid "+C.border,background:C.bg2,color:C.text,cursor:"pointer"}}>{"Tout aligner sur IBKR ("+diverg.length+")"}</button>
+                    : <button onClick={function(){ applyUpdates(diverg.map(function(row){ var isC=row.type==="ibkr"; var ct=isC?(createCat[row.ticker]||row.cat):row.cat; return {ticker:row.ticker,cat:ct,qty:row.ib.qty,pru:row.ib.pru,mark:row.ib.mark,action:isC?"create":"set"}; })); }} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.btc,color:"#0a0a0a",cursor:"pointer"}}>{"Confirmer : aligner "+diverg.length+" ligne(s)"}</button>}
                 </div>}
-                <div style={{fontSize:10,color:C.gray,marginTop:6,lineHeight:1.4}}>{(alignedN?(alignedN+" alignée(s) · "):"")+appOnlyN+" hors IBKR (crypto/cash autres plateformes — non touchées)"}</div>
+
+                <div style={{fontSize:10,color:C.gray,marginTop:6,lineHeight:1.4}}>{(alignedN?(alignedN+" alignée(s) · "):"")+horsN+" crypto hors IBKR · cash non comparé (mapping à venir)"}</div>
               </div>
           )}
         </div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -9685,20 +9713,30 @@ function App(){
   const reconcilePositions=useCallback(function(updates){
     setLive(function(prev){
       const b=prev||CURRENT;
-      let cryptoItems=b.crypto.items.map(function(i){return {...i};});
-      let stocksItems=b.stocks.items.map(function(i){return {...i};});
+      const usdEur=b.usdEur||0.86;
+      let items=((b.portfolio&&b.portfolio.items)?b.portfolio.items:buildPortfolio(b).items).map(function(i){return {...i};});
       (updates||[]).forEach(function(u){
-        const isC=u.cat==="Crypto";
-        const arr=isC?cryptoItems:stocksItems;
         const tU=(u.ticker||"").toUpperCase();
-        let idx=arr.findIndex(function(x){return (x.t||"").toUpperCase()===tU;});
-        if(idx<0){ const lv=u.mark||u.pru||0; arr.push({t:u.ticker,cat:isC?"Crypto":"Picking",qty:u.qty,pa:u.pru,live:lv,val:u.qty*lv,pnl:(lv-u.pru)*u.qty,pct:u.pru?((lv-u.pru)/u.pru*100):0}); }
-        else{ const it={...arr[idx]}; it.qty=u.qty; it.pa=u.pru; const lv=it.live||u.mark||u.pru||0; it.val=u.qty*lv; it.pnl=(lv-u.pru)*u.qty; it.pct=u.pru?((lv-u.pru)/u.pru*100):0; arr[idx]=it; }
+        if(u.action==="delete"){ items=items.filter(function(x){return (x.t||"").toUpperCase()!==tU;}); return; }
+        let idx=items.findIndex(function(x){return (x.t||"").toUpperCase()===tU;});
+        const lv=(idx>=0?(items[idx].live||u.mark||u.pru):(u.mark||u.pru))||0;
+        const val=Math.round(u.qty*lv);
+        const pnl=Math.round((lv-u.pru)*u.qty);
+        const pct=u.pru?parseFloat(((lv-u.pru)/u.pru).toFixed(4)):0;
+        const valEUR=Math.round(val*usdEur);
+        if(idx<0){ items.push({t:u.ticker,cat:u.cat||"Picking",qty:u.qty,pa:u.pru,live:lv,val:val,pnl:pnl,pct:pct,valEUR:valEUR}); }
+        else{ items[idx]={...items[idx],cat:u.cat||items[idx].cat,qty:u.qty,pa:u.pru,live:lv,val:val,pnl:pnl,pct:pct,valEUR:valEUR}; }
       });
-      return {...b, crypto:{...b.crypto,items:cryptoItems}, stocks:{...b.stocks,items:stocksItems}, savedAt:Date.now()};
+      const cryptoItems=items.filter(function(x){return x.cat==="Crypto";}).map(function(x){return {...x};});
+      const stocksItems=items.filter(function(x){return x.cat!=="Crypto"&&x.cat!=="Cash Matelas";}).map(function(x){return {...x};});
+      return {...b,
+        portfolio:{...(b.portfolio||{}),items:items},
+        crypto:{...(b.crypto||{}),items:cryptoItems,total:cryptoItems.reduce(function(ss,x){return ss+(x.val||0);},0)},
+        stocks:{...(b.stocks||{}),items:stocksItems,total:stocksItems.reduce(function(ss,x){return ss+(x.val||0);},0)},
+        savedAt:Date.now()};
     });
   },[]);
-  const applyTradeToEFF=useCallback(trade=>{
+    const applyTradeToEFF=useCallback(trade=>{
     setLive(prev=>{
       const base = prev||CURRENT;
       if(trade._directBank){

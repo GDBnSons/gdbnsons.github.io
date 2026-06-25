@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.06";
+const APP_VERSION = "v28.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1201,7 +1201,7 @@ function LineChart({series,dates,h=80,legend,defaultTF="ALL",hideTF=false,unit="
           })}
           {(markers||[]).filter(function(m){return m && Math.abs(m.i-hover.i)<=1;}).map(function(m,mi){
             return (<div key={"mt"+mi} style={{display:"flex",justifyContent:"space-between",gap:14,marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
-              <span style={{fontSize:10,fontWeight:800,color:m.color}}>{m.side==="BUY"?"Achat":"Vente"}{m.qtyTxt?(" "+m.qtyTxt):""}</span>
+              <span style={{fontSize:10,fontWeight:800,color:m.color}}>{m.side==="BUY"?"Achat":"Vente"}{m.qtyTxt?(" "+m.qtyTxt):""}{m.priceTxt?(" "+m.priceTxt):""}</span>
               <span style={{fontSize:11,fontWeight:800,color:m.color}}>{m.amtTxt||""}</span></div>);
           })}
         </div>
@@ -6866,6 +6866,7 @@ function computeClosedTrades(txns){
   var byT={};
   (txns||[]).forEach(function(t){
     if(!t||!t.ticker||STABLE[t.ticker]) return;
+    if(t.assetCat==="CASH"||/^[A-Z]{3}\.[A-Z]{3}$/.test(t.ticker)) return; // exclure Forex (EUR.USD)
     (byT[t.ticker]=byT[t.ticker]||[]).push(t);
   });
   var closed=[];
@@ -6876,7 +6877,7 @@ function computeClosedTrades(txns){
     });
     var pos=0, cost=0, cyc=null;
     rows.forEach(function(t){
-      var q=+t.qty||0, v=+t.valueUSD||0;
+      var q=+t.qty||0, v=Math.abs(+t.valueUSD||0);
       if(t.side==="BUY"){
         if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
         pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:+t.price||0,valueUSD:v,fee:(+t.fee||0)+(+t.commission||0)});
@@ -6967,7 +6968,8 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
       const r=3 + 5*Math.sqrt(Math.min(1, maxV?val/maxV:0));
       return {i:i, v:closes[i], color:(fl.side==="BUY"?C.green:C.red), r:r, side:fl.side,
         qtyTxt:(fl.qty!=null && fl.qty!=="" ? Number(fl.qty).toLocaleString("fr-FR",{maximumFractionDigits:4}) : ""),
-        amtTxt:(val ? "$"+Math.round(val).toLocaleString("fr-FR") : "")};
+        amtTxt:(val ? "$"+Math.round(val).toLocaleString("fr-FR") : ""),
+        priceTxt:(fl.price ? ("@ $"+Number(fl.price).toLocaleString("fr-FR",{maximumFractionDigits:(fl.price<10?4:2)})) : "")};
     });
   }
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
@@ -7127,6 +7129,22 @@ function PageLegend(
     </div>
   );
 }
+function exportBasesJSON(){
+  return cfGet("/read")
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(d){
+      var blob = new Blob([JSON.stringify(d,null,2)], {type:"application/json"});
+      var u = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      var dt = new Date();
+      var stamp = dt.getFullYear()+"-"+("0"+(dt.getMonth()+1)).slice(-2)+"-"+("0"+dt.getDate()).slice(-2);
+      a.href = u; a.download = "gdb-sons-backup-"+stamp+".json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(u); }, 1000);
+    })
+    .catch(function(e){ alert("Erreur export : "+((e&&e.message)||"")); });
+}
+
 function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onClose }){
   const [tab,setTab]=React.useState("trades");
   const [phase,setPhase]=React.useState("loading");
@@ -7348,7 +7366,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 }
 
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, autoRestore}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7613,6 +7631,20 @@ function PageData(
 
   var exp_state = useState(null); var expMsg = exp_state[0]; var setExpMsg = exp_state[1];
   var rst_open=useState(false); var rstOpen=rst_open[0]; var setRstOpen=rst_open[1];
+  useEffect(function(){ if(autoRestore) setRstOpen(true); },[autoRestore]);
+  var yf_open=useState(false); var yfOpen=yf_open[0]; var setYfOpen=yf_open[1];
+  var yf_edit=useState(function(){return Object.assign({},YF_MAP);}); var yfEdit=yf_edit[0]; var setYfEdit=yf_edit[1];
+  var yf_filter=useState(""); var yfFilter=yf_filter[0]; var setYfFilter=yf_filter[1];
+  var yf_msg=useState(null); var yfMsg=yf_msg[0]; var setYfMsg=yf_msg[1];
+  var yf_new=useState({t:"",s:""}); var yfNew=yf_new[0]; var setYfNew=yf_new[1];
+  function yfSave(){
+    Object.keys(YF_MAP).forEach(function(k){ if(!(k in yfEdit)) delete YF_MAP[k]; });
+    Object.keys(yfEdit).forEach(function(k){ YF_MAP[k]=yfEdit[k]; });
+    saveBase('gdb_yfmap', Object.assign({},YF_MAP));
+    setYfMsg({type:"ok",text:"✓ YF_MAP enregistrée"}); setTimeout(function(){setYfMsg(null);},3000);
+  }
+  function yfAdd(){ var t=(yfNew.t||"").trim().toUpperCase(); var sy=(yfNew.s||"").trim(); if(!t||!sy) return; setYfEdit(function(p){var n=Object.assign({},p);n[t]=sy;return n;}); setYfNew({t:"",s:""}); }
+  function yfDel(k){ setYfEdit(function(p){var n=Object.assign({},p);delete n[k];return n;}); }
   var rst_dates=useState([]); var rstDates=rst_dates[0]; var setRstDates=rst_dates[1];
   var rst_mode=useState("cloud"); var rstMode=rst_mode[0]; var setRstMode=rst_mode[1];
   var rst_sel=useState(""); var rstSel=rst_sel[0]; var setRstSel=rst_sel[1];
@@ -7724,6 +7756,29 @@ function PageData(
 
       <div style={{marginBottom:12}}>
         <button onClick={onImportIbkr} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"\ud83d\udce5 Importer les trades IBKR"}</button>
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <button onClick={function(){setYfOpen(!yfOpen);}} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.border,cursor:"pointer",background:C.bg2,color:C.text}}>{"🗺️ YF_MAP — symboles Yahoo "+(yfOpen?"▲":"▼")}</button>
+        {yfOpen && <div style={{marginTop:8,padding:"10px",background:C.bg2,borderRadius:8,border:"1px solid "+C.border}}>
+          <input placeholder="Filtrer un ticker…" value={yfFilter} onChange={function(e){setYfFilter(e.target.value);}} style={{width:"100%",padding:"7px 9px",borderRadius:6,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12,boxSizing:"border-box"}}/>
+          <div style={{maxHeight:280,overflowY:"auto",marginTop:8}}>
+            {Object.keys(yfEdit).filter(function(k){return !yfFilter||k.toUpperCase().indexOf(yfFilter.toUpperCase())>=0;}).sort().map(function(k){
+              return <div key={k} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+                <span style={{fontSize:11,fontWeight:700,color:C.text,width:84,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k}</span>
+                <input value={yfEdit[k]} onChange={function(e){var v=e.target.value; setYfEdit(function(p){var n=Object.assign({},p);n[k]=v;return n;});}} style={{flex:1,padding:"5px 8px",borderRadius:6,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11,boxSizing:"border-box"}}/>
+                <button onClick={function(){yfDel(k);}} style={{width:24,height:24,borderRadius:6,border:"1px solid "+C.red,background:"transparent",color:C.red,cursor:"pointer",fontSize:13,lineHeight:1,flexShrink:0}}>{"×"}</button>
+              </div>;
+            })}
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:8}}>
+            <input placeholder="Ticker" value={yfNew.t} onChange={function(e){setYfNew(Object.assign({},yfNew,{t:e.target.value}));}} style={{width:84,padding:"5px 8px",borderRadius:6,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11,boxSizing:"border-box"}}/>
+            <input placeholder="Symbole Yahoo" value={yfNew.s} onChange={function(e){setYfNew(Object.assign({},yfNew,{s:e.target.value}));}} style={{flex:1,padding:"5px 8px",borderRadius:6,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11,boxSizing:"border-box"}}/>
+            <button onClick={yfAdd} style={{width:24,height:24,borderRadius:6,border:"1px solid "+C.border,background:C.bg,color:C.text,cursor:"pointer",fontSize:14,lineHeight:1,flexShrink:0}}>{"+"}</button>
+          </div>
+          <button onClick={yfSave} style={{width:"100%",marginTop:8,padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.green,color:"#00150c",cursor:"pointer"}}>{"Enregistrer YF_MAP"}</button>
+          {yfMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:yfMsg.type==="ok"?C.green:C.red}}>{yfMsg.text}</div>}
+        </div>}
       </div>
 
       <div style={{marginBottom:12}}>
@@ -8729,6 +8784,7 @@ function App(){
   });
   const[showTheme,setShowTheme]=useState(false);
   const[showSettings,setShowSettings]=useState(false);
+  const[dataRestore,setDataRestore]=useState(false);
   const[settingsPage,setSettingsPage]=useState(null); // null | "data" | "changelog" | "about"
   // ── Écran de démarrage ──────────────────────────────────────────────────
   const[startScreen,setStartScreen]=useState(true); // afficher l'écran de choix
@@ -10214,7 +10270,10 @@ function App(){
             <div style={{width:230,marginRight:14,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",boxShadow:"0 10px 30px rgba(0,0,0,.45)"}}>
               {[
                 ["🎨","Thèmes",function(){ setShowSettings(false); setShowTheme(true); }],
-                ["🗄️","Bases de données",function(){ setShowSettings(false); setSettingsPage("data"); }],
+                ["🗄️","Bases de données",function(){ setShowSettings(false); setDataRestore(false); setSettingsPage("data"); }],
+                ["📥","Importer trades / positions IBKR",function(){ setShowSettings(false); setIbkrOpen(true); }],
+                ["📤","Exporter les bases",function(){ setShowSettings(false); exportBasesJSON(); }],
+                ["♻️","Restaurer une sauvegarde",function(){ setShowSettings(false); setDataRestore(true); setSettingsPage("data"); }],
                 ["📜","Changelog",function(){ setShowSettings(false); setSettingsPage("changelog"); }],
                 ["ℹ️","À propos",function(){ setShowSettings(false); setSettingsPage("about"); }],
               ].map(function(it,i){
@@ -10238,7 +10297,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

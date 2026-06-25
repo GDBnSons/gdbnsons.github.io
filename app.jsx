@@ -655,8 +655,11 @@ function applyPrices(prices, usdEur, effSrc){
       newLive = parseFloat((priceEUR * eurUsd).toFixed(4));
     }
     const currentLive = item.live || 1;
-    const variation = Math.abs(newLive - currentLive) / currentLive;
-    if(variation > 0.5){
+    // Garde-fou : ne rejeter que les valeurs manifestement aberrantes
+    // (prix nul/negatif, ou ecart > 5x a la hausse comme a la baisse).
+    // Les corrections legitimes (ex. changement de symbole YF_MAP) passent.
+    const ratio = newLive / currentLive;
+    if(!(newLive > 0) || ratio > 5 || ratio < 0.2){
       console.warn(`Prix aberrant pour ${item.t}: ${newLive} vs ${currentLive} — ignoré`);
       return item;
     }
@@ -733,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.09";
+const APP_VERSION = "v28.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

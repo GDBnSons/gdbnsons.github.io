@@ -733,7 +733,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.05";
+const APP_VERSION = "v28.06";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9752,7 +9752,7 @@ function App(){
           return;
         }
         let idx=items.findIndex(function(x){return (x.t||"").toUpperCase()===tU;});
-        const lv=(idx>=0?(items[idx].live||u.mark||u.pru):(u.mark||u.pru))||0;
+        const lv=((u.mark&&u.mark>0)?u.mark:((idx>=0?items[idx].live:0)||u.pru))||0;
         const val=Math.round(u.qty*lv);
         const pnl=Math.round((lv-u.pru)*u.qty);
         const pct=u.pru?parseFloat(((lv-u.pru)/u.pru).toFixed(4)):0;

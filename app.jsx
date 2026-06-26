@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.13";
+const APP_VERSION = "v28.15";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5051,7 +5051,11 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         const vals = yPcts;
         const pnlsC = yearRows.map(r=>r.pnl);
         const labels = yearRows.map(r=>r.year);
-        const mx = Math.max(...vals.filter(v=>v!=null).map(Math.abs), .01);
+        // v28.14 — echelle asymetrique : positifs sur leur propre max ; negatifs ancres
+        // a -100% (max de perte ~ bas du cadre) pour mieux occuper la hauteur.
+        const mxPos = Math.max(...vals.filter(v=>v!=null&&v>=0), .01);
+        const mxNegAbs = Math.max(...vals.filter(v=>v!=null&&v<0).map(v=>Math.abs(v)), 0);
+        const mxNeg = Math.max(1, mxNegAbs);
         const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, MIDLINE=HTOP;
         const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
         const nY=labels.length, barW=Math.floor((W-8)/Math.max(nY,1))-2, gap=2;
@@ -5073,8 +5077,8 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                     <text x={cx} y={TOTAL_H-3} textAnchor="middle" fill={C.text3} fontSize={8}>{yl}</text>
                   </g>
                 );
-                const hpx=Math.max(2,Math.abs(v)/mx*(HTOP-8));
                 const isPos=v>=0;
+                const hpx=Math.max(2, isPos ? v/mxPos*(HTOP-8) : Math.abs(v)/mxNeg*(HBOT-8));
                 const col=bclr(v);
                 const barY=isPos?MIDLINE-hpx:MIDLINE;
                 const lblY=isPos?MIDLINE-hpx-3:MIDLINE+hpx+9;
@@ -5801,7 +5805,8 @@ function PageTrades({txns,onAdd,onDel,hidden=false,EFF,onTradeApplied,showAdd:sh
       ? parseFloat(form.price) * src.eurUsd
       : parseFloat(form.price);
     const trade={...form,qty:parseFloat(form.qty),price:priceUSD,priceRaw:parseFloat(form.price),currency:form.currency,id:uid(),bankAccount:form.bank||"Aucune"};
-    onAdd(trade);
+    // v28.14 — l'achat/vente ne s'enregistre PLUS en transactions (seule source : import IBKR).
+    // On mouvemente uniquement les positions du portefeuille.
     onTradeApplied(trade);
     setShowAdd(false);
     setForm({date:today(),side:"BUY",ticker:"BTC",cat:"Picking",qty:"",price:"",currency:"USD",note:"",bank:"Aucune"});
@@ -6017,7 +6022,8 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
     const trade={...form, cat:resolvedCat, ticker:resolvedTicker, qty:parseFloat(form.qty),
       price:priceUSD, priceRaw:parseFloat(form.price), currency:form.currency,
       id:uid(), bankAccount:form.bank||"Aucune"};
-    onAdd(trade);
+    // v28.14 — l'achat/vente ne s'enregistre PLUS en transactions (seule source : import IBKR).
+    // On mouvemente uniquement les positions du portefeuille.
     onTradeApplied(trade);
     setShowNew(false);
     setDone({type:"trade", side:form.side, ticker:resolvedTicker, qty:parseFloat(form.qty), valoUSD, valoEUR, bank:form.bank, note:form.note, date:form.date});
@@ -7142,6 +7148,12 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
       <div style={{fontSize:14,fontWeight:800,color:props.c||C.text,marginTop:2}}>{props.v}</div>
     </div>
   );};
+  const InfoS=function(props){ return (
+    <div style={{background:C.bg2,borderRadius:9,padding:"6px 7px"}}>
+      <div style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:.5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.k}</div>
+      <div style={{fontSize:12,fontWeight:800,color:props.c||C.text,marginTop:2}}>{props.v}</div>
+    </div>
+  );};
 
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:680,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
@@ -7161,20 +7173,37 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
           </div>
         </div>
         {/* Infos */}
+        {isFut ? (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:14}}>
-          <Info k="Entree" v={entryDate+" \u00b7 "+(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
-          <Info k="Sortie" v={exitDate+" \u00b7 "+(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
+          <Info k="Entree" v={entryDate+" · "+(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
+          <Info k="Sortie" v={exitDate+" · "+(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
           <Info k="Duree" v={trade.durationDays+" j"}/>
-          {isFut
-            ? <Info k="Notionnel / Marge" v={fU(trade.notionalUSD)+" / "+fU(trade.marginUSD)}/>
-            : <Info k="Quantite" v={(trade.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})}/>}
-          {isFut
-            ? <Info k="Funding / Frais" v={Math.round(trade.raw.fundingUSD)+" / "+Math.round(trade.raw.tradingFeesUSD)+" $"}/>
-            : <Info k="Capital investi" v={fU(trade.investedUSD)}/>}
-          <Info k={isFut?"Levier":"Operations"} v={isFut?("x"+trade.lev):(trade.nBuy+" achats / "+trade.nSell+" ventes")}/>
-          {!isFut && src==="ibkr" && <Info k="Commissions" v={fU(Math.abs(tradeFees)+Math.abs(annexFees))}/>}
-          {!isFut && src==="ibkr" && annexDivs>0 && <Info k="Dividendes recus" v={"+"+fU(annexDivs)} c={C.green}/>}
+          <Info k="Notionnel / Marge" v={fU(trade.notionalUSD)+" / "+fU(trade.marginUSD)}/>
+          <Info k="Funding / Frais" v={Math.round(trade.raw.fundingUSD)+" / "+Math.round(trade.raw.tradingFeesUSD)+" $"}/>
+          <Info k="Levier" v={"x"+trade.lev}/>
         </div>
+        ) : (
+        <>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}>
+          <Info k="Entree" v={entryDate}/>
+          <Info k="Sortie" v={exitDate}/>
+          <Info k="Prix d'achat moyen" v={(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
+          <Info k="Prix de vente moyen" v={(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
+          <Info k="Capital investi" v={fU(trade.investedUSD)}/>
+          <Info k="Operations" v={trade.nBuy+" achats / "+trade.nSell+" ventes"}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:14}}>
+          <InfoS k="Duree" v={trade.durationDays+" j"}/>
+          <InfoS k="Quantite" v={(trade.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})}/>
+          <InfoS k="Commissions" v={fU(Math.abs(tradeFees)+Math.abs(annexFees))}/>
+        </div>
+        {src==="ibkr" && annexDivs>0 && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:14}}>
+          <Info k="Dividendes recus" v={"+"+fU(annexDivs)} c={C.green}/>
+        </div>
+        )}
+        </>
+        )}
         {/* Graphique Yahoo */}
         <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px"}}>
           <div style={{display:"flex",gap:16,marginBottom:6,paddingLeft:2,fontSize:11}}>

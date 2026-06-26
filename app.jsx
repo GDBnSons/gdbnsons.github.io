@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.10";
+const APP_VERSION = "v28.13";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4606,6 +4606,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
   const[yr,setYr]=useState("2026");
   const[cat,setCat]=useState("total"); // crypto | stocks | total
   const[view,setView]=useState("bars"); // bars | table
+  const[period,setPeriod]=useState("month"); // month | year
 
   // ── Taux USD/EUR historique par date (lit liveDD ou DD global) ────────────
   const _DD_ST = liveDD || DD;
@@ -4814,6 +4815,43 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
   const bestI  = realPct.reduce((bi,v,i)=>{if(v==null)return bi; return bi===-1||v>realPct[bi]?i:bi;}, -1);
   const worstI = realPct.reduce((wi,v,i)=>{if(v==null)return wi; return wi===-1||v<realPct[wi]?i:wi;}, -1);
 
+  // ── v28.12 — Agrégation ANNUELLE (un point par année) ─────────────────────
+  const pnlForYear = (md, year, i) => {
+    const bom = md?.bom?.[i], eom = md?.eom?.[i];
+    const invEUR = md?.inv?.[i] ?? 0;
+    const rate_bom = bomRate(year, i), rate_eom = eomRate(year, i);
+    if(bom == null || eom == null){
+      const rawPnl = md?.pnl?.[i];
+      if(rawPnl == null) return null;
+      if(eur)  return dataInEUR ? rawPnl                    : Math.round(rawPnl * rate_eom);
+      else     return dataInEUR ? Math.round(rawPnl / rate_eom) : rawPnl;
+    }
+    const eomC = cvtBOM_EOM(eom, rate_eom);
+    const bomC = cvtBOM_EOM(bom, rate_bom);
+    const invC = eur ? invEUR : Math.round(invEUR / rate_bom);
+    return eomC - bomC - invC;
+  };
+  const yearAgg = (year) => {
+    const md = getMonthlyData(cat, year);
+    if(!md) return null;
+    let pnlSum = 0, hasPnl = false; const n = md.m?.length || 12;
+    for(let i=0;i<n;i++){ const p=pnlForYear(md,year,i); if(p!=null){ pnlSum+=p; hasPnl=true; } }
+    const firstI = (md.bom||[]).findIndex(v=>v!=null);
+    const bomStart = firstI>=0 ? cvtBOM_EOM(md.bom[firstI], bomRate(year, firstI)) : null;
+    const lastI = [...(md.eom||[])].map((v,i)=>v!=null?i:-1).filter(i=>i>=0).pop() ?? -1;
+    const eomEnd = lastI>=0 ? cvtBOM_EOM(md.eom[lastI], eomRate(year, lastI)) : null;
+    const invSum = (md.m||[]).reduce((s,_,i)=>{ const v=md.inv?.[i]; if(v==null) return s; return s+(eur?v:Math.round(v/bomRate(year,i))); }, 0);
+    const pct = bomStart ? pnlSum/bomStart : (invSum ? pnlSum/invSum : null);
+    return { year, pnl: hasPnl?pnlSum:null, pct, bomStart, eomEnd, inv:invSum };
+  };
+  const yearRows = years.map(yearAgg).filter(Boolean);
+  const yPcts = yearRows.map(r=>r.pct);
+  const yTtlPnl = yearRows.reduce((s,r)=>s+(r.pnl||0),0);
+  const yValidPct = yPcts.filter(v=>v!=null);
+  const yAvgPct = yValidPct.length ? yValidPct.reduce((s,v)=>s+v,0)/yValidPct.length : 0;
+  const yBestI = yPcts.reduce((bi,v,i)=>{ if(v==null)return bi; return bi===-1||v>yPcts[bi]?i:bi; }, -1);
+  const yWorstI = yPcts.reduce((wi,v,i)=>{ if(v==null)return wi; return wi===-1||v<yPcts[wi]?i:wi; }, -1);
+
   // Colors for bars
   const bclr = v => v==null?"transparent":v>=0?C.green:C.red;
 
@@ -4830,8 +4868,19 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         ))}
       </div>
 
+      {/* ── Toggle Mensuel / Annuel ── */}
+      <div style={{display:"flex",gap:5,marginBottom:10}}>
+        {[["month","Mensuel"],["year","Annuel"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setPeriod(k)} style={{
+            flex:1,padding:"6px 4px",borderRadius:8,fontSize:11,fontWeight:700,
+            border:`1px solid ${period===k?catColor:C.border}`,cursor:"pointer",
+            background:period===k?catColor+"22":"transparent",color:period===k?catColor:C.gray,
+          }}>{l}</button>
+        ))}
+      </div>
+
       {/* ── Sélecteur année ── */}
-      <div style={{display:"flex",gap:3,marginBottom:14,background:C.bg1,borderRadius:10,padding:4}}>
+      {period==="month" && <div style={{display:"flex",gap:3,marginBottom:14,background:C.bg1,borderRadius:10,padding:4}}>
         {years.map(y=>(
           <button key={y} onClick={()=>setYr(y)} style={{
             flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
@@ -4839,10 +4888,10 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
             background:safeYr===y?catColor:"transparent",color:safeYr===y?"#000":C.gray,
           }}>{y}</button>
         ))}
-      </div>
+      </div>}
 
       {/* ── Résumé annuel ── */}
-      {data&&(
+      {period==="month" && data&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
           {[
             ["Total P&L",cur+(ttlPnl>=0?"+":"")+Math.round(ttlPnl).toLocaleString("fr-FR"),ttlPnl>=0?C.green:C.red],
@@ -4859,7 +4908,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
       )}
 
       {/* ── Graphique barres mensuelles ── */}
-      {data&&(()=>{
+      {period==="month" && data&&(()=>{
         const vals = realPct;
         // P&L converti pour les labels des barres
         const pnlsC = data.m.map((_,i)=>cvtPNL(i));
@@ -4921,7 +4970,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
       })()}
 
       {/* ── Tableau mensuel détail ── */}
-      {data&&(
+      {period==="month" && data&&(
         <div style={{...crd(),marginBottom:14,padding:"10px 8px"}}>
           <div style={{fontSize:10,color:C.gray,fontWeight:700,marginBottom:8}}>Détail mensuel</div>
           <div style={{overflowX:"auto"}}>
@@ -4973,6 +5022,115 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                       <td style={{padding:"5px 6px",textAlign:"right",color:bclr(ttlPctY),fontSize:9,fontWeight:800}}>{fmtP(ttlPctY)}</td>
                     </>);
                   })()}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Résumé ANNUEL ── */}
+      {period==="year" && yearRows.length>0 && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
+          {[
+            ["Total P&L",cur+(yTtlPnl>=0?"+":"")+Math.round(yTtlPnl).toLocaleString("fr-FR"),yTtlPnl>=0?C.green:C.red],
+            ["Moy./an",fmtP(yAvgPct),yAvgPct>=0?C.green:C.red],
+            ["Meilleure",yBestI>=0?yearRows[yBestI].year+" "+fmtP(yPcts[yBestI]):"\u2014",C.green],
+            ["Pire",yWorstI>=0?yearRows[yWorstI].year+" "+fmtP(yPcts[yWorstI]):"\u2014",C.red],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{background:C.bg1,borderRadius:8,padding:"8px 6px",border:`1px solid ${C.border}`,textAlign:"center"}}>
+              <div style={{fontSize:8,color:C.gray,marginBottom:3}}>{l}</div>
+              <div style={{fontSize:11,fontWeight:800,color:c}}>{msk(v,hidden)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Graphique barres ANNUELLES ── */}
+      {period==="year" && yearRows.length>0 && (()=>{
+        const vals = yPcts;
+        const pnlsC = yearRows.map(r=>r.pnl);
+        const labels = yearRows.map(r=>r.year);
+        const mx = Math.max(...vals.filter(v=>v!=null).map(Math.abs), .01);
+        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, MIDLINE=HTOP;
+        const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
+        const nY=labels.length, barW=Math.floor((W-8)/Math.max(nY,1))-2, gap=2;
+        const bx=i=>4+i*(barW+gap);
+        return(
+          <>
+          <div style={{fontSize:11,color:C.text2,marginBottom:6,fontWeight:700,padding:"0 2px"}}>
+            Performance annuelle — {cat==="crypto"?"Crypto":cat==="stocks"?"Actions":"Total"} {eur?"€":"$"}
+          </div>
+          <div style={{...crd(),marginBottom:14,padding:"8px 4px"}}>
+            <svg width="100%" viewBox={`0 0 ${W} ${TOTAL_H}`} style={{overflow:"visible",display:"block"}}>
+              <line x1={2} y1={MIDLINE} x2={W-2} y2={MIDLINE} stroke={C.border} strokeWidth={0.8}/>
+              {labels.map((yl,i)=>{
+                const v=vals[i], pnl=pnlsC[i];
+                const cx=bx(i)+barW/2;
+                if(v==null) return(
+                  <g key={i}>
+                    <rect x={bx(i)} y={MIDLINE-1} width={barW} height={2} fill={C.bg3} rx={1}/>
+                    <text x={cx} y={TOTAL_H-3} textAnchor="middle" fill={C.text3} fontSize={8}>{yl}</text>
+                  </g>
+                );
+                const hpx=Math.max(2,Math.abs(v)/mx*(HTOP-8));
+                const isPos=v>=0;
+                const col=bclr(v);
+                const barY=isPos?MIDLINE-hpx:MIDLINE;
+                const lblY=isPos?MIDLINE-hpx-3:MIDLINE+hpx+9;
+                const pnlY=isPos?MIDLINE-hpx-11:MIDLINE+hpx+18;
+                return(
+                  <g key={i}>
+                    <rect x={bx(i)} y={barY} width={barW} height={hpx} fill={col} opacity={0.85} rx={2}/>
+                    <text x={cx} y={lblY} textAnchor="middle" fill={col} fontSize={8} fontWeight="800">{fmtP(v,0)}</text>
+                    {pnl!=null&&(
+                      <text x={cx} y={pnlY} textAnchor="middle" fill={C.text3} fontSize={6.5}>
+                        {pnl>=0?"+":""}{Math.round(pnl/1000)}k
+                      </text>
+                    )}
+                    <text x={cx} y={TOTAL_H-3} textAnchor="middle"
+                      fill={i===yBestI?C.green:i===yWorstI?C.red:C.text3}
+                      fontSize={8} fontWeight={i===yBestI||i===yWorstI?"800":"400"}>{yl}</text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          </>
+        );
+      })()}
+
+      {/* ── Tableau ANNUEL détail ── */}
+      {period==="year" && yearRows.length>0 && (
+        <div style={{...crd(),marginBottom:14,padding:"10px 8px"}}>
+          <div style={{fontSize:10,color:C.gray,fontWeight:700,marginBottom:8}}>Détail annuel</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+              <thead>
+                <tr>
+                  {["Année","Début","Fin","Investi",`P&L ${cur}`,"%"].map(h=>(
+                    <th key={h} style={{padding:"4px 6px",color:C.gray,fontWeight:600,textAlign:h==="Année"?"left":"right",borderBottom:`1px solid ${C.border}`,fontSize:9}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {yearRows.map((r,i)=>(
+                  <tr key={i} style={{borderBottom:`1px solid ${C.border}22`}}>
+                    <td style={{padding:"5px 6px",color:C.text2,fontWeight:600}}>{r.year}</td>
+                    <td style={{padding:"5px 6px",textAlign:"right",color:C.gray}}>{r.bomStart!=null?msk(cur+Math.round(r.bomStart).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
+                    <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{r.eomEnd!=null?msk(cur+Math.round(r.eomEnd).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
+                    <td style={{padding:"5px 6px",textAlign:"right",color:r.inv?C.teal:C.text3,fontWeight:r.inv?700:400}}>{r.inv?msk((r.inv>0?"+":"")+Math.round(r.inv).toLocaleString("fr-FR")+cur,hidden):"\u2014"}</td>
+                    <td style={{padding:"5px 6px",textAlign:"right",color:bclr(r.pnl)}}>{r.pnl!=null?msk((r.pnl>=0?"+":"")+Math.round(r.pnl).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
+                    <td style={{padding:"5px 6px",textAlign:"right",color:bclr(r.pct)}}>{r.pct!=null?fmtP(r.pct):"\u2014"}</td>
+                  </tr>
+                ))}
+                <tr style={{borderTop:`1px solid ${C.border}`,fontWeight:800}}>
+                  <td style={{padding:"5px 6px",color:C.text,fontSize:9}}>TOTAL</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:C.gray,fontSize:9}}>{yearRows[0]&&yearRows[0].bomStart!=null?msk(cur+Math.round(yearRows[0].bomStart).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:C.text,fontSize:9}}>{yearRows[yearRows.length-1]&&yearRows[yearRows.length-1].eomEnd!=null?msk(cur+Math.round(yearRows[yearRows.length-1].eomEnd).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:C.teal,fontSize:9}}>{(()=>{const t=yearRows.reduce((s,r)=>s+(r.inv||0),0);return t?msk((t>0?"+":"")+Math.round(t).toLocaleString("fr-FR")+cur,hidden):"\u2014";})()}</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:bclr(yTtlPnl),fontSize:9}}>{msk((yTtlPnl>=0?"+":"")+Math.round(yTtlPnl).toLocaleString("fr-FR"),hidden)}</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:bclr(yearRows[0]&&yearRows[0].bomStart?yTtlPnl/yearRows[0].bomStart:0),fontSize:9,fontWeight:800}}>{(()=>{const b=yearRows[0]&&yearRows[0].bomStart;return fmtP(b?yTtlPnl/b:0);})()}</td>
                 </tr>
               </tbody>
             </table>
@@ -7049,6 +7207,7 @@ function PageLegend(
   const sorted = list.slice().sort(function(a,b){
     if(sortK==="pnl") return b.pnlUSD-a.pnlUSD;
     if(sortK==="pct") return (b.pct==null?-1e12:b.pct)-(a.pct==null?-1e12:a.pct);
+    if(sortK==="date") return (b.exitDate||"").localeCompare(a.exitDate||"");
     return b.durationDays-a.durationDays;
   });
   const tot = list.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
@@ -7103,6 +7262,7 @@ function PageLegend(
         <Sort label="P&L" active={sortK==="pnl"} onClick={function(){setSortK("pnl");}}/>
         <Sort label="%" active={sortK==="pct"} onClick={function(){setSortK("pct");}}/>
         <Sort label="Durée" active={sortK==="dur"} onClick={function(){setSortK("dur");}}/>
+        <Sort label="Date" active={sortK==="date"} onClick={function(){setSortK("date");}}/>
       </div>
       {/* Liste */}
       <div>
@@ -9091,13 +9251,22 @@ function App(){
           // une txn faite sur un autre appareil (présente en KV, pas en local).
           try{
             var TXNS_SEEDVER="real_v1";
-            var _txnsMig = lsv9Get('__txns_seedver')===TXNS_SEEDVER;
+            // v28.13 — FIX persistance : le flag etait ecrit via lsv9Set('__txns_seedver')
+            // mais cette cle n'est PAS dans LSV9_KEYS → lsv9Set la refusait (return false)
+            // → flag jamais persiste → la migration "one-shot" se redeclenchait a CHAQUE
+            // chargement et ecrasait gdb_txns (local + KV) par le seed, effacant les imports
+            // IBKR. On persiste desormais le flag dans une cle localStorage dediee, et la
+            // migration FUSIONNE (seed + existant) au lieu d'ecraser.
+            var _txnsMig = false;
+            try{ _txnsMig = localStorage.getItem('gdb_txns_seedver')===TXNS_SEEDVER; }catch(e){}
             if(!_txnsMig){
-              setTxns(SEED_TXNS_REAL);
-              lsv9Set('gdb_txns', SEED_TXNS_REAL);
-              lsv9Set('__txns_seedver', TXNS_SEEDVER);
-              saveBase('gdb_txns', SEED_TXNS_REAL);
-              console.info("[txns] migration one-shot reelle: "+SEED_TXNS_REAL.length+" transactions (ecrasement faux trades).");
+              const _kvTx0 = Array.isArray(kvData.gdb_txns) ? kvData.gdb_txns : [];
+              const _seeded = unionTxnsById(SEED_TXNS_REAL, unionTxnsById(tx, _kvTx0));
+              setTxns(_seeded);
+              lsv9Set('gdb_txns', _seeded);
+              try{ localStorage.setItem('gdb_txns_seedver', TXNS_SEEDVER); }catch(e){}
+              saveBase('gdb_txns', _seeded);
+              console.info("[txns] migration one-shot (fusion non destructive): "+_seeded.length+" transactions.");
             } else {
               const kvTx = Array.isArray(kvData.gdb_txns) ? kvData.gdb_txns : [];
               const merged = unionTxnsById(tx, kvTx);

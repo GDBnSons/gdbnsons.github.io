@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.15";
+const APP_VERSION = "v28.16";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7141,6 +7141,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   }
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
   const fE = function(v){ return (v<0?"-":"")+Math.abs(Math.round(v)).toLocaleString("fr-FR")+" \u20ac"; };
+  const fmtDate = function(d){ if(!d||String(d).length<10) return d||""; var p=String(d).slice(0,10).split("-"); return p.length===3?(p[2]+"-"+p[1]+"-"+p[0]):String(d); };
   const typeLabel = isFut ? ("Futures "+dir) : (src==="ibkr"?"Action (spot)":"Crypto (spot)");
   const Info=function(props){ return (
     <div style={{background:C.bg2,borderRadius:10,padding:"9px 11px"}}>
@@ -7174,34 +7175,39 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
         </div>
         {/* Infos */}
         {isFut ? (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:14}}>
-          <Info k="Entree" v={entryDate+" · "+(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
-          <Info k="Sortie" v={exitDate+" · "+(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
-          <Info k="Duree" v={trade.durationDays+" j"}/>
-          <Info k="Notionnel / Marge" v={fU(trade.notionalUSD)+" / "+fU(trade.marginUSD)}/>
-          <Info k="Funding / Frais" v={Math.round(trade.raw.fundingUSD)+" / "+Math.round(trade.raw.tradingFeesUSD)+" $"}/>
-          <Info k="Levier" v={"x"+trade.lev}/>
-        </div>
-        ) : (
         <>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}>
-          <Info k="Entree" v={entryDate}/>
-          <Info k="Sortie" v={exitDate}/>
-          <Info k="Prix d'achat moyen" v={(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
-          <Info k="Prix de vente moyen" v={(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
-          <Info k="Capital investi" v={fU(trade.investedUSD)}/>
-          <Info k="Operations" v={trade.nBuy+" achats / "+trade.nSell+" ventes"}/>
+          <Info k="Entree" v={fmtDate(entryDate)}/>
+          <Info k="Sortie" v={fmtDate(exitDate)}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:7}}>
+          <Info k="Notionnel" v={fU(trade.notionalUSD)}/>
+          <Info k="Marge" v={fU(trade.marginUSD)}/>
+          <Info k="Levier" v={"x"+trade.lev}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:14}}>
           <InfoS k="Duree" v={trade.durationDays+" j"}/>
+          <InfoS k="Funding" v={Math.round(trade.raw.fundingUSD)+" $"}/>
+          <InfoS k="Frais" v={Math.round(trade.raw.tradingFeesUSD)+" $"}/>
+        </div>
+        </>
+        ) : (
+        <>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}>
+          <Info k="Entree" v={fmtDate(entryDate)}/>
+          <Info k="Sortie" v={fmtDate(exitDate)}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:7}}>
+          <Info k="PA moyen" v={(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
+          <Info k="PV moyen" v={(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
+          <Info k="Capital investi" v={fU(trade.investedUSD)}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:7,marginBottom:14}}>
+          <InfoS k="Duree" v={trade.durationDays+" j"}/>
           <InfoS k="Quantite" v={(trade.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})}/>
           <InfoS k="Commissions" v={fU(Math.abs(tradeFees)+Math.abs(annexFees))}/>
+          <InfoS k="Dividendes" v={(annexDivs>0?"+":"")+fU(annexDivs)} c={annexDivs>0?C.green:undefined}/>
         </div>
-        {src==="ibkr" && annexDivs>0 && (
-        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:14}}>
-          <Info k="Dividendes recus" v={"+"+fU(annexDivs)} c={C.green}/>
-        </div>
-        )}
         </>
         )}
         {/* Graphique Yahoo */}

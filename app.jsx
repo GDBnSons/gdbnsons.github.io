@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.19";
+const APP_VERSION = "v28.20";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7248,7 +7248,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   );
 }
 function PageLegend(
-{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex, onDeleteTrade}){
+{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex}){
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
@@ -7339,11 +7339,6 @@ function PageLegend(
                 <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
                 <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%")}</div>
               </div>
-              {board==="spot" && t.txnIds && t.txnIds.length>0 && (
-                <button onClick={function(e){ e.stopPropagation();
-                  if(window.confirm("Supprimer le trade "+t.ticker+" ("+t.entryDate+" → "+t.exitDate+") ?\nCela retire "+t.txnIds.length+" transaction(s) de la base.")){ onDeleteTrade(t.txnIds); }
-                }} title="Supprimer ce trade" style={{flexShrink:0,width:30,height:30,borderRadius:8,border:"1px solid "+C.red+"55",background:"transparent",color:C.red,cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{"🗑️"}</button>
-              )}
             </div>
           );
         })}
@@ -9610,6 +9605,8 @@ function App(){
       }
 
       setReady(true);
+      // v28.20 — refresh des prix au lancement (apres chargement initial complet)
+      try{ handleRefresh(); }catch(e){ console.warn("[launch] refresh:", e && e.message); }
     })();
   },[]);
 
@@ -9938,14 +9935,6 @@ function App(){
     const next=[t,...txns];setTxns(next);
     await save(SK.txns,next);                 // legacy (gdb_sons_v8 + KV gdb_data) — inchangé
     saveBase('gdb_txns', next);               // Phase 2 — base canonique : miroir v9 local + KV gdb_txns
-  },[txns]);
-  const deleteTxnsByIds=useCallback(async function(ids){
-    if(!ids||!ids.length) return 0;
-    const idset=new Set(ids);
-    const kept=(txns||[]).filter(function(t){ return !idset.has(t.id); });
-    const removed=(txns||[]).length-kept.length;
-    if(removed>0){ setTxns(kept); await save(SK.txns,kept); await saveBase('gdb_txns',kept); }
-    return removed;
   },[txns]);
 
   // v25.05 Phase 4 — applyInvestment : transfert Cash Matelas <-> fonds, creation/destruction
@@ -10342,7 +10331,7 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
-        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} onDeleteTrade={deleteTxnsByIds}/>}
+        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
         {tab===6 && <PageMarket eur={eur}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>

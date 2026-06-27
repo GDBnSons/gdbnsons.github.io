@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.16";
+const APP_VERSION = "v28.17";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7044,22 +7044,27 @@ function computeClosedTrades(txns){
     });
     var pos=0, cost=0, cyc=null;
     rows.forEach(function(t){
-      var q=+t.qty||0, v=Math.abs(+t.valueUSD||0);
+      // v28.17 — valeur depuis price x qty en devise NATIVE (le valueUSD remonte par IBKR
+      // est en base EUR -> faussait PA/PV moyen des tickers USD). On suit le ccy du cycle.
+      var q=+t.qty||0, pNat=+t.price||0, v=Math.abs(pNat*q), fee=(+t.fee||0)+(+t.commission||0);
       if(t.side==="BUY"){
-        if(pos<=EPS){ cyc={ticker:tk,src:t.src,entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
-        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:+t.price||0,valueUSD:v,fee:(+t.fee||0)+(+t.commission||0)});
+        if(pos<=EPS){ cyc={ticker:tk,src:t.src,ccy:(t.ccy||"USD"),entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
+        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee});
       } else {
         if(!cyc) return;
-        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:+t.price||0,valueUSD:v,fee:(+t.fee||0)+(+t.commission||0)});
+        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee});
         if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
         pos-=q;
         if(pos<=EPS*Math.max(1,cyc.buyQty)){
           var pnl=cyc.sellVal-cyc.buyVal, inv=cyc.buyVal;
           var dur=Math.round((new Date(cyc.lastSell)-new Date(cyc.entryDate))/864e5);
-          closed.push({ticker:tk,src:cyc.src,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
+          var _rate=usdEurAt(cyc.lastSell)||0.92;       // USD->EUR
+          var _toUSD=(cyc.ccy==="EUR")?(1/_rate):1;       // natif -> USD (liste)
+          closed.push({ticker:tk,src:cyc.src,ccy:cyc.ccy,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
             durationDays:dur, qty:cyc.buyQty,
             entryPrice:cyc.buyQty?cyc.buyVal/cyc.buyQty:0, exitPrice:cyc.sellQty?cyc.sellVal/cyc.sellQty:0,
-            investedUSD:inv, pnlUSD:pnl, pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills});
+            investedNat:inv, pnlNat:pnl, investedUSD:inv*_toUSD, pnlUSD:pnl*_toUSD,
+            pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills});
           pos=0; cost=0; cyc=null;
         }
       }
@@ -7090,10 +7095,17 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const dir = isFut ? trade.dir : null;
   const entryDate = isFut ? trade.entryDate : trade.entryDate;
   const exitDate  = isFut ? trade.exitDate  : trade.exitDate;
-  const pnlUSD = trade.pnlUSD;
-  const up = pnlUSD>=0;
-  const eurRate = usdEurAt(exitDate);
-  const pnlEUR = pnlUSD*eurRate;
+  const ccyT = isFut ? "USD" : (trade.ccy||"USD");
+  const isEurT = ccyT==="EUR";
+  const curT = isEurT ? "€" : "$";
+  const curOther = isEurT ? "$" : "€";
+  const eurRate = usdEurAt(exitDate);                       // USD->EUR
+  const pnlNat = (trade.pnlNat!=null) ? trade.pnlNat : trade.pnlUSD;
+  const invNat = (trade.investedNat!=null) ? trade.investedNat : trade.investedUSD;
+  const up = pnlNat>=0;
+  const pnlOther = isEurT ? pnlNat*(1/eurRate) : pnlNat*eurRate;   // l'autre devise
+  const toNat = function(vBaseEUR){ return isEurT ? vBaseEUR : (vBaseEUR/eurRate); }; // base EUR -> natif
+  const money = function(v,c){ var sgn=v<0?"-":""; var n=Math.abs(Math.round(v)).toLocaleString("fr-FR"); return c==="€" ? (sgn+n+" €") : (sgn+"$"+n); };
   const [hist,setHist]=useState(null); // null=loading, []=erreur/vide
   const [err,setErr]=useState(false);
   const ySym = ySymFor(ticker, src);
@@ -7108,8 +7120,8 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
 
   // fills -> markers
   const fills = isFut
-    ? [{date:entryDate, side:(dir==="LONG"?"BUY":"SELL"), valueUSD:trade.notionalUSD, qty:""},
-       {date:exitDate,  side:(dir==="LONG"?"SELL":"BUY"), valueUSD:trade.notionalUSD, qty:""}]
+    ? [{date:entryDate, side:(dir==="LONG"?"BUY":"SELL"), valueNat:trade.notionalUSD, ccy:"USD", qty:""},
+       {date:exitDate,  side:(dir==="LONG"?"SELL":"BUY"), valueNat:trade.notionalUSD, ccy:"USD", qty:""}]
     : (trade.fills||[]);
   // Annexe IBKR reliee au trade (dividendes / frais dans la fenetre)
   var annexDivs=0, annexFees=0;
@@ -7128,15 +7140,15 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
     const closes = hist.map(function(p){return p[1];});
     chartSeries = [{vals:closes, color:C.blue, label:"Cours", area:true}];
     function nIdx(d){ for(var i=0;i<chartDates.length;i++){ if(chartDates[i]>=d) return i; } return chartDates.length-1; }
-    const maxV = Math.max.apply(null, fills.map(function(fl){return fl.valueUSD||0;}).concat([1]));
+    const maxV = Math.max.apply(null, fills.map(function(fl){return fl.valueNat||0;}).concat([1]));
     markers = fills.map(function(fl){
       const i=nIdx(fl.date);
-      const val=fl.valueUSD||0;
+      const val=fl.valueNat||0;
       const r=3 + 5*Math.sqrt(Math.min(1, maxV?val/maxV:0));
       return {i:i, v:closes[i], color:(fl.side==="BUY"?C.green:C.red), r:r, side:fl.side,
         qtyTxt:(fl.qty!=null && fl.qty!=="" ? Number(fl.qty).toLocaleString("fr-FR",{maximumFractionDigits:4}) : ""),
-        amtTxt:(val ? "$"+Math.round(val).toLocaleString("fr-FR") : ""),
-        priceTxt:(fl.price ? ("@ $"+Number(fl.price).toLocaleString("fr-FR",{maximumFractionDigits:(fl.price<10?4:2)})) : "")};
+        amtTxt:(val ? money(val,(fl.ccy==="EUR"?"€":"$")) : ""),
+        priceTxt:(fl.price ? ("@ "+(fl.ccy==="EUR"?"":"$")+Number(fl.price).toLocaleString("fr-FR",{maximumFractionDigits:(fl.price<10?4:2)})+(fl.ccy==="EUR"?" €":"")) : "")};
     });
   }
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
@@ -7169,8 +7181,8 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
             </div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{fontSize:20,fontWeight:900,color:up?C.green:C.red}}>{(up?"+":"")+fU(pnlUSD)}</div>
-            <div style={{fontSize:12,fontWeight:700,color:up?C.green:C.red}}>{(up?"+":"")+fE(pnlEUR)} {trade.pct!=null?("\u00b7 "+(up?"+":"")+trade.pct.toFixed(1)+"%"):""}</div>
+            <div style={{fontSize:20,fontWeight:900,color:up?C.green:C.red}}>{(up?"+":"")+money(pnlNat,curT)}</div>
+            <div style={{fontSize:12,fontWeight:700,color:up?C.green:C.red}}>{(up?"+":"")+money(pnlOther,curOther)} {trade.pct!=null?("· "+(up?"+":"")+trade.pct.toFixed(1)+"%"):""}</div>
           </div>
         </div>
         {/* Infos */}
@@ -7200,13 +7212,13 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:7}}>
           <Info k="PA moyen" v={(trade.entryPrice||0).toFixed( (trade.entryPrice||0)<10?4:2 )}/>
           <Info k="PV moyen" v={(trade.exitPrice||0).toFixed( (trade.exitPrice||0)<10?4:2 )}/>
-          <Info k="Capital investi" v={fU(trade.investedUSD)}/>
+          <Info k="Capital investi" v={money(invNat,curT)}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:7,marginBottom:14}}>
           <InfoS k="Duree" v={trade.durationDays+" j"}/>
           <InfoS k="Quantite" v={(trade.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})}/>
-          <InfoS k="Commissions" v={fU(Math.abs(tradeFees)+Math.abs(annexFees))}/>
-          <InfoS k="Dividendes" v={(annexDivs>0?"+":"")+fU(annexDivs)} c={annexDivs>0?C.green:undefined}/>
+          <InfoS k="Commissions" v={money(Math.abs(tradeFees)+Math.abs(toNat(annexFees)),curT)}/>
+          <InfoS k="Dividendes" v={(annexDivs>0?"+":"")+money(toNat(annexDivs),curT)} c={annexDivs>0?C.green:undefined}/>
         </div>
         </>
         )}
@@ -7230,7 +7242,7 @@ function PageLegend(
 {txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex}){
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
-  const [sortK,setSortK]=useState("pnl");
+  const [sortK,setSortK]=useState("date");
   const spot = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
   const fut = React.useMemo(function(){
     return (liveFutures||SEED_FUTURES).map(function(t){

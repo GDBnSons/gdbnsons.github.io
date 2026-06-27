@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.18";
+const APP_VERSION = "v28.19";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7057,11 +7057,11 @@ function computeClosedTrades(txns){
       // est en base EUR -> faussait PA/PV moyen des tickers USD). On suit le ccy du cycle.
       var q=+t.qty||0, pNat=+t.price||0, v=Math.abs(pNat*q), fee=(+t.fee||0)+(+t.commission||0);
       if(t.side==="BUY"){
-        if(pos<=EPS){ cyc={ticker:tk,src:t.src,ccy:(t.ccy||"USD"),entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[]}; }
-        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee});
+        if(pos<=EPS){ cyc={ticker:tk,src:t.src,ccy:(t.ccy||"USD"),entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[],ids:[]}; }
+        pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee}); if(t.id)cyc.ids.push(t.id);
       } else {
         if(!cyc) return;
-        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee});
+        cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee}); if(t.id)cyc.ids.push(t.id);
         if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
         pos-=q;
         if(pos<=EPS*Math.max(1,cyc.buyQty)){
@@ -7072,7 +7072,7 @@ function computeClosedTrades(txns){
           closed.push({ticker:tk,src:cyc.src,ccy:cyc.ccy,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
             durationDays:dur, qty:cyc.buyQty,
             entryPrice:cyc.buyQty?cyc.buyVal/cyc.buyQty:0, exitPrice:cyc.sellQty?cyc.sellVal/cyc.sellQty:0,
-            investedNat:inv, pnlNat:pnl, investedUSD:inv*_toUSD, pnlUSD:pnl*_toUSD,
+            investedNat:inv, pnlNat:pnl, investedUSD:inv*_toUSD, pnlUSD:pnl*_toUSD, txnIds:cyc.ids,
             pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills});
           pos=0; cost=0; cyc=null;
         }
@@ -7248,7 +7248,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   );
 }
 function PageLegend(
-{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex}){
+{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex, onDeleteTrade}){
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
@@ -7339,6 +7339,11 @@ function PageLegend(
                 <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
                 <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%")}</div>
               </div>
+              {board==="spot" && t.txnIds && t.txnIds.length>0 && (
+                <button onClick={function(e){ e.stopPropagation();
+                  if(window.confirm("Supprimer le trade "+t.ticker+" ("+t.entryDate+" → "+t.exitDate+") ?\nCela retire "+t.txnIds.length+" transaction(s) de la base.")){ onDeleteTrade(t.txnIds); }
+                }} title="Supprimer ce trade" style={{flexShrink:0,width:30,height:30,borderRadius:8,border:"1px solid "+C.red+"55",background:"transparent",color:C.red,cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{"🗑️"}</button>
+              )}
             </div>
           );
         })}
@@ -7585,7 +7590,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 }
 
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, onPurgeCryptoSpot, autoRestore}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, autoRestore}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7855,7 +7860,6 @@ function PageData(
   var yf_edit=useState(function(){return Object.assign({},YF_MAP);}); var yfEdit=yf_edit[0]; var setYfEdit=yf_edit[1];
   var yf_filter=useState(""); var yfFilter=yf_filter[0]; var setYfFilter=yf_filter[1];
   var yf_msg=useState(null); var yfMsg=yf_msg[0]; var setYfMsg=yf_msg[1];
-  var cs_msg=useState(null); var csMsg=cs_msg[0]; var setCsMsg=cs_msg[1];
   var yf_new=useState({t:"",s:""}); var yfNew=yf_new[0]; var setYfNew=yf_new[1];
   function yfSave(){
     Object.keys(YF_MAP).forEach(function(k){ if(!(k in yfEdit)) delete YF_MAP[k]; });
@@ -7999,17 +8003,6 @@ function PageData(
           <button onClick={yfSave} style={{width:"100%",marginTop:8,padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.green,color:"#00150c",cursor:"pointer"}}>{"Enregistrer YF_MAP"}</button>
           {yfMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:yfMsg.type==="ok"?C.green:C.red}}>{yfMsg.text}</div>}
         </div>}
-      </div>
-
-      <div style={{marginBottom:12}}>
-        <button onClick={async function(){
-          var n=(txns||[]).filter(isCryptoSpotTxn).length;
-          if(n===0){ setCsMsg({type:"ok",text:"Aucun trade spot crypto à supprimer."}); setTimeout(function(){setCsMsg(null);},3000); return; }
-          if(!window.confirm("Supprimer "+n+" trade(s) spot crypto ? Les futures sont conservés.")) return;
-          var removed=await onPurgeCryptoSpot();
-          setCsMsg({type:"ok",text:"\u2713 "+removed+" trade(s) spot crypto supprimé(s)."}); setTimeout(function(){setCsMsg(null);},4000);
-        }} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.red,cursor:"pointer",background:"transparent",color:C.red}}>{"🗑️ Supprimer les trades spot crypto"}</button>
-        {csMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:csMsg.type==="ok"?C.green:C.red}}>{csMsg.text}</div>}
       </div>
 
       <div style={{marginBottom:12}}>
@@ -9946,8 +9939,10 @@ function App(){
     await save(SK.txns,next);                 // legacy (gdb_sons_v8 + KV gdb_data) — inchangé
     saveBase('gdb_txns', next);               // Phase 2 — base canonique : miroir v9 local + KV gdb_txns
   },[txns]);
-  const purgeCryptoSpot=useCallback(async function(){
-    const kept=(txns||[]).filter(function(t){ return !isCryptoSpotTxn(t); });
+  const deleteTxnsByIds=useCallback(async function(ids){
+    if(!ids||!ids.length) return 0;
+    const idset=new Set(ids);
+    const kept=(txns||[]).filter(function(t){ return !idset.has(t.id); });
     const removed=(txns||[]).length-kept.length;
     if(removed>0){ setTxns(kept); await save(SK.txns,kept); await saveBase('gdb_txns',kept); }
     return removed;
@@ -10347,7 +10342,7 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
-        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
+        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} onDeleteTrade={deleteTxnsByIds}/>}
         {tab===6 && <PageMarket eur={eur}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
@@ -10543,7 +10538,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} onPurgeCryptoSpot={purgeCryptoSpot} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

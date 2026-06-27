@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.17";
+const APP_VERSION = "v28.18";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7027,6 +7027,15 @@ function CloudKeyList({data, onRefresh}){
 
 // v26.02 Lot C — reconstruction des trades clotures (round-trip par actif, cout moyen).
 // Un cycle = de la 1ere acquisition (position 0->+) au retour a ~0. PnL = ventes - achats.
+function isCryptoSpotTxn(t){
+  if(!t) return false;
+  var ac=(t.assetCat||"").toUpperCase();
+  if(ac==="CRYPTO") return true;            // crypto spot importee IBKR
+  var tk=(t.ticker||"").toUpperCase();
+  if(tk==="BTC") return true;
+  if(typeof CG_MAP!=="undefined" && CG_MAP && CG_MAP[tk]) return true; // ticker crypto connu
+  return false;
+}
 function computeClosedTrades(txns){
   var STABLE={USDT:1,USDC:1,UST:1,DAI:1,BUSD:1,TUSD:1,FDUSD:1};
   var EPS=1e-6;
@@ -7576,7 +7585,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 }
 
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, autoRestore}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, onPurgeCryptoSpot, autoRestore}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7846,6 +7855,7 @@ function PageData(
   var yf_edit=useState(function(){return Object.assign({},YF_MAP);}); var yfEdit=yf_edit[0]; var setYfEdit=yf_edit[1];
   var yf_filter=useState(""); var yfFilter=yf_filter[0]; var setYfFilter=yf_filter[1];
   var yf_msg=useState(null); var yfMsg=yf_msg[0]; var setYfMsg=yf_msg[1];
+  var cs_msg=useState(null); var csMsg=cs_msg[0]; var setCsMsg=cs_msg[1];
   var yf_new=useState({t:"",s:""}); var yfNew=yf_new[0]; var setYfNew=yf_new[1];
   function yfSave(){
     Object.keys(YF_MAP).forEach(function(k){ if(!(k in yfEdit)) delete YF_MAP[k]; });
@@ -7989,6 +7999,17 @@ function PageData(
           <button onClick={yfSave} style={{width:"100%",marginTop:8,padding:"8px 0",borderRadius:8,fontSize:12,fontWeight:800,border:"none",background:C.green,color:"#00150c",cursor:"pointer"}}>{"Enregistrer YF_MAP"}</button>
           {yfMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:yfMsg.type==="ok"?C.green:C.red}}>{yfMsg.text}</div>}
         </div>}
+      </div>
+
+      <div style={{marginBottom:12}}>
+        <button onClick={async function(){
+          var n=(txns||[]).filter(isCryptoSpotTxn).length;
+          if(n===0){ setCsMsg({type:"ok",text:"Aucun trade spot crypto à supprimer."}); setTimeout(function(){setCsMsg(null);},3000); return; }
+          if(!window.confirm("Supprimer "+n+" trade(s) spot crypto ? Les futures sont conservés.")) return;
+          var removed=await onPurgeCryptoSpot();
+          setCsMsg({type:"ok",text:"\u2713 "+removed+" trade(s) spot crypto supprimé(s)."}); setTimeout(function(){setCsMsg(null);},4000);
+        }} style={{width:"100%",padding:"8px 0",borderRadius:8,fontSize:11,fontWeight:700,border:"1px solid "+C.red,cursor:"pointer",background:"transparent",color:C.red}}>{"🗑️ Supprimer les trades spot crypto"}</button>
+        {csMsg && <div style={{marginTop:6,fontSize:11,fontWeight:700,color:csMsg.type==="ok"?C.green:C.red}}>{csMsg.text}</div>}
       </div>
 
       <div style={{marginBottom:12}}>
@@ -9925,6 +9946,12 @@ function App(){
     await save(SK.txns,next);                 // legacy (gdb_sons_v8 + KV gdb_data) — inchangé
     saveBase('gdb_txns', next);               // Phase 2 — base canonique : miroir v9 local + KV gdb_txns
   },[txns]);
+  const purgeCryptoSpot=useCallback(async function(){
+    const kept=(txns||[]).filter(function(t){ return !isCryptoSpotTxn(t); });
+    const removed=(txns||[]).length-kept.length;
+    if(removed>0){ setTxns(kept); await save(SK.txns,kept); await saveBase('gdb_txns',kept); }
+    return removed;
+  },[txns]);
 
   // v25.05 Phase 4 — applyInvestment : transfert Cash Matelas <-> fonds, creation/destruction
   // de parts (cumul DB), conservation EXACTE du cours (deltaUSD=montant/usdEur, shares=deltaUSD/cours$).
@@ -10516,7 +10543,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} onPurgeCryptoSpot={purgeCryptoSpot} autoRestore={dataRestore}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

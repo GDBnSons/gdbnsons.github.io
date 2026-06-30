@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.20";
+const APP_VERSION = "v28.21";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8181,6 +8181,75 @@ function recomputeGcFromDB(gcArr, ddArr, invArr){
 }
 
 // ── v27.02 — Onglet Market : Pouls / Macro / Secteurs (worker /market/overview) ──
+function PageNewsletter(){
+  const [prefs,setPrefs]=useState(null);
+  const [hist,setHist]=useState(null);
+  const [base,setBase]=useState(CF_WORKER_URL);
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const [lastSent,setLastSent]=useState(null);
+
+  function loadPrefs(){ cfGet("/newsletter/prefs").then(function(r){return r.json();}).then(function(d){ if(d&&d.prefs){setPrefs(d.prefs); setLastSent(d.lastSent||null);} }).catch(function(){}); }
+  function loadHist(){ cfGet("/newsletter/history").then(function(r){return r.json();}).then(function(d){ if(d){ setHist(d.editions||[]); if(d.base) setBase(d.base);} }).catch(function(){ setHist([]); }); }
+  useEffect(function(){ loadPrefs(); loadHist(); },[]);
+
+  function toggleEnabled(){
+    if(!prefs) return;
+    var next=!prefs.enabled;
+    setPrefs(Object.assign({},prefs,{enabled:next}));
+    cfPost("/newsletter/prefs",{enabled:next}).then(function(r){return r.json();}).then(function(d){ if(d&&d.prefs) setPrefs(d.prefs); }).catch(function(){});
+  }
+  function sendNow(){
+    setBusy(true); setMsg(null);
+    cfGet("/newsletter/send-now?force=1",{timeout:60000}).then(function(r){return r.json();}).then(function(d){
+      setBusy(false);
+      if(d&&d.ok){ var em=d.email&&d.email.ok, tg=d.telegram&&d.telegram.ok; setMsg({ok:true,text:"Envoyé — e-mail "+(em?"\u2713":"\u2717")+" · Telegram "+(tg?"\u2713":"\u2717")}); loadHist(); }
+      else setMsg({ok:false,text:(d&&(d.error||d.skipped))||"Échec de l'envoi"});
+    }).catch(function(e){ setBusy(false); setMsg({ok:false,text:(e&&e.message)||"Erreur réseau"}); });
+  }
+  var previewUrl = CF_WORKER_URL + "/newsletter/view?key=" + CF_AUTH_KEY;
+  var on = !!(prefs && prefs.enabled);
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <a href={previewUrl} target="_blank" rel="noopener" style={{flex:1,minWidth:130,textAlign:"center",background:C.btc+"22",border:"1px solid "+C.btc,borderRadius:10,padding:"11px 12px",color:C.btc,fontSize:13,fontWeight:700,textDecoration:"none"}}>👁 Aperçu</a>
+        <button onClick={sendNow} disabled={busy} style={{flex:1,minWidth:130,background:busy?C.bg1:C.green+"22",border:"1px solid "+C.green,borderRadius:10,padding:"11px 12px",color:C.green,fontSize:13,fontWeight:700,cursor:busy?"default":"pointer"}}>{busy?"Envoi…":"✉️ Envoyer maintenant"}</button>
+      </div>
+      {msg && <div style={{background:(msg.ok?C.green:C.red)+"11",border:"1px solid "+(msg.ok?C.green:C.red)+"44",borderRadius:10,padding:10,color:(msg.ok?C.green:C.red),fontSize:12,marginBottom:12}}>{msg.text}</div>}
+
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:14,marginBottom:12}}>
+        <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Préférences</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:13,color:C.text,fontWeight:600}}>Envoi quotidien automatique</div>
+            <div style={{fontSize:11,color:C.text3}}>6h00 (Nouméa){lastSent?" · dernier : "+lastSent:""}</div>
+          </div>
+          <button onClick={toggleEnabled} disabled={!prefs} style={{width:52,height:30,borderRadius:999,border:"none",cursor:prefs?"pointer":"default",background:on?C.green:C.border,position:"relative",flexShrink:0}}>
+            <span style={{position:"absolute",top:3,left:on?25:3,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+          </button>
+        </div>
+      </div>
+
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:14}}>
+        <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Historique{hist?" ("+hist.length+")":""}</div>
+        {!hist && <div style={{fontSize:12,color:C.text3}}>Chargement…</div>}
+        {hist && hist.length===0 && <div style={{fontSize:12,color:C.text3}}>Aucune édition pour l'instant.</div>}
+        {hist && hist.map(function(e){
+          var url = base + "/newsletter/day?id=" + e.stamp + "&t=" + e.token;
+          var d = (e.stamp&&e.stamp.length===8) ? (e.stamp.slice(6,8)+"/"+e.stamp.slice(4,6)+"/"+e.stamp.slice(0,4)) : (e.stamp||"?");
+          return (
+            <a key={e.stamp+"_"+e.token} href={url} target="_blank" rel="noopener" style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid "+C.border,textDecoration:"none"}}>
+              <span style={{fontSize:13,color:C.text,fontWeight:600}}>{d}{e.weekend?" · week-end":""}</span>
+              <span style={{fontSize:11,color:C.text3}}>{(e.email?"✉️":"—")+"  "+(e.tg?"📨":"—")+"  ›"}</span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PageMarket({ eur=false }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -8342,7 +8411,7 @@ function PageMarket({ eur=false }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; if(n>=1e6)return "$"+(n/1e6).toFixed(0)+" M"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["macro","Macro"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"]];
+  const SUBS=[["macro","Macro"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
 
   function Gauge(props){
     var v=props.value;
@@ -8393,8 +8462,10 @@ function PageMarket({ eur=false }){
         );})}
       </div>
 
-      {loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement…</div>}
-      {err && !loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
+      {loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && sub!=="newsletter" && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement…</div>}
+      {err && !loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && sub!=="newsletter" && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
+
+      {sub==="newsletter" && <PageNewsletter/>}
 
       {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
         <div>

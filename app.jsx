@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.21";
+const APP_VERSION = "v28.25";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -835,7 +835,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -4726,13 +4726,14 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         _applyLiveEOM(liveEUR || ddEUR);
       }
       if(category==="stocks"){
-        // GDB.S = tous les items stocks sauf KUCOIN (qui appartient au fonds crypto GDB.C)
-        // Inclut : actions, ETF, Cash plateforme (EURO/USD/STRC), Or
-        // Exclut : KUCOIN (cash crypto), Cash Matelas (matelas, hors fonds)
+        // v28.23 — MÊME périmètre que calcGdbPrices (GDB.S) et que les mois révolus
+        // (r[4]×parts) : GDB.S = tous les items stocks SAUF KUCOIN → le Cash Matelas
+        // est INCLUS. L'exclure ici créait une discontinuité à la frontière de mois
+        // (EOM révolu incluait le matelas, mois courant non) → EOM stocks faux.
         const usdEur  = src?.usdEur || 0.86;
         const liveEUR = EFF ? Math.round(
           EFF.stocks.items
-            .filter(x => x.t !== "KUCOIN" && x.cat !== "Cash Matelas")
+            .filter(x => x.t !== "KUCOIN")
             .reduce((s, x) => s + (x.val || 0), 0) * usdEur
         ) : null;
         _applyLiveEOM(liveEUR);
@@ -7248,11 +7249,14 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   );
 }
 function PageLegend(
-{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex}){
+{txns, liveFutures, hidden, eur, EFF, liveIbkrAnnex, spotExcl, onExclude, onRestore}){
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
-  const spot = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
+  function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+t.exitDate; }
+  const spotAll = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
+  const exclSet = React.useMemo(function(){ return new Set(spotExcl||[]); }, [spotExcl]);
+  const spot = React.useMemo(function(){ return spotAll.filter(function(t){ return !exclSet.has(spotKey(t)); }); }, [spotAll, exclSet]);
   const fut = React.useMemo(function(){
     return (liveFutures||SEED_FUTURES).map(function(t){
       return {ticker:t.ticker, dir:t.dir, entryDate:t.openDate, exitDate:t.closeDate, durationDays:t.durationDays,
@@ -7320,6 +7324,12 @@ function PageLegend(
         <Sort label="Durée" active={sortK==="dur"} onClick={function(){setSortK("dur");}}/>
         <Sort label="Date" active={sortK==="date"} onClick={function(){setSortK("date");}}/>
       </div>
+      {board==="spot" && (spotExcl||[]).length>0 && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg2,borderRadius:9,padding:"7px 11px",marginBottom:10}}>
+          <span style={{fontSize:11,color:C.text3}}>{(spotExcl||[]).length} trade{(spotExcl||[]).length>1?"s":""} masqué{(spotExcl||[]).length>1?"s":""}</span>
+          <button onClick={function(){ if(window.confirm("Restaurer tous les trades spot masqués ?")) onRestore&&onRestore(); }} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:7,padding:"3px 10px",color:C.btc,fontSize:11,fontWeight:700,cursor:"pointer"}}>Restaurer</button>
+        </div>
+      )}
       {/* Liste */}
       <div>
         {sorted.map(function(t,i){
@@ -7339,6 +7349,10 @@ function PageLegend(
                 <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
                 <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%")}</div>
               </div>
+              {board==="spot" && onExclude && (
+                <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Supprimer ce trade spot ?\n"+t.ticker+"  "+t.entryDate+" \u2192 "+t.exitDate+"\n(persistant, restaurable ci-dessus)")) onExclude(spotKey(t)); }}
+                  title="Supprimer ce trade" style={{background:"transparent",border:"none",cursor:"pointer",color:C.text3,fontSize:15,padding:"4px 2px 4px 4px",flexShrink:0,lineHeight:1}}>{"\uD83D\uDDD1"}</button>
+              )}
             </div>
           );
         })}
@@ -8188,10 +8202,16 @@ function PageNewsletter(){
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState(null);
   const [lastSent,setLastSent]=useState(null);
+  const [lastNews,setLastNews]=useState(null);
+  const [log,setLog]=useState(null);
+
+  function fmtStamp(st){ return (st&&st.length===8)?(st.slice(6,8)+"/"+st.slice(4,6)+"/"+st.slice(0,4)):(st||""); }
+  function sensCol(sens){ var s=(sens||"").toLowerCase(); return s.indexOf("hauss")>=0?C.green:(s.indexOf("baiss")>=0?C.red:C.text3); }
 
   function loadPrefs(){ cfGet("/newsletter/prefs").then(function(r){return r.json();}).then(function(d){ if(d&&d.prefs){setPrefs(d.prefs); setLastSent(d.lastSent||null);} }).catch(function(){}); }
-  function loadHist(){ cfGet("/newsletter/history").then(function(r){return r.json();}).then(function(d){ if(d){ setHist(d.editions||[]); if(d.base) setBase(d.base);} }).catch(function(){ setHist([]); }); }
-  useEffect(function(){ loadPrefs(); loadHist(); },[]);
+  function loadHist(){ cfGet("/newsletter/history").then(function(r){return r.json();}).then(function(d){ if(d){ setHist(d.editions||[]); if(d.base) setBase(d.base); setLastNews(d.lastNews||null);} }).catch(function(){ setHist([]); }); }
+  function loadLog(){ cfGet("/newsletter/log").then(function(r){return r.json();}).then(function(d){ if(d) setLog(d.log||[]); }).catch(function(){ setLog([]); }); }
+  useEffect(function(){ loadPrefs(); loadHist(); loadLog(); },[]);
 
   function toggleEnabled(){
     if(!prefs) return;
@@ -8203,7 +8223,7 @@ function PageNewsletter(){
     setBusy(true); setMsg(null);
     cfGet("/newsletter/send-now?force=1",{timeout:60000}).then(function(r){return r.json();}).then(function(d){
       setBusy(false);
-      if(d&&d.ok){ var em=d.email&&d.email.ok, tg=d.telegram&&d.telegram.ok; setMsg({ok:true,text:"Envoyé — e-mail "+(em?"\u2713":"\u2717")+" · Telegram "+(tg?"\u2713":"\u2717")}); loadHist(); }
+      if(d&&d.ok){ var em=d.email&&d.email.ok, tg=d.telegram&&d.telegram.ok; setMsg({ok:!(d.alerted),text:"Envoyé — e-mail "+(em?"\u2713":"\u2717")+" · Telegram "+(tg?"\u2713":"\u2717")}); loadHist(); loadLog(); }
       else setMsg({ok:false,text:(d&&(d.error||d.skipped))||"Échec de l'envoi"});
     }).catch(function(e){ setBusy(false); setMsg({ok:false,text:(e&&e.message)||"Erreur réseau"}); });
   }
@@ -8218,12 +8238,31 @@ function PageNewsletter(){
       </div>
       {msg && <div style={{background:(msg.ok?C.green:C.red)+"11",border:"1px solid "+(msg.ok?C.green:C.red)+"44",borderRadius:10,padding:10,color:(msg.ok?C.green:C.red),fontSize:12,marginBottom:12}}>{msg.text}</div>}
 
+      {lastNews && lastNews.news && lastNews.news.length>0 && (
+        <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Dernières news{lastNews.stamp?" · "+fmtStamp(lastNews.stamp):""}</div>
+          {lastNews.news.slice(0,5).map(function(n,i){
+            var sc=sensCol(n.sens);
+            return (
+              <div key={i} style={{padding:"8px 0",borderBottom:i<Math.min(5,lastNews.news.length)-1?"1px solid "+C.border:"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <a href={n.url||"#"} target="_blank" rel="noopener" style={{fontSize:13,color:C.text,fontWeight:600,textDecoration:"none",flex:1,lineHeight:1.3}}>{n.titre}</a>
+                  {n.sens && <span style={{fontSize:9,fontWeight:700,color:sc,textTransform:"uppercase",whiteSpace:"nowrap",marginTop:2}}>{n.sens}</span>}
+                </div>
+                {n.resume && <div style={{fontSize:11,color:C.text3,marginTop:3,lineHeight:1.35}}>{n.resume}</div>}
+                {n.source && <div style={{fontSize:10,color:C.btc,marginTop:3}}>{n.source}{n.actifs&&n.actifs.length?" · "+n.actifs.join(", "):""}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:14,marginBottom:12}}>
         <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Préférences</div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <div style={{fontSize:13,color:C.text,fontWeight:600}}>Envoi quotidien automatique</div>
-            <div style={{fontSize:11,color:C.text3}}>6h00 (Nouméa){lastSent?" · dernier : "+lastSent:""}</div>
+            <div style={{fontSize:11,color:C.text3}}>6h00 (Nouméa){lastSent?" · dernier : "+fmtStamp(lastSent):""}</div>
           </div>
           <button onClick={toggleEnabled} disabled={!prefs} style={{width:52,height:30,borderRadius:999,border:"none",cursor:prefs?"pointer":"default",background:on?C.green:C.border,position:"relative",flexShrink:0}}>
             <span style={{position:"absolute",top:3,left:on?25:3,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
@@ -8237,12 +8276,30 @@ function PageNewsletter(){
         {hist && hist.length===0 && <div style={{fontSize:12,color:C.text3}}>Aucune édition pour l'instant.</div>}
         {hist && hist.map(function(e){
           var url = base + "/newsletter/day?id=" + e.stamp + "&t=" + e.token;
-          var d = (e.stamp&&e.stamp.length===8) ? (e.stamp.slice(6,8)+"/"+e.stamp.slice(4,6)+"/"+e.stamp.slice(0,4)) : (e.stamp||"?");
           return (
             <a key={e.stamp+"_"+e.token} href={url} target="_blank" rel="noopener" style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid "+C.border,textDecoration:"none"}}>
-              <span style={{fontSize:13,color:C.text,fontWeight:600}}>{d}{e.weekend?" · week-end":""}</span>
+              <span style={{fontSize:13,color:C.text,fontWeight:600}}>{fmtStamp(e.stamp)}</span>
               <span style={{fontSize:11,color:C.text3}}>{(e.email?"✉️":"—")+"  "+(e.tg?"📨":"—")+"  ›"}</span>
             </a>
+          );
+        })}
+      </div>
+
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:12}}>
+        <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Journal{log?" ("+log.length+")":""}</div>
+        {!log && <div style={{fontSize:12,color:C.text3}}>Chargement…</div>}
+        {log && log.length===0 && <div style={{fontSize:12,color:C.text3}}>Aucun envoi enregistré.</div>}
+        {log && log.slice(0,15).map(function(e,i){
+          var dt = new Date((e.ts||0)+11*3600*1000);
+          function p(n){return(n<10?"0":"")+n;}
+          var when = p(dt.getUTCDate())+"/"+p(dt.getUTCMonth()+1)+" "+p(dt.getUTCHours())+"h"+p(dt.getUTCMinutes());
+          var both = e.email && e.tg;
+          var errTxt = (e.emailErr||e.tgErr) ? (" · "+String(e.emailErr||e.tgErr).slice(0,24)) : "";
+          return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:i<Math.min(15,log.length)-1?"1px solid "+C.border:"none",gap:8}}>
+              <span style={{fontSize:12,color:C.text2,whiteSpace:"nowrap"}}>{when}{e.force?" ·m":""}</span>
+              <span style={{fontSize:11,color:both?C.green:C.red,textAlign:"right"}}>{"✉️"+(e.email?"\u2713":"\u2717")+"  📨"+(e.tg?"\u2713":"\u2717")+errTxt}</span>
+            </div>
           );
         })}
       </div>
@@ -9020,6 +9077,11 @@ function App(){
   const[liveInv,setLiveInv]=useState(INV_SEED);
   const[liveFutures,setLiveFutures]=useState(SEED_FUTURES);
   const[liveIbkrAnnex,setLiveIbkrAnnex]=useState(SEED_IBKR_ANNEX);
+  // v28.25 — exclusion PERSISTANTE de trades spot (Legend). Filtre les trades clôturés
+  // calculés ; immunisé contre la ré-injection du SEED. Base gdb_spot_excl (KV + local).
+  const[liveSpotExcl,setLiveSpotExcl]=useState(function(){ try{ var v=lsv9Get('gdb_spot_excl'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  const excludeSpotTrade = useCallback(function(key){ setLiveSpotExcl(function(prev){ var next=(prev||[]).indexOf(key)>=0?prev:[...(prev||[]),key]; saveBase('gdb_spot_excl', next); return next; }); },[]);
+  const restoreSpotTrades = useCallback(function(){ setLiveSpotExcl([]); saveBase('gdb_spot_excl', []); },[]);
   // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
   const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
   // v25.04 — liste des investisseurs connus (depuis la DB gdb_inv), grandit avec les nouveaux.
@@ -9199,6 +9261,17 @@ function App(){
     finally{ setRefreshing(false); }
   },[]);
 
+  // v28.24 — refresh au lancement : ne part QUE lorsque tout est charge —
+  // ready (boot termine) ET ecran de demarrage passe (applyStartChoice a injecte
+  // positions + YF_MAP). setTimeout(0) laisse React committer ces etats d'abord.
+  const launchRefreshDone = useRef(false);
+  useEffect(()=>{
+    if(ready && !startScreen && !launchRefreshDone.current){
+      launchRefreshDone.current = true;
+      setTimeout(()=>{ try{ handleRefresh(); }catch(e){ console.warn("[launch] refresh:", e && e.message); } }, 0);
+    }
+  },[ready, startScreen]); // eslint-disable-line
+
   // Merge live prices into effective CURRENT data
   // EFF = live est la source unique de vérité
   const EFF = live || CURRENT;
@@ -9288,6 +9361,7 @@ function App(){
       if(kv.gdb_inv)   { const _mi=unionTxnsById(INV_SEED, kv.gdb_inv); setLiveInv(_mi); FUND_PARTS=cumulFundParts(_mi); }
       if(kv.gdb_futures)    setLiveFutures(unionTxnsById(SEED_FUTURES, kv.gdb_futures));
       if(kv.gdb_ibkr_annex) setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, kv.gdb_ibkr_annex));
+      if(Array.isArray(kv.gdb_spot_excl)) setLiveSpotExcl(kv.gdb_spot_excl);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9324,6 +9398,7 @@ function App(){
       const lvInv  = lsv9Get('gdb_inv'); if(lvInv){ const _mi2=unionTxnsById(INV_SEED, lvInv); setLiveInv(_mi2); FUND_PARTS=cumulFundParts(_mi2); }
       const lvFut = lsv9Get('gdb_futures'); if(lvFut){ setLiveFutures(unionTxnsById(SEED_FUTURES, lvFut)); }
       const lvAnx = lsv9Get('gdb_ibkr_annex'); if(lvAnx){ setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, lvAnx)); }
+      const lvExcl = lsv9Get('gdb_spot_excl'); if(Array.isArray(lvExcl)){ setLiveSpotExcl(lvExcl); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -9676,8 +9751,9 @@ function App(){
       }
 
       setReady(true);
-      // v28.20 — refresh des prix au lancement (apres chargement initial complet)
-      try{ handleRefresh(); }catch(e){ console.warn("[launch] refresh:", e && e.message); }
+      // v28.24 — refresh de lancement deplace vers un effet dedie (attend ready +
+      // ecran de demarrage passe, cf. launchRefreshDone). L'appel ici partait avant
+      // applyStartChoice (positions + YF_MAP KV pas encore injectes) -> inefficace.
     })();
   },[]);
 
@@ -10402,7 +10478,7 @@ function App(){
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
-        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex}/>}
+        {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>

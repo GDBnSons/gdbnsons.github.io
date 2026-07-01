@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.25";
+const APP_VERSION = "v28.26";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4707,7 +4707,23 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         let eomEUR = null;
         if(category==="crypto")      eomEUR = r[1];
         else if(category==="total")  eomEUR = r[2];
-        else if(category==="stocks") eomEUR = (r[4]!=null && r[5]!=null) ? Math.round(r[4]*GDB_S_NB_PARTS*r[5]) : null;
+        else if(category==="stocks"){
+          // v28.26 — mois PRÉSENT dans STOCKS_MONTHLY (ex. Jan→Mai) : on garde la
+          // reconstruction historique au nb de parts figé (GDB_S_NB_PARTS), inchangée.
+          // Mois ABSENT (ex. juin) : GDB.S est enregistré = valeur ÷ parts DYNAMIQUES ;
+          // après un dépôt/retrait le nb de parts change → 11942 fige une mauvaise base.
+          // On reconstruit alors avec les parts RÉELLES à la date (cumul gdb_inv ≤ r[0]).
+          if(r[4]!=null && r[5]!=null){
+            let partsS = GDB_S_NB_PARTS;
+            const hasBase = base.eom && base.eom[mi]!=null;
+            if(!hasBase){
+              let _S=0;
+              (_INV_ST||[]).forEach(function(m){ if(m && typeof m.shares==="number" && m.fonds==="GDB.S" && (!m.date || m.date <= r[0])) _S += m.shares; });
+              if(_S>0) partsS = _S;
+            }
+            eomEUR = Math.round(r[4]*partsS*r[5]);
+          } else eomEUR = null;
+        }
         if(eomEUR!=null) result.eom[mi] = eomEUR;
       }
       // re-chaîner BOM = EOM du mois précédent (même frontière)

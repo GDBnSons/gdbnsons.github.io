@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.26";
+const APP_VERSION = "v28.27";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8329,6 +8329,8 @@ function PageMarket({ eur=false }){
   const [err,setErr]=useState(null);
   const [sub,setSub]=useState("macro");
   const [mt,setMt]=useState(null);
+  const [risk,setRisk]=useState(null),[riskL,setRiskL]=useState(false),[riskE,setRiskE]=useState(null);
+  const [cross,setCross]=useState(null),[crossL,setCrossL]=useState(false),[crossE,setCrossE]=useState(null);
 
   function load(noCache){
     setLoading(true); setErr(null);
@@ -8466,6 +8468,8 @@ function PageMarket({ eur=false }){
     if(sub==="hedge"    && hf===null   && !hfL) loadSec("/market/13f",setHf,setHfL,setHfE,false);
     if(sub==="congress" && cong===null && !congL) loadSec("/market/congress",setCong,setCongL,setCongE,false);
     if(sub==="macro"    && fund===null && !fundL) loadSec("/funding",setFund,setFundL,setFundE,false);
+    if(sub==="macro"    && risk===null && !riskL) loadSec("/market/risk",setRisk,setRiskL,setRiskE,false);
+    if(sub==="secteurs" && cross===null && !crossL) loadSec("/market/cross",setCross,setCrossL,setCrossE,false);
     if(sub==="btc"      && btcSig===null && !btcSigL) loadBtc(false);
   },[sub]);
   function refresh(){
@@ -8474,7 +8478,8 @@ function PageMarket({ eur=false }){
     else if(sub==="hedge") loadSec("/market/13f",setHf,setHfL,setHfE,true);
     else if(sub==="congress") loadSec("/market/congress",setCong,setCongL,setCongE,true);
     else if(sub==="btc") loadBtc(true);
-    else { load(true); if(sub==="macro") loadSec("/funding",setFund,setFundL,setFundE,true); }
+    else if(sub==="secteurs") { load(true); loadSec("/market/cross",setCross,setCrossL,setCrossE,true); }
+    else { load(true); if(sub==="macro"){ loadSec("/funding",setFund,setFundL,setFundE,true); loadSec("/market/risk",setRisk,setRiskL,setRiskE,true); } }
   }
 
   const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
@@ -8552,6 +8557,29 @@ function PageMarket({ eur=false }){
               </div>
             );})}
           </div>
+          <div style={{marginTop:18}}>
+            <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Cross-asset — du jour</div>
+            {crossL && !cross && <div style={{color:C.text3,fontSize:11,padding:"4px 0"}}>Chargement…</div>}
+            {crossE && !cross && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:10,color:C.red,fontSize:11}}>Cross-asset : {crossE} <button onClick={function(){loadSec("/market/cross",setCross,setCrossL,setCrossE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
+            {cross && (function(){ var tiles=(cross.tiles||[]); var cr=cross.crypto; return (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {tiles.map(function(it){ var col=it.pct==null?C.text3:(it.pct>=0?C.green:C.red); return (
+                  <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{background:col+heatA(it.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",cursor:"pointer",display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:11,fontWeight:700,color:C.text}}>{it.label}</span>
+                    <span style={{fontSize:8,color:C.text3}}>{it.symbol}</span>
+                    <span style={{fontSize:15,fontWeight:800,color:col}}>{pctFmt(it.pct)}</span>
+                  </div>
+                );})}
+                {cr && (function(){ var col=cr.pct==null?C.text3:(cr.pct>=0?C.green:C.red); return (
+                  <div style={{background:col+heatA(cr.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",display:"flex",flexDirection:"column",gap:2}}>
+                    <span style={{fontSize:11,fontWeight:700,color:C.text}}>Crypto (market cap)</span>
+                    <span style={{fontSize:8,color:C.text3}}>{bigMcap(cr.mcap)} · dom. {cr.dominance!=null?cr.dominance.toFixed(1)+"%":"—"}</span>
+                    <span style={{fontSize:15,fontWeight:800,color:col}}>{pctFmt(cr.pct)}</span>
+                  </div>
+                );})()}
+              </div>
+            );})()}
+          </div>
         </div>
       );})()}
 
@@ -8580,8 +8608,39 @@ function PageMarket({ eur=false }){
             </div>
           </div>
         ); };
+        var sigCol=function(sg){ return sg>0?C.green:(sg<0?C.red:C.text3); };
         return (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            {sectTitle("Tendance générale — risk-on / risk-off")}
+            {riskL && !risk && <div style={{color:C.text3,fontSize:11,padding:"4px 0"}}>Chargement du baromètre…</div>}
+            {riskE && !risk && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:10,color:C.red,fontSize:11}}>Baromètre : {riskE} <button onClick={function(){loadSec("/market/risk",setRisk,setRiskL,setRiskE,true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
+            {risk && (function(){
+              var vColor = risk.verdict==="risk-on"?C.green:(risk.verdict==="risk-off"?C.red:C.text2);
+              var vLabel = risk.verdict==="risk-on"?"RISK-ON":(risk.verdict==="risk-off"?"RISK-OFF":"NEUTRE");
+              return (
+                <div style={{background:C.bg1,border:"1px solid "+vColor+"55",borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:12}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:22,fontWeight:900,color:vColor,letterSpacing:0.5}}>{vLabel}</span>
+                    <span style={{fontSize:12,color:C.text2,fontWeight:700}}>{risk.bullish}/{risk.max} signaux haussiers</span>
+                  </div>
+                  <div style={{position:"relative",height:8,borderRadius:4,background:"linear-gradient(90deg,#e5484d 0%,#f5a623 35%,#9b9b9b 50%,#46a758 70%,#12a594 100%)"}}>
+                    <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,risk.index))+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {(risk.criteria||[]).map(function(c){ var sc=sigCol(c.signal); return (
+                      <div key={c.key} style={{background:sc+"14",border:"1px solid "+sc+"44",borderRadius:10,padding:"8px 10px",display:"flex",flexDirection:"column",gap:2}}>
+                        <span style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:0.3}}>{c.label}</span>
+                        <span style={{fontSize:14,fontWeight:800,color:sc}}>{c.value}</span>
+                        <span style={{fontSize:8,color:C.text3}}>{c.detail}</span>
+                      </div>
+                    );})}
+                  </div>
+                  <div style={{fontSize:8,color:C.text3,textAlign:"right"}}>SPY {risk.spy&&risk.spy.price!=null?num(risk.spy.price,2):"—"} · MAJ {risk.ts?new Date(risk.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+                </div>
+              );
+            })()}
+          </div>
           <div style={{display:"flex",gap:10}}>
             <Gauge title="Fear & Greed — Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>
             <Gauge title="Fear & Greed — Marché" value={p.fgTradi?p.fgTradi.value:null} label={p.fgTradi?p.fgTradi.label:""}/>

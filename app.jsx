@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.27";
+const APP_VERSION = "v28.30";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8330,6 +8330,8 @@ function PageMarket({ eur=false }){
   const [sub,setSub]=useState("macro");
   const [mt,setMt]=useState(null);
   const [risk,setRisk]=useState(null),[riskL,setRiskL]=useState(false),[riskE,setRiskE]=useState(null);
+  const [riskSel,setRiskSel]=useState(null);
+  const [riskOpen,setRiskOpen]=useState(false);
   const [cross,setCross]=useState(null),[crossL,setCrossL]=useState(false),[crossE,setCrossE]=useState(null);
 
   function load(noCache){
@@ -8618,28 +8620,57 @@ function PageMarket({ eur=false }){
             {risk && (function(){
               var vColor = risk.verdict==="risk-on"?C.green:(risk.verdict==="risk-off"?C.red:C.text2);
               var vLabel = risk.verdict==="risk-on"?"RISK-ON":(risk.verdict==="risk-off"?"RISK-OFF":"NEUTRE");
+              // Position du curseur recalculée depuis le score (cohérente avec X/N signaux) — robuste si index absent/NaN
+              var _crit = risk.criteria||[];
+              var _max  = risk.max || _crit.length || 12;
+              var _bull = (risk.bullish!=null)?risk.bullish:_crit.filter(function(x){return x.signal>0;}).length;
+              var _bear = (risk.bearish!=null)?risk.bearish:_crit.filter(function(x){return x.signal<0;}).length;
+              var _score= (typeof risk.score==="number")?risk.score:(_bull-_bear);
+              var _idx  = Math.round((_score+_max)/(2*_max)*100);
+              if(!isFinite(_idx)) _idx = (typeof risk.index==="number"&&isFinite(risk.index))?risk.index:50;
+              _idx = Math.max(0,Math.min(100,_idx));
               return (
                 <div style={{background:C.bg1,border:"1px solid "+vColor+"55",borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:12}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                  <div onClick={function(){ setRiskOpen(function(o){return !o;}); }} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",cursor:"pointer"}}>
                     <span style={{fontSize:22,fontWeight:900,color:vColor,letterSpacing:0.5}}>{vLabel}</span>
-                    <span style={{fontSize:12,color:C.text2,fontWeight:700}}>{risk.bullish}/{risk.max} signaux haussiers</span>
+                    <span style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12,color:C.text2,fontWeight:700}}>{_bull}/{_max} signaux haussiers</span>
+                      <span style={{fontSize:12,color:C.text3,fontWeight:800}}>{riskOpen?"\u25BE":"\u25B8"}</span>
+                    </span>
                   </div>
                   <div style={{position:"relative",height:8,borderRadius:4,background:"linear-gradient(90deg,#e5484d 0%,#f5a623 35%,#9b9b9b 50%,#46a758 70%,#12a594 100%)"}}>
-                    <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,risk.index))+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>
+                    <div style={{position:"absolute",top:-3,left:"calc("+_idx+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>
                   </div>
+                  {riskOpen && (<React.Fragment>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                     {(risk.criteria||[]).map(function(c){ var sc=sigCol(c.signal); return (
-                      <div key={c.key} style={{background:sc+"14",border:"1px solid "+sc+"44",borderRadius:10,padding:"8px 10px",display:"flex",flexDirection:"column",gap:2}}>
-                        <span style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:0.3}}>{c.label}</span>
-                        <span style={{fontSize:14,fontWeight:800,color:sc}}>{c.value}</span>
-                        <span style={{fontSize:8,color:C.text3}}>{c.detail}</span>
+                      <div key={c.key} onClick={function(){ setRiskSel(c); }} style={{background:sc+"14",border:"1px solid "+sc+"44",borderRadius:10,padding:"9px 10px",cursor:"pointer",display:"flex",flexDirection:"column",gap:3}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
+                          <span style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</span>
+                          <span style={{fontSize:11,fontWeight:800,color:sc,flexShrink:0}}>{c.signal>0?"\u25B2":(c.signal<0?"\u25BC":"\u2014")}</span>
+                        </div>
+                        <span style={{fontSize:15,fontWeight:800,color:sc,lineHeight:1.1}}>{c.value}</span>
                       </div>
                     );})}
                   </div>
                   <div style={{fontSize:8,color:C.text3,textAlign:"right"}}>SPY {risk.spy&&risk.spy.price!=null?num(risk.spy.price,2):"—"} · MAJ {risk.ts?new Date(risk.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+                  </React.Fragment>)}
                 </div>
               );
             })()}
+            {riskSel && (
+              <div onClick={function(){setRiskSel(null);}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:900,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+                <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:16,padding:"16px 16px 20px",width:"100%",maxWidth:440,margin:8,boxShadow:"0 -4px 24px rgba(0,0,0,0.4)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
+                    <span style={{fontSize:15,fontWeight:800,color:C.text}}>{riskSel.label}</span>
+                    {(function(){ var sc=riskSel.signal>0?C.green:(riskSel.signal<0?C.red:C.text3); var lab=riskSel.signal>0?"Haussier":(riskSel.signal<0?"Baissier":"Neutre"); return <span style={{fontSize:11,fontWeight:800,color:sc,background:sc+"1e",border:"1px solid "+sc+"55",borderRadius:20,padding:"3px 12px"}}>{lab}</span>; })()}
+                  </div>
+                  <div style={{fontSize:26,fontWeight:900,color:(riskSel.signal>0?C.green:(riskSel.signal<0?C.red:C.text2)),marginBottom:10}}>{riskSel.value}</div>
+                  <div style={{fontSize:13,color:C.text2,lineHeight:1.5}}>{riskSel.tip||riskSel.detail}</div>
+                  <button onClick={function(){setRiskSel(null);}} style={{marginTop:16,width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>Fermer</button>
+                </div>
+              </div>
+            )}
           </div>
           <div style={{display:"flex",gap:10}}>
             <Gauge title="Fear & Greed — Crypto" value={p.fgCrypto?p.fgCrypto.value:null} label={p.fgCrypto?p.fgCrypto.label:""}/>

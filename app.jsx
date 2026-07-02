@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.30";
+const APP_VERSION = "v28.31";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8646,7 +8646,7 @@ function PageMarket({ eur=false }){
                     {(risk.criteria||[]).map(function(c){ var sc=sigCol(c.signal); return (
                       <div key={c.key} onClick={function(){ setRiskSel(c); }} style={{background:sc+"14",border:"1px solid "+sc+"44",borderRadius:10,padding:"9px 10px",cursor:"pointer",display:"flex",flexDirection:"column",gap:3}}>
                         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
-                          <span style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</span>
+                          <span style={{fontSize:9,color:C.text,textTransform:"uppercase",letterSpacing:0.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</span>
                           <span style={{fontSize:11,fontWeight:800,color:sc,flexShrink:0}}>{c.signal>0?"\u25B2":(c.signal<0?"\u25BC":"\u2014")}</span>
                         </div>
                         <span style={{fontSize:15,fontWeight:800,color:sc,lineHeight:1.1}}>{c.value}</span>

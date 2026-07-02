@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.31";
+const APP_VERSION = "v28.32";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8566,7 +8566,7 @@ function PageMarket({ eur=false }){
             {cross && (function(){ var tiles=(cross.tiles||[]); var cr=cross.crypto; return (
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 {tiles.map(function(it){ var col=it.pct==null?C.text3:(it.pct>=0?C.green:C.red); return (
-                  <div key={it.symbol} onClick={function(){setMt({ticker:it.symbol,cat:""});}} style={{background:col+heatA(it.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",cursor:"pointer",display:"flex",flexDirection:"column",gap:2}}>
+                  <div key={it.symbol} onClick={it.combo?undefined:function(){setMt({ticker:it.symbol,cat:""});}} style={{background:col+heatA(it.pct),border:"1px solid "+col+"55",borderRadius:10,padding:"10px 11px",cursor:it.combo?"default":"pointer",display:"flex",flexDirection:"column",gap:2}}>
                     <span style={{fontSize:11,fontWeight:700,color:C.text}}>{it.label}</span>
                     <span style={{fontSize:8,color:C.text3}}>{it.symbol}</span>
                     <span style={{fontSize:15,fontWeight:800,color:col}}>{pctFmt(it.pct)}</span>

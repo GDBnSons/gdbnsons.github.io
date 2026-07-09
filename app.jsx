@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.33";
+const APP_VERSION = "v28.34";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8332,6 +8332,8 @@ function PageMarket({ eur=false }){
   const [risk,setRisk]=useState(null),[riskL,setRiskL]=useState(false),[riskE,setRiskE]=useState(null);
   const [riskSel,setRiskSel]=useState(null);
   const [riskOpen,setRiskOpen]=useState(false);
+  const [histR,setHistR]=useState(null),[histL,setHistL]=useState(false),[histE,setHistE]=useState(null);
+  const [histOpen,setHistOpen]=useState(false);
   const [cross,setCross]=useState(null),[crossL,setCrossL]=useState(false),[crossE,setCrossE]=useState(null);
 
   function load(noCache){
@@ -8481,7 +8483,7 @@ function PageMarket({ eur=false }){
     else if(sub==="congress") loadSec("/market/congress",setCong,setCongL,setCongE,true);
     else if(sub==="btc") loadBtc(true);
     else if(sub==="secteurs") { load(true); loadSec("/market/cross",setCross,setCrossL,setCrossE,true); }
-    else { load(true); if(sub==="macro"){ loadSec("/funding",setFund,setFundL,setFundE,true); loadSec("/market/risk",setRisk,setRiskL,setRiskE,true); } }
+    else { load(true); if(sub==="macro"){ loadSec("/funding",setFund,setFundL,setFundE,true); loadSec("/market/risk",setRisk,setRiskL,setRiskE,true); if(histOpen) loadSec("/market/risk-history",setHistR,setHistL,setHistE,true); } }
   }
 
   const pctColor=function(p){ return p==null?C.text3:(p>0?C.green:(p<0?C.red:C.text2)); };
@@ -8669,6 +8671,49 @@ function PageMarket({ eur=false }){
                   <div style={{fontSize:13,color:C.text2,lineHeight:1.5}}>{riskSel.tip||riskSel.detail}</div>
                   <button onClick={function(){setRiskSel(null);}} style={{marginTop:16,width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>Fermer</button>
                 </div>
+              </div>
+            )}
+          </div>
+          <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px"}}>
+            <div onClick={function(){ var o=!histOpen; setHistOpen(o); if(o && histR===null && !histL) loadSec("/market/risk-history",setHistR,setHistL,setHistE,false); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+              <span style={{fontSize:12,fontWeight:800,color:C.text}}>Historique du baromètre</span>
+              <span style={{fontSize:12,color:C.text3,fontWeight:800}}>{histOpen?"\u25BE":"\u25B8"}</span>
+            </div>
+            {histOpen && (
+              <div style={{marginTop:10}}>
+                {histL && !histR && <div style={{fontSize:11,color:C.text3}}>Chargement…</div>}
+                {histE && !histR && <div style={{fontSize:11,color:C.red}}>{histE}</div>}
+                {histR && (function(){
+                  var pts=(histR.points||[]).filter(function(p){ return p && p.d; });
+                  if(pts.length<2) return <div style={{fontSize:11,color:C.text3,lineHeight:1.5}}>Historique en construction — un point est enregistré chaque matin à l'envoi de la newsletter ({pts.length} point{pts.length>1?"s":""} pour l'instant). Le graphe apparaîtra dès 2 points.</div>;
+                  var W=340,H=150,P=8,n=pts.length;
+                  function norm(key){
+                    var vals=pts.map(function(p){ return (p[key]!=null&&isFinite(p[key]))?p[key]:null; });
+                    var vs=vals.filter(function(v){ return v!=null; });
+                    if(vs.length<2) return null;
+                    var mn=Math.min.apply(null,vs), mx=Math.max.apply(null,vs), rg=(mx-mn)||1;
+                    return vals.map(function(v){ return v==null?null:(H-P-((v-mn)/rg)*(H-2*P)); });
+                  }
+                  function line(ys){ if(!ys) return ""; var out=[]; ys.forEach(function(y,i){ if(y!=null) out.push((P+i*(W-2*P)/(n-1)).toFixed(1)+","+y.toFixed(1)); }); return out.join(" "); }
+                  var yR=norm("index"), yS=norm("spy"), yP=norm("port");
+                  var last=pts[n-1];
+                  function leg(col,lab,val){ return <span style={{display:"inline-flex",alignItems:"center",gap:4,marginRight:12}}><span style={{width:10,height:3,background:col,borderRadius:2,display:"inline-block"}}/><span style={{fontSize:10,color:C.text2}}>{lab}{val?(" · "+val):""}</span></span>; }
+                  return (
+                    <div>
+                      <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block",background:C.bg,borderRadius:8}}>
+                        {yS && <polyline points={line(yS)} fill="none" stroke="#4a9eff" strokeWidth="1.5" strokeLinejoin="round"/>}
+                        {yP && <polyline points={line(yP)} fill="none" stroke={C.green} strokeWidth="1.5" strokeLinejoin="round"/>}
+                        {yR && <polyline points={line(yR)} fill="none" stroke={C.btc} strokeWidth="2.2" strokeLinejoin="round"/>}
+                      </svg>
+                      <div style={{marginTop:8,display:"flex",flexWrap:"wrap",alignItems:"center"}}>
+                        {yR && leg(C.btc,"Baromètre",(last.bullish!=null&&last.max!=null)?(last.bullish+"/"+last.max):null)}
+                        {yS && leg("#4a9eff","SPY",last.spy!=null?String(Math.round(last.spy)):null)}
+                        {yP && leg(C.green,"Portefeuille",last.port!=null?("$"+Math.round(last.port/1000)+"k"):null)}
+                      </div>
+                      <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>{n} jours · séries normalisées (min-max) pour comparer les formes — 1 point/jour à 6h00.</div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

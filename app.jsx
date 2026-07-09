@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.32";
+const APP_VERSION = "v28.33";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9118,6 +9118,10 @@ function PageChangelog(){
     ["v27 — Sauvegarde & sécurité", "Restauration des sauvegardes (cloud daté ou fichier, avec backup de sécurité préalable). Pare-feu d'écriture par origine côté worker. Versioning centralisé du cache. Pré-chauffage horaire + sauvegarde quotidienne dédupliquée (cron)."],
     ["v27 — Refactor & performance", "Helper d'appels worker unifié (URL/clé centralisées). Mémoïsation des 4 graphes (survol fluide). Tops/Flops actions filtrés > 500 M$. Funding affiché en millions (M). Persistance YF_MAP fiabilisée à l'ajout d'un ticker. Retrait de la base figée DB."],
     ["v28 — Version sanctuarisée", "Base de référence stable : stockage fiabilisé (fusion par date des séries, persistance des positions après un trade), graphes optimisés, onglet Market complet (Macro, Secteurs, Tops/Flops, Initiés & 13F, BTC). Module achat/vente affiné (Note + Contrepartie côte à côte)."],
+    ["v29 — Newsletter quotidienne", "Fiche marché envoyée chaque matin à 6h (e-mail + Telegram avec lien web) : baromètre, pouls (Fear & Greed, VIX, signal BTC), indices overnight, secteurs, funding, agenda éco USA, portefeuille (Δ24h/Δ7j, meilleur/pire), 5 news sélectionnées et résumées par IA (Claude). Portefeuille re-pricé via Yahoo au moment de l'envoi. Fiabilité : 3 tentatives par canal, alerte Telegram en cas d'échec, journal des envois. Section Newsletter dans Market : aperçu, envoi manuel, on/off, historique 60 jours, dernières news, journal."],
+    ["v28.2x — Baromètre risk-on/off", "Ouverture de Market → Macro : verdict RISK-ON / NEUTRE / RISK-OFF + curseur, 12 critères à poids égal (DXY, SPY vs open hebdo, MA9/18 hebdo et daily, régime 50MA, VIX, Fear & Greed, ampleur sectorielle, High Yield, cycliques/défensives, cuivre/or, or refuge). Carte repliable, tuiles cliquables avec explication détaillée. Repris en ouverture de la newsletter (remplace l'Humeur du jour)."],
+    ["v28.2x — Carte cross-asset", "Market → Secteurs : Or, Argent, Mines, Cuivre, Obligations (TLT/HYG/LQD), Semi-conducteurs, Services pétroliers, Brent, Robotique, Spatial (SPCX+JEDI.L) + market cap crypto totale avec dominance BTC. Δ jour, tuiles cliquables."],
+    ["v28.2x — Corrections & confort", "Trades spot supprimables durablement (Legend : corbeille + restauration, base dédiée immunisée contre la ré-injection). Refresh au lancement différé après chargement complet. Stats : valeur de fin de mois Actions corrigée (reconstruction au nombre de parts réel) et périmètre aligné entre mois courant et mois révolus."],
   ];
   return (
     <div style={{paddingBottom:40}}>
@@ -9143,7 +9147,8 @@ function PageAbout(){
     ["Frontend", "React 18 (JSX, Babel standalone) · JavaScript · HTML / CSS"],
     ["Backend", "Cloudflare Worker (JavaScript) + KV storage"],
     ["Hébergement", "GitHub Pages"],
-    ["Sources de données", "Yahoo Finance · CoinGecko · FMP · SEC EDGAR · Nasdaq · House Stock Watcher"],
+    ["Sources de données", "Yahoo Finance · CoinGecko · FMP · SEC EDGAR · Nasdaq · House Stock Watcher · Finnhub · RSS (CoinDesk, Cointelegraph, Decrypt)"],
+    ["Newsletter", "Envoi quotidien 6h00 (Nouméa) — e-mail (Resend) + Telegram · résumé des news par IA (Claude, Anthropic) · baromètre risk-on/off 12 critères"],
   ];
   return (
     <div style={{paddingBottom:40}}>

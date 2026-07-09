@@ -333,59 +333,97 @@ v23.00   Nouvelle série stable depuis v21.97 :
          ▸ scrollY===0 → scrollY<=2 (tolérance scroll résiduel)
          ▸ Seuil preventDefault : dy>10 → dy>5 (détection plus tôt)
 
+v27      ONGLET MARKET & ANALYSE
+─────────────────────────────────
+v27.x    Nouvel onglet Market : Macro (Fear & Greed, VIX, taux US,
+         indices mondiaux, forex), Secteurs (heatmap SPDR), Top/Flop,
+         Calendrier économique, Initiés (SEC Form 4), Hedge Funds (13F),
+         Congrès (STOCK Act), tableau de bord BTC (20 indicateurs → score
+         agrégé + recommandation, graphe 10 ans prix + score)
+         Ratios financiers dans l'analyse titre (P/E, EV/EBITDA, PEG, ROE…)
+         Édition de cellules dans les bases time-series (KV /write-bases)
+         Menu Paramètres (Thèmes, Bases, Changelog, À propos)
+         Restauration de sauvegardes + pare-feu d'écriture côté worker
+         Pré-chauffage horaire + sauvegarde quotidienne (cron)
 
-v23.x    FIABILISATION DU STOCKAGE (zéro perte, multi-appareils)
-         ▸ Miroir local v9 (lsv9) + saveBase : écriture locale immédiate,
-           puis push KV avec retry et marquage "dirty" si hors-ligne
-         ▸ Réconciliation au boot par FUSION PAR DATE de toutes les séries
-           (dd, gdbs, gc, gsb, bench) et des mensuels (cm/sm/tm)
-         ▸ Persistance des positions après un trade (modèle "état matérialisé")
-           — achats/ventes survivent au rechargement sans nouveau snapshot
+v28      SÉRIE STABLE (sanctuarisée)
+─────────────────────────────────
+v28.0x   Stockage fiabilisé : fusion par date des séries temporelles,
+         persistance des positions après un trade, graphes mémoïsés
+v28.20   Refresh des prix au lancement de l'app
+v28.21   Section Newsletter dans Market (aperçu, envoi manuel,
+         préférences on/off, historique des éditions)
+v28.22   Newsletter in-app : 5 dernières news de l'édition envoyée
+         + journal des envois (état e-mail/Telegram, erreurs)
+v28.23   Stats : périmètre Actions aligné entre mois courant et mois
+         révolus (Cash Matelas inclus, comme GDB.S)
+v28.24   Refresh de lancement différé : attend le chargement complet
+         (ready + choix de source) — corrige le refresh à vide
+v28.25   Trades spot supprimables durablement (Legend : corbeille par
+         ligne + barre Restaurer ; base gdb_spot_excl KV+local,
+         immunisée contre la ré-injection du SEED)
+v28.26   Stats : valeur de fin de mois Actions corrigée pour les mois
+         reconstruits (nombre de parts réel à la date via gdb_inv,
+         au lieu du nombre de parts figé)
+v28.27   Market → Macro s'ouvre sur le baromètre risk-on/off ;
+         carte cross-asset dans Secteurs
+v28.28   Baromètre : +MA9/18 daily (12 critères), tuiles synthétiques,
+         info-bulle détaillée au clic sur chaque critère
+v28.29   Curseur du baromètre recalculé depuis le score (robuste)
+v28.30   Baromètre repliable (verdict + compteur + barre par défaut)
+v28.31   Libellés des tuiles du baromètre en blanc
+v28.32   Cross-asset : +Robotique (ROBO) + Spatial (SPCX·JEDI.L) ;
+         tuile composée non cliquable
+v28.33   Changelog + À propos mis à jour
 
-v27      ONGLET MARKET
-         ▸ Macro (Fear & Greed, VIX, taux US, indices mondiaux, forex)
-         ▸ Secteurs (heatmap), Tops/Flops, Calendrier économique
-         ▸ Initiés (SEC EDGAR Form 4) + Hedge Funds (13F) + "Détenu par"
-         ▸ Ratios financiers dans l'analyse titre (P/E, EV/EBITDA, ROE…)
-
-v27.4x   TABLEAU DE BORD BTC
-         ▸ Fiche sentiment : 20 indicateurs (cycle/valorisation, tendance,
-           on-chain, sentiment) → score agrégé pondéré OI + recommandation
-         ▸ Graphe historique double-axe : prix BTC (log) + score reconstitué
-           sur 10 ans (préfix-sums worker), sélecteur de période 1W→ALL
-
-v27.5x   SAUVEGARDE & SÉCURITÉ
-         ▸ Restauration (cloud daté ou fichier) avec backup de sécurité préalable
-         ▸ Pare-feu d'écriture par origine (ALLOWED_WRITE_ORIGINS) côté worker
-         ▸ Versioning centralisé du cache (CACHE_KEYS)
-         ▸ Cron : pré-chauffage horaire + sauvegarde quotidienne dédupliquée
-
-v27.6x   REFACTOR & CORRECTIONS
-         ▸ Helper d'appels worker unifié (cfGet/cfPost) — URL/clé centralisées
-         ▸ Mémoïsation des 4 graphes (survol fluide, moins de recalculs O(n²))
-         ▸ Tops/Flops actions filtrés > 500 M$ de capitalisation
-         ▸ Funding affiché en millions (M)
-         ▸ Persistance YF_MAP fiabilisée à l'ajout d'un nouveau ticker
-         ▸ Retrait de la base figée DB (gdb_db), redondante
-
-v28.00   VERSION SANCTUARISÉE
-         ▸ Base de référence stable : stockage fiabilisé, graphes optimisés,
-           onglet Market complet, tableau de bord BTC
-         ▸ Module achat/vente : Note + Contrepartie côte à côte
+v29      NEWSLETTER QUOTIDIENNE (worker v102 → v134)
+─────────────────────────────────
+Envoi    Chaque matin 6h00 NC (cron 19h00 UTC) : e-mail (Resend)
+         + résumé Telegram avec lien web tokenisé (30 jours)
+Contenu  Baromètre risk-on/off (12 critères, remplace l'Humeur du jour),
+         pouls (Fear & Greed crypto/tradi, VIX, signal BTC),
+         indices & macro overnight, secteurs top/flop, funding
+         (BTC/ETH APR + basis NQ), agenda éco USA (hier/aujourd'hui/
+         demain, impact fort), portefeuille (Crypto/Actions/Or/Cash,
+         Δ24h/Δ7j, meilleur/pire), 5 news sélectionnées, résumées
+         et notées (sens) par IA (Claude Haiku) avec lien source
+News     Yahoo Finance (primaire) + Finnhub + RSS CoinDesk/
+         Cointelegraph/Decrypt, dédup + cache 6h
+Fraîcheur Portefeuille re-pricé via Yahoo juste avant l'envoi
+         (mêmes symboles et conversion EUR→USD que l'app)
+Architecture Option B (limite 50 sous-requêtes/invocation du plan
+         gratuit) : 1 gros build par heure UTC (14 calendrier, 15
+         cross-asset, 16 BTC, 17 funding, 18 overview), snapshots
+         nl_snap_* (26h), fiche read-only à 19h
+Fiabilité 3 tentatives par canal (backoff), alerte Telegram en cas
+         d'échec, journal gdb_nl_log (50 entrées), idempotence
+         quotidienne, préférences on/off (gdb_nl_prefs)
+Routes   /newsletter/view · /day (public tokenisé) · /send-now ·
+         /history · /prefs · /log · /warm · /cron-status (diagnostic)
+         /market/cross · /market/risk · /market/warm
+Baromètre 12 critères à poids égal (signal +1/0/-1) : DXY 1j, SPY vs
+         open hebdo, MA9/18 hebdo, MA9/18 daily, régime 50MA, VIX
+         (<20 et en baisse), Fear & Greed moyen, ampleur sectorielle,
+         HYG 1 semaine, XLY vs XLP, CPER vs GLD, Or (inversé)
+Cross-asset Or, Argent, Mines (XME), Cuivre (CPER), Obligations
+         (TLT/HYG/LQD), Semi (SMH), Serv. pétroliers (OIH), Brent,
+         Robotique (ROBO), Spatial (SPCX+JEDI.L, moyenne),
+         market cap crypto totale + dominance BTC (CoinGecko)
 
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
-Stack      React 18 (Babel standalone) + JSX — GitHub Pages (noindex)
-Storage    Miroir local v9 (lsv9) + Cloudflare KV — fusion par date, retry/dirty
-APIs       Yahoo Finance (cours, news, fondamentaux), FMP (logos),
-           CoinGecko (crypto), SEC EDGAR (initiés/13F), Nasdaq (calendrier),
-           bitcoin-data.com (on-chain BTC)
-Worker     Cloudflare Worker v93 (proxy API, KV, pare-feu d'écriture, cron)
-Version    v28.00
+Stack      React 18 + JSX précompilé (esbuild) — GitHub Pages (noindex)
+Storage    localStorage (offline) + Cloudflare KV (cloud)
+APIs       Yahoo Finance (cours, news, fondamentaux), FMP (logos stocks),
+           CoinGecko (crypto : cours, métriques, logos, dominance),
+           Finnhub + RSS (news), SEC EDGAR, Nasdaq, House Stock Watcher
+Newsletter Resend (e-mail) + Telegram Bot + Claude Haiku (résumé news IA)
+Worker     Cloudflare Worker v134 (proxy API, KV store, newsletter,
+           cron horaire 0 * * * *, builds marché snapshotés)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
-BASES KV (19 clés)
+BASES KV (16 clés)
   gdb_snapshots   Snapshots journaliers objets {d, ao, ao_usd, eur, gdbs, gdbc}
   gdb_txns        Transactions [{id, date, side, ticker, qty, price, cat}]
   gdb_dd          DD séries temporelles [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
@@ -402,6 +440,3 @@ BASES KV (19 clés)
   gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
   gdb_yfmap       YF_MAP {ticker: yahooSymbol}
   gdb_icons       ICON_DB {ticker: {user, fmp}}
-  gdb_inv         INV — parts investisseurs
-  gdb_futures     FUTURES — positions à terme
-  gdb_ibkr_annex  IBKR annexe

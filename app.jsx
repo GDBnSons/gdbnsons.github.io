@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.34";
+const APP_VERSION = "v28.35";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -835,7 +835,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -4221,6 +4221,102 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
 /* ═══════════════════════════════════════════════════════════
    PAGE ALLOCATION — camemberts + ajustements + détail par catégorie
 ═══════════════════════════════════════════════════════════ */
+/* ── Cibles d'allocation multiples (v28.35) — helpers + modal ── */
+const ALLOC_POCHES = ["Crypto","Indices","Picking","Or","Cash Dip","Cash Matelas"];
+function defaultAllocTargets(src){
+  var alloc={};
+  ((src&&src.alloc)||[]).forEach(function(a){ alloc[a.n]=a.tgt; });
+  ALLOC_POCHES.forEach(function(p){ if(alloc[p]==null) alloc[p]=0; });
+  return { activeId:"cible-2026", targets:[{ id:"cible-2026", name:"Cible 2026", alloc:alloc }] };
+}
+function allocSum(t){ return ALLOC_POCHES.reduce(function(s,p){ return s+(parseFloat(t.alloc[p])||0); },0); }
+
+function AllocTargetsModal({data, colors, onSave, onClose}){
+  const [draft,setDraft]=useState(function(){ return JSON.parse(JSON.stringify(data)); });
+  const [selId,setSelId]=useState(data.activeId);
+  const sel = draft.targets.find(function(t){ return t.id===selId; }) || draft.targets[0];
+  function upd(fn){ setDraft(function(d){ var n=JSON.parse(JSON.stringify(d)); fn(n); return n; }); }
+  function setPct(p,v){ upd(function(n){ var t=n.targets.find(function(x){return x.id===sel.id;}); if(t) t.alloc[p]=v; }); }
+  function setName(v){ upd(function(n){ var t=n.targets.find(function(x){return x.id===sel.id;}); if(t) t.name=v; }); }
+  function addTarget(dupFrom){
+    var id="t"+Date.now().toString(36);
+    upd(function(n){
+      var base = dupFrom ? n.targets.find(function(x){return x.id===dupFrom;}) : null;
+      var alloc={}; ALLOC_POCHES.forEach(function(p){ alloc[p]=base?(base.alloc[p]||0):0; });
+      n.targets.push({ id:id, name: base?(base.name+" (copie)"):"Nouvelle cible", alloc:alloc });
+    });
+    setSelId(id);
+  }
+  function delTarget(){
+    if(draft.targets.length<=1) return;
+    var delId=sel.id;
+    upd(function(n){
+      n.targets=n.targets.filter(function(x){ return x.id!==delId; });
+      if(n.activeId===delId) n.activeId=n.targets[0].id;
+    });
+    setSelId(function(){ var rest=draft.targets.filter(function(x){return x.id!==delId;}); return rest.length?rest[0].id:draft.targets[0].id; });
+  }
+  function setActive(){ upd(function(n){ n.activeId=sel.id; }); }
+  const invalid = draft.targets.filter(function(t){ return Math.abs(allocSum(t)-100)>0.5; });
+  const sum = allocSum(sel);
+  const sumOk = Math.abs(sum-100)<=0.5;
+  const isActive = draft.activeId===sel.id;
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:950,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:16,padding:16,width:"100%",maxWidth:460,margin:8,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 -4px 24px rgba(0,0,0,0.5)"}}>
+        <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:12}}>Cibles d'allocation</div>
+
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+          {draft.targets.map(function(t){
+            var on=t.id===sel.id, act=t.id===draft.activeId;
+            return (
+              <button key={t.id} onClick={function(){setSelId(t.id);}} style={{background:on?C.blue:C.bg2,border:"1px solid "+(on?C.blue:C.border),borderRadius:20,padding:"6px 12px",color:on?"#fff":C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                {t.name}{act?" \u2605":""}
+              </button>
+            );
+          })}
+          <button onClick={function(){addTarget(null);}} style={{background:"transparent",border:"1px dashed "+C.border,borderRadius:20,padding:"6px 12px",color:C.gray,fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Nouvelle</button>
+        </div>
+
+        <input value={sel.name} onChange={function(e){setName(e.target.value);}} placeholder="Nom de la cible"
+          style={{width:"100%",boxSizing:"border-box",background:C.bg2,border:"1px solid "+C.border,borderRadius:9,padding:"9px 11px",color:C.text,fontSize:13,fontWeight:700,marginBottom:12}}/>
+
+        {ALLOC_POCHES.map(function(p){
+          var v=sel.alloc[p]; var col=(colors&&colors[p])||C.gray;
+          return (
+            <div key={p} style={{display:"flex",alignItems:"center",gap:9,marginBottom:8}}>
+              <div style={{width:10,height:10,borderRadius:2,background:col,flexShrink:0}}/>
+              <span style={{fontSize:13,color:C.text,flex:1}}>{p}</span>
+              <input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={v===0?"0":(v||"")}
+                onChange={function(e){ var x=parseFloat(e.target.value); setPct(p, isFinite(x)?Math.max(0,Math.min(100,x)):0); }}
+                style={{width:72,boxSizing:"border-box",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 9px",color:C.text,fontSize:13,fontWeight:700,textAlign:"right"}}/>
+              <span style={{fontSize:12,color:C.gray,width:14}}>%</span>
+            </div>
+          );
+        })}
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 2px",borderTop:"1px solid "+C.border,marginTop:6,marginBottom:12}}>
+          <span style={{fontSize:12,color:C.gray,fontWeight:700}}>Total</span>
+          <span style={{fontSize:15,fontWeight:900,color:sumOk?C.green:C.orange}}>{sum.toFixed(1)}%{sumOk?"":" (doit faire 100%)"}</span>
+        </div>
+
+        <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+          {!isActive && <button onClick={setActive} style={{flex:1,minWidth:110,background:C.green+"22",border:"1px solid "+C.green,borderRadius:9,padding:"9px 10px",color:C.green,fontSize:12,fontWeight:700,cursor:"pointer"}}>{"\u2605"} Comparer à celle-ci</button>}
+          <button onClick={function(){addTarget(sel.id);}} style={{flex:1,minWidth:100,background:C.bg2,border:"1px solid "+C.border,borderRadius:9,padding:"9px 10px",color:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>Dupliquer</button>
+          {draft.targets.length>1 && <button onClick={function(){ if(window.confirm("Supprimer la cible « "+sel.name+" » ?")) delTarget(); }} style={{flex:1,minWidth:100,background:C.red+"18",border:"1px solid "+C.red+"66",borderRadius:9,padding:"9px 10px",color:C.red,fontSize:12,fontWeight:700,cursor:"pointer"}}>Supprimer</button>}
+        </div>
+
+        {invalid.length>0 && <div style={{fontSize:11,color:C.orange,marginBottom:10}}>À corriger avant d'enregistrer : {invalid.map(function(t){return t.name+" ("+allocSum(t).toFixed(1)+"%)";}).join(" · ")}</div>}
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onClose} style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px",color:C.text2,fontSize:13,fontWeight:700,cursor:"pointer"}}>Annuler</button>
+          <button disabled={invalid.length>0} onClick={function(){ if(invalid.length===0) onSave(draft); }}
+            style={{flex:1,background:invalid.length===0?C.blue:C.bg2,border:"none",borderRadius:10,padding:"11px",color:invalid.length===0?"#fff":C.gray,fontSize:13,fontWeight:800,cursor:invalid.length===0?"pointer":"default"}}>Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DonutControlled({data,size=160,ri=30,label,sub,sel,onSel}){
   const cx=size/2,cy=size/2,R=size/2-7;
   const total=data.reduce((s,d)=>s+d.v,0)||1;
@@ -4262,8 +4358,9 @@ function DonutControlled({data,size=160,ri=30,label,sub,sel,onSel}){
   );
 }
 
-function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIconDb}){
+function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIconDb, allocTargets, onSaveTargets}){
   const[mode,setMode]=useState("detail");
+  const[tgtModal,setTgtModal]=useState(false);
   const[selSlice,setSelSlice]=useState(null);
   const[openSec,setOpenSec]=useState(null);
   const[tickerModal,setTickerModal]=useState(null); // {ticker, cat}
@@ -4272,8 +4369,12 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
   const sectionsTotal = SECTIONS.reduce((s,sec)=>s+sec.totalUSD, 0);
   const realD = SECTIONS.map(s=>({v:s.totalUSD/sectionsTotal, c:s.color, n:s.n, pct:s.pct, usd:s.totalUSD}));
   // Mapping SECTIONS.n → alloc cible par nom
+  // Cibles multiples : la cible ACTIVE surcharge les tgt codés en dur (fallback total si base absente)
+  const AT = (allocTargets && Array.isArray(allocTargets.targets) && allocTargets.targets.length) ? allocTargets : defaultAllocTargets(EFF||CURRENT);
+  const activeTarget = AT.targets.find(function(t){ return t.id===AT.activeId; }) || AT.targets[0];
+  const allocColors = {}; (EFF||CURRENT).alloc.forEach(function(a){ allocColors[a.n]=a.c; });
   const allocByName = {};
-  (EFF||CURRENT).alloc.forEach(function(a){ allocByName[a.n]=a; });
+  (EFF||CURRENT).alloc.forEach(function(a){ allocByName[a.n]=Object.assign({},a,{tgt:(activeTarget.alloc&&activeTarget.alloc[a.n]!=null)?activeTarget.alloc[a.n]:a.tgt}); });
   // Map section key → alloc name
   const SECT_TO_ALLOC = {
     "Bitcoin":     "Crypto",
@@ -4317,10 +4418,19 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
               <div style={{fontSize:10,color:C.gray,marginTop:3}}>Réel</div>
             </div>
             <div style={{textAlign:"center"}}>
-              <Donut data={tgtD} size={148} label="CIBLE" sub={eur?"€320k":"$380k"} ri={26}/>
-              <div style={{fontSize:10,color:C.gray,marginTop:3}}>Cible 2026</div>
+              <Donut data={tgtD} size={148} label="CIBLE" sub={activeTarget.name} ri={26}/>
+              <div style={{fontSize:10,color:C.gray,marginTop:3}}>{activeTarget.name}</div>
+              <button onClick={function(){setTgtModal(true);}} style={{marginTop:6,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"5px 12px",color:C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{"\u270E"} Gérer les cibles</button>
             </div>
           </div>
+          {AT.targets.length>1 && (
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center",marginBottom:12}}>
+              {AT.targets.map(function(t){
+                var on=t.id===AT.activeId;
+                return <button key={t.id} onClick={function(){ if(!on) onSaveTargets(Object.assign({},AT,{activeId:t.id})); }} style={{background:on?C.blue:C.bg1,border:"1px solid "+(on?C.blue:C.border),borderRadius:20,padding:"5px 12px",color:on?"#fff":C.gray,fontSize:11,fontWeight:700,cursor:"pointer"}}>{t.name}</button>;
+              })}
+            </div>
+          )}
           {/* Légende compacte */}
           <div style={{display:"flex",flexWrap:"wrap",gap:7,justifyContent:"center",marginBottom:14}}>
             {SECTIONS.map((s,i)=>{
@@ -4570,6 +4680,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
         onClose={()=>setTickerModal(null)}
       />
     )}
+    {tgtModal && <AllocTargetsModal data={AT} colors={allocColors} onClose={function(){setTgtModal(false);}} onSave={function(d){ onSaveTargets(d); setTgtModal(false); }}/>}
     </>
   );
 }
@@ -9238,6 +9349,9 @@ function App(){
   const[liveSpotExcl,setLiveSpotExcl]=useState(function(){ try{ var v=lsv9Get('gdb_spot_excl'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
   const excludeSpotTrade = useCallback(function(key){ setLiveSpotExcl(function(prev){ var next=(prev||[]).indexOf(key)>=0?prev:[...(prev||[]),key]; saveBase('gdb_spot_excl', next); return next; }); },[]);
   const restoreSpotTrades = useCallback(function(){ setLiveSpotExcl([]); saveBase('gdb_spot_excl', []); },[]);
+  // v28.35 — cibles d'allocation multiples persistantes (base gdb_alloc_targets, KV+local)
+  const[liveAllocTargets,setLiveAllocTargets]=useState(function(){ try{ var v=lsv9Get('gdb_alloc_targets'); return (v&&Array.isArray(v.targets)&&v.targets.length)?v:null; }catch(e){ return null; } });
+  const saveAllocTargets = useCallback(function(next){ setLiveAllocTargets(next); saveBase('gdb_alloc_targets', next); },[]);
   // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
   const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
   // v25.04 — liste des investisseurs connus (depuis la DB gdb_inv), grandit avec les nouveaux.
@@ -9518,6 +9632,7 @@ function App(){
       if(kv.gdb_futures)    setLiveFutures(unionTxnsById(SEED_FUTURES, kv.gdb_futures));
       if(kv.gdb_ibkr_annex) setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, kv.gdb_ibkr_annex));
       if(Array.isArray(kv.gdb_spot_excl)) setLiveSpotExcl(kv.gdb_spot_excl);
+      if(kv.gdb_alloc_targets && Array.isArray(kv.gdb_alloc_targets.targets) && kv.gdb_alloc_targets.targets.length) setLiveAllocTargets(kv.gdb_alloc_targets);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9555,6 +9670,7 @@ function App(){
       const lvFut = lsv9Get('gdb_futures'); if(lvFut){ setLiveFutures(unionTxnsById(SEED_FUTURES, lvFut)); }
       const lvAnx = lsv9Get('gdb_ibkr_annex'); if(lvAnx){ setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, lvAnx)); }
       const lvExcl = lsv9Get('gdb_spot_excl'); if(Array.isArray(lvExcl)){ setLiveSpotExcl(lvExcl); }
+      const lvAT = lsv9Get('gdb_alloc_targets'); if(lvAT && Array.isArray(lvAT.targets) && lvAT.targets.length){ setLiveAllocTargets(lvAT); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10631,7 +10747,7 @@ function App(){
       )}
       <div style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
-        {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
+        {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}

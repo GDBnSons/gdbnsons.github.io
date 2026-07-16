@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.35";
+const APP_VERSION = "v28.36";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4242,7 +4242,7 @@ function AllocTargetsModal({data, colors, onSave, onClose}){
     var id="t"+Date.now().toString(36);
     upd(function(n){
       var base = dupFrom ? n.targets.find(function(x){return x.id===dupFrom;}) : null;
-      var alloc={}; ALLOC_POCHES.forEach(function(p){ alloc[p]=base?(base.alloc[p]||0):0; });
+      var alloc={}; ALLOC_POCHES.forEach(function(p){ alloc[p]=base?(base.alloc[p]||0):null; });
       n.targets.push({ id:id, name: base?(base.name+" (copie)"):"Nouvelle cible", alloc:alloc });
     });
     setSelId(id);
@@ -4287,8 +4287,8 @@ function AllocTargetsModal({data, colors, onSave, onClose}){
             <div key={p} style={{display:"flex",alignItems:"center",gap:9,marginBottom:8}}>
               <div style={{width:10,height:10,borderRadius:2,background:col,flexShrink:0}}/>
               <span style={{fontSize:13,color:C.text,flex:1}}>{p}</span>
-              <input type="number" inputMode="decimal" min="0" max="100" step="0.5" value={v===0?"0":(v||"")}
-                onChange={function(e){ var x=parseFloat(e.target.value); setPct(p, isFinite(x)?Math.max(0,Math.min(100,x)):0); }}
+              <input type="number" inputMode="decimal" min="0" max="100" step="0.5" placeholder="—" value={(v==null||v==="")?"":v}
+                onChange={function(e){ var raw=e.target.value; if(raw===""){ setPct(p,null); return; } var x=parseFloat(raw); setPct(p, isFinite(x)?Math.max(0,Math.min(100,x)):null); }}
                 style={{width:72,boxSizing:"border-box",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 9px",color:C.text,fontSize:13,fontWeight:700,textAlign:"right"}}/>
               <span style={{fontSize:12,color:C.gray,width:14}}>%</span>
             </div>

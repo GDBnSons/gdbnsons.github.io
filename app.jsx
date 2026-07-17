@@ -736,7 +736,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.36";
+const APP_VERSION = "v28.37";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -835,7 +835,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -8434,7 +8434,7 @@ function PageNewsletter(){
   );
 }
 
-function PageMarket({ eur=false }){
+function PageMarket({ eur=false, hfRead={}, onHfRead }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(null);
@@ -9034,12 +9034,15 @@ function PageMarket({ eur=false }){
               var open=!!hfOpen[fi]; var hold=fd.holdings||[];
               return (
                 <div key={fd.cik} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
-                  <div onClick={function(){toggle(fi);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer"}}>
+                  <div onClick={function(){toggle(fi); if(onHfRead && fd.date) onHfRead(fd.cik, (fd.date||"").slice(0,10));}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer"}}>
                     <div style={{display:"flex",flexDirection:"column",gap:2,minWidth:0}}>
                       <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fd.name}</span>
                       <span style={{fontSize:9,color:C.text3}}>{(fd.date||"").slice(0,10)} · {hold.length} pos. · {bigMcap(fd.total)}</span>
                     </div>
-                    <span style={{color:C.text3,fontSize:11,flexShrink:0}}>{open?"▾":"▸"}</span>
+                    <span style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+                      {fd.date && hfRead[fd.cik]!==((fd.date||"").slice(0,10)) && <span style={{background:C.btc,color:"#111",fontSize:8,fontWeight:900,letterSpacing:0.5,borderRadius:6,padding:"2px 6px"}}>NEW</span>}
+                      <span style={{color:C.text3,fontSize:11}}>{open?"▾":"▸"}</span>
+                    </span>
                   </div>
                   {open && (
                     <div style={{borderTop:"1px solid "+C.border,padding:"4px 10px 8px"}}>
@@ -9352,6 +9355,9 @@ function App(){
   // v28.35 — cibles d'allocation multiples persistantes (base gdb_alloc_targets, KV+local)
   const[liveAllocTargets,setLiveAllocTargets]=useState(function(){ try{ var v=lsv9Get('gdb_alloc_targets'); return (v&&Array.isArray(v.targets)&&v.targets.length)?v:null; }catch(e){ return null; } });
   const saveAllocTargets = useCallback(function(next){ setLiveAllocTargets(next); saveBase('gdb_alloc_targets', next); },[]);
+  // v28.37 — 13F lus par fonds (pastille NEW) : { cik: dateDuDernierDepotVu }
+  const[liveHfRead,setLiveHfRead]=useState(function(){ try{ var v=lsv9Get('gdb_hf_read'); return (v&&typeof v==="object")?v:{}; }catch(e){ return {}; } });
+  const markHfRead = useCallback(function(cik,date){ setLiveHfRead(function(prev){ if(prev && prev[cik]===date) return prev; var n=Object.assign({},prev); n[cik]=date; saveBase('gdb_hf_read', n); return n; }); },[]);
   // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
   const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
   // v25.04 — liste des investisseurs connus (depuis la DB gdb_inv), grandit avec les nouveaux.
@@ -9633,6 +9639,7 @@ function App(){
       if(kv.gdb_ibkr_annex) setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, kv.gdb_ibkr_annex));
       if(Array.isArray(kv.gdb_spot_excl)) setLiveSpotExcl(kv.gdb_spot_excl);
       if(kv.gdb_alloc_targets && Array.isArray(kv.gdb_alloc_targets.targets) && kv.gdb_alloc_targets.targets.length) setLiveAllocTargets(kv.gdb_alloc_targets);
+      if(kv.gdb_hf_read && typeof kv.gdb_hf_read==="object") setLiveHfRead(kv.gdb_hf_read);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9671,6 +9678,7 @@ function App(){
       const lvAnx = lsv9Get('gdb_ibkr_annex'); if(lvAnx){ setLiveIbkrAnnex(unionTxnsById(SEED_IBKR_ANNEX, lvAnx)); }
       const lvExcl = lsv9Get('gdb_spot_excl'); if(Array.isArray(lvExcl)){ setLiveSpotExcl(lvExcl); }
       const lvAT = lsv9Get('gdb_alloc_targets'); if(lvAT && Array.isArray(lvAT.targets) && lvAT.targets.length){ setLiveAllocTargets(lvAT); }
+      const lvHfR = lsv9Get('gdb_hf_read'); if(lvHfR && typeof lvHfR==="object"){ setLiveHfRead(lvHfR); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10751,7 +10759,7 @@ function App(){
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
-        {tab===6 && <PageMarket eur={eur}/>}
+        {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

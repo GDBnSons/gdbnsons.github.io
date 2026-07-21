@@ -622,7 +622,7 @@ async function fetchAllPrices(){
   // v27.25 — Phase 1 : batch des cours en UN seul appel worker (/yahoo-quotes).
   // Fallback par-ticker (anciens proxies) uniquement pour les symboles manquants.
   const entries = Object.entries(YF_MAP).filter(([key])=> key!=="EURUSD");
-  const symbols = Array.from(new Set(entries.map(([,sym])=> sym)));
+  const symbols = Array.from(new Set(entries.map(([,sym])=> sym).concat(["GC=F"]))); // +Or (future) pour BENCH_IDX & historique Home
   const sym2keys = {};
   entries.forEach(([key,sym])=>{ (sym2keys[sym] = sym2keys[sym] || []).push(key); });
 
@@ -636,6 +636,7 @@ async function fetchAllPrices(){
     const p = got[sym];
     if(p != null) (sym2keys[sym] || []).forEach(function(key){ results[key] = p; });
   });
+  if(got["GC=F"] != null) results["GCF"] = got["GC=F"]; // cours de l'or (once, future GC=F)
 
   // 2) Fallback par-ticker pour les manquants seulement (parallèle par 5, sans pause)
   const missing = entries.filter(([key])=> results[key] == null);
@@ -757,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.41";
+const APP_VERSION = "v28.43";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -856,7 +857,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -2969,13 +2970,14 @@ function useWindowSize(){
   return s;
 }
 
-function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC}){
+function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC, liveHomeHist}){
   const _DD=liveDD||DD;
   const _GDBS=liveGDBS||GDBS;
   const _GC=liveGC||GC_FULL;
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);
   const [full, setFull] = useState(false);
+  const [hiddenSeries, setHiddenSeries] = useState({"Patrimoine total":true, "Or":true});
   const win = useWindowSize();
   // tf et setTF viennent du parent (PageOverview) pour synchroniser avec le card
 
@@ -3051,10 +3053,41 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
 
   const p0abs = portAbs.find(v => v != null);
   const portB = portAbs.map(v => v != null && p0abs ? round2(v / p0abs * 100) : null);
-    return { gSlice:gSlice, dates:dates, n:n, gsB:gsB, gcB:gcB, portAbs:portAbs, portB:portB, p0abs:p0abs };
-  }, [src, tf, eur, _DD, _GDBS, chartData]);
+
+  /* ── Nouvelles séries : Patrimoine ex. Or, Patrimoine total, Or (XAU) ── */
+  // gdb_home_hist : [{d, total(USD), or(USD), xau(GC=F)}] enregistré quotidiennement (dès le 22/07)
+  const _HH = {}; (liveHomeHist||[]).forEach(r=>{ if(r&&r.d) _HH[r.d]=r; });
+  const rateUE = src.usdEur || 0.86;               // USD → EUR (approx courant, fenêtre courte)
+  const OR_CUT = "2026-07-20", TOT_CUT = "2026-07-22";
+  // Valeur de la poche Or par date (devise d'affichage)
+  const orDisp = dates.map(d=>{ const h=_HH[d]; if(!h||h.or==null) return 0; return eur ? Math.round(h.or*rateUE) : h.or; });
+  // Patrimoine ex. Or = portefeuille − Or (à partir du 20/07)
+  const exOrAbs = dates.map((d,i)=> portAbs[i]==null ? null : (portAbs[i] - (d>=OR_CUT ? orDisp[i] : 0)));
+  const exOrB   = exOrAbs.map(v=> v!=null && p0abs ? round2(v / p0abs * 100) : null);
+  // Patrimoine total (avec Or) — à partir du 22/07 uniquement
+  const totAbs  = dates.map((d,i)=> d>=TOT_CUT ? portAbs[i] : null);
+  const totB    = totAbs.map(v=> v!=null && p0abs ? round2(v / p0abs * 100) : null);
+  // Or : cours XAU (GC=F) en base 100 depuis le 22/07
+  const xauArr  = dates.map(d=>{ const h=_HH[d]; return (d>=TOT_CUT && h && h.xau!=null) ? h.xau : null; });
+  const xau0    = xauArr.find(v=>v!=null);
+  const orB     = xauArr.map(v=> v!=null && xau0 ? round2(v / xau0 * 100) : null);
+
+    return { gSlice:gSlice, dates:dates, n:n, gsB:gsB, gcB:gcB, portAbs:portAbs, portB:portB, p0abs:p0abs,
+             exOrB:exOrB, exOrAbs:exOrAbs, totB:totB, totAbs:totAbs, orB:orB, xauArr:xauArr };
+  }, [src, tf, eur, _DD, _GDBS, chartData, liveHomeHist]);
   if(!_GM) return null;
-  const { gSlice, dates, n, gsB, gcB, portAbs, portB, p0abs } = _GM;
+  const { gSlice, dates, n, gsB, gcB, portAbs, portB, p0abs, exOrB, exOrAbs, totB, totAbs, orB, xauArr } = _GM;
+
+  /* ── Séries du graphe (base 100, échelle de gauche) ── */
+  const DARKGREEN = "#15803D";
+  const SERIES = [
+    { key:"gdbc", lbl:"GDB.C",              col:C.orange, vals:gcB,  bold:true,  absAt:i=>fmtGdb(gSlice[i]&&gSlice[i][2]) },
+    { key:"gdbs", lbl:"GDB.S",              col:C.blue,   vals:gsB,  bold:true,  absAt:i=>fmtGdb(gSlice[i]&&gSlice[i][1]) },
+    { key:"exor", lbl:"Patrimoine ex. Or",  col:C.green,  vals:exOrB,bold:false, absAt:i=>exOrAbs[i]!=null?`${cur}${fmtK(exOrAbs[i])}`:null },
+    { key:"tot",  lbl:"Patrimoine total",   col:DARKGREEN,vals:totB, bold:false, absAt:i=>totAbs[i]!=null?`${cur}${fmtK(totAbs[i])}`:null },
+    { key:"or",   lbl:"Or",                 col:C.gold,   vals:orB,  bold:false, absAt:i=>xauArr[i]!=null?`$${xauArr[i].toFixed(0)}`:null },
+  ];
+  const visSeries = SERIES.filter(sx=>!hiddenSeries[sx.lbl] && sx.vals.some(v=>v!=null));
 
   // Exposer portAbs au parent pour la sparkline
   useEffect(()=>{ onSparkData&&onSparkData(portAbs); }, [tf, portAbs.join(",")]); // eslint-disable-line
@@ -3065,10 +3098,10 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   const H = full ? Math.max(120, Math.round(300*_availH/_availW) - 22) : 150;
   const IW = W - PAD_L - PAD_R;
 
-  const leftVals = [...gsB, ...gcB].filter(v => v != null);
-  const portBVals = portB.filter(v => v != null);
-  const allVals = [...leftVals, ...portBVals];
-  const gMin = Math.min(...allVals), gMax = Math.max(...allVals);
+  const visVals = visSeries.flatMap(sx=>sx.vals).filter(v => v != null);
+  const _fallback = [...gsB, ...gcB].filter(v => v != null);
+  const _base = visVals.length ? visVals : (_fallback.length ? _fallback : [100]);
+  const gMin = Math.min(..._base), gMax = Math.max(..._base);
   const gRng = gMax - gMin || 1;
 
   const px = i => PAD_L + (i / (n - 1)) * IW;
@@ -3157,11 +3190,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
           <div style={{fontSize:11,color:"#fff",fontWeight:800,width:"100%",textAlign:"center",marginBottom:1}}>
             {fmtDate(hDate)}
           </div>
-          {[
-            {color:C.orange, label:"GDB.C", val:fmtGdb(hGc), sub:hGcB!=null?`base ${hGcB.toFixed(1)}`:null},
-            {color:C.blue,   label:"GDB.S", val:fmtGdb(hGs), sub:hGsB!=null?`base ${hGsB.toFixed(1)}`:null},
-            {color:C.green,  label:"Portefeuille", val:hPortAbs!=null?`${cur}${fmtK(hPortAbs)}`:null, sub:hPortB!=null?`base ${hPortB.toFixed(1)}`:null},
-          ].filter(x=>x.val).map((x,i)=>(
+          {visSeries.map(sx=>({color:sx.col, label:sx.lbl, val:(hi!=null?sx.absAt(hi):null), sub:(hi!=null&&sx.vals[hi]!=null)?`base ${sx.vals[hi].toFixed(1)}`:null})).filter(x=>x.val).map((x,i)=>(
             <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
                 <div style={{width:8,height:8,borderRadius:2,background:x.color}}/>
@@ -3192,14 +3221,12 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
           </text>
         ))}
         <line x1={PAD_L} y1={py(100)} x2={W - PAD_R} y2={py(100)} stroke="rgba(255,255,255,.1)" strokeWidth={0.8} strokeDasharray="4,4"/>
-        {makeLine(gcB, C.orange, true)}
-        {makeLine(gsB, C.blue, true)}
-        {makeLine(portB, C.green, false)}
+        {visSeries.map(sx => <g key={sx.key}>{makeLine(sx.vals, sx.col, sx.bold)}</g>)}
         {hover != null && hi != null && (
           <g>
             <line x1={px(hi)} y1={2} x2={px(hi)} y2={H} stroke="rgba(255,255,255,.18)" strokeWidth={1} strokeDasharray="3,3"/>
-            {[[gcB,C.orange],[gsB,C.blue],[portB,C.green]].map(([vals, color], si) => {
-              const v = vals[hi]; if (v == null) return null;
+            {visSeries.map((sx, si) => {
+              const v = sx.vals[hi], color = sx.col; if (v == null) return null;
               return <g key={si}>
                 <circle cx={px(hi)} cy={py(v)} r={4.5} fill={C.bg1} stroke={color} strokeWidth={2}/>
                 <circle cx={px(hi)} cy={py(v)} r={1.8} fill={color}/>
@@ -3219,18 +3246,18 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
       </svg>
 
       </div>{/* end tooltip wrapper */}
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 2, paddingTop: 4, borderTop: `1px solid ${C.border}` }}>
-        {[
-          { color: C.orange, label: "GDB.C" },
-          { color: C.blue,   label: "GDB.S" },
-          { color: C.green,  label: "Patrimoine" },
-        ].map((l, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <div style={{ width: 12, height: 2, background: l.color, borderRadius: 1 }}/>
-            <span style={{ fontSize: 10, color: l.color, fontWeight: 700 }}>{l.label}</span>
-          </div>
-        ))}
+      {/* Légende cliquable (masquer/afficher les courbes) */}
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"center", marginTop:4, paddingTop:6, borderTop:`1px solid ${C.border}` }}>
+        {SERIES.map((sx)=>{ const on=!hiddenSeries[sx.lbl]; const hasData=sx.vals.some(v=>v!=null); return (
+          <button key={sx.key} onClick={()=>setHiddenSeries(h=>{ const n2=Object.assign({},h); n2[sx.lbl]=!h[sx.lbl]; return n2; })} title={hasData?"":"Pas encore de données"} style={{
+            display:"flex", alignItems:"center", gap:5, cursor:"pointer",
+            background:on?sx.col+"22":"transparent", border:`1px solid ${on?sx.col:C.border}`,
+            borderRadius:20, padding:"4px 10px", opacity:(on?1:0.45)*(hasData?1:0.6),
+          }}>
+            <div style={{ width:11, height:2.5, background:sx.col, borderRadius:1 }}/>
+            <span style={{ fontSize:10, color:on?sx.col:C.gray, fontWeight:700 }}>{sx.lbl}</span>
+          </button>
+        );})}
       </div>
     </>
   );
@@ -3967,7 +3994,7 @@ function buildSections(L){
 /* ═══════════════════════════════════════════════════════════
    PAGE OVERVIEW
 ═══════════════════════════════════════════════════════════ */
-function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,chosenSource,iconDbVersion=0,bumpIconDb}){
+function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,liveHomeHist,chosenSource,iconDbVersion=0,bumpIconDb}){
   const _DD_PO=liveDD||DD;
   const _CM_PO=liveCM||CRYPTO_MONTHLY;
   const [chartTF, setChartTF] = useState("YTD");
@@ -4224,8 +4251,8 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
       })()}
 
       {/* ── GDB Comparison Chart ── */}
-      <SH label="GDB.C · GDB.S · Patrimoine total" color={C.gray}/>
-      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC}/>
+      <SH label="GDB.C · GDB.S · Patrimoine" color={C.gray}/>
+      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveHomeHist={liveHomeHist}/>
 
       {/* Version discrète */}
       <div style={{
@@ -5385,6 +5412,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const nqRaw  = dates.map(d=>{ const r=benchMap[d]; return r?r[4]:null; }); // NASDAQ
   const ethRaw = dates.map(d=>{ const r=benchMap[d]; return r?r[2]:null; }); // ETH
   const msRaw  = dates.map(d=>{ const r=benchMap[d]; return r?r[5]:null; }); // MSCI
+  const goRaw  = dates.map(d=>{ const r=benchMap[d]; return r&&r[6]!=null?r[6]:null; }); // Or (GC=F)
 
   const gcB  = rebase(gcRaw);
   const gsB  = rebase(gsRaw);
@@ -5393,6 +5421,7 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const nqB  = rebase(nqRaw);
   const ethB = rebase(ethRaw);
   const msB  = rebase(msRaw);
+  const goB  = rebase(goRaw);
 
   const SERIES = [
     {vals:gcB,  col:"#F7931A", lbl:"GDB.C", bold:true},
@@ -5402,8 +5431,9 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
     {vals:nqB,  col:"#10B981", lbl:"Nasdaq"},
     {vals:msB,  col:"#EC4899", lbl:"MSCI"},
     {vals:spB,  col:"#6B7280", lbl:"S&P"},
+    {vals:goB,  col:C.gold,    lbl:"Or"},
   ];
-  const anyVals = [...gcB,...gsB,...btcB,...spB,...nqB,...ethB,...msB].filter(v=>v!=null);
+  const anyVals = [...gcB,...gsB,...btcB,...spB,...nqB,...ethB,...msB,...goB].filter(v=>v!=null);
     return { dates:dates, n:n, SERIES:SERIES, anyVals:anyVals, gcB:gcB, gsB:gsB, btcB:btcB, spB:spB, nqB:nqB, ethB:ethB, msB:msB };
   }, [tf, _GSB_data, _GDBS_data, _BENCH_data, liveGC]);
   const { dates, n, SERIES, anyVals, gcB, gsB, btcB, spB, nqB, ethB, msB } = _GCD;
@@ -7000,7 +7030,7 @@ function CloudKeyList({data, onRefresh}){
     {key:"gdb_gdbs",      label:"GDBS (GDB.C et GDB.S)"},
     {key:"gdb_gc",        label:"GC_FULL (GDB.C historique)"},
     {key:"gdb_gsb",       label:"GS_B100_EXT"},
-    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"]},
+    {key:"gdb_bench",     label:"BENCH_IDX (indices BTC/ETH/SP500...)", cols:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World","Or $"]},
     {key:"gdb_cm",        label:"CRYPTO_MONTHLY"},
     {key:"gdb_sm",        label:"STOCKS_MONTHLY"},
     {key:"gdb_tm",        label:"TOTAL_MONTHLY"},
@@ -9482,6 +9512,9 @@ function App(){
   const markHfRead = useCallback(function(cik,date){ setLiveHfRead(function(prev){ if(prev && prev[cik]===date) return prev; var n=Object.assign({},prev); n[cik]=date; saveBase('gdb_hf_read', n); return n; }); },[]);
   // v28.38 — composition des fonds (GDB.S / GDB.C / Hors-fonds) par catégorie ou actif
   const[liveFundComp,setLiveFundComp]=useState(function(){ try{ var v=lsv9Get('gdb_fund_comp'); if(v&&typeof v==="object"){ setFundComp(v); return v; } }catch(e){} return defaultFundComp(); });
+  // v28.42 — historique quotidien pour le graphe Home : [{d, total(USD), or(USD), xau(GC=F)}]
+  const[liveHomeHist,setLiveHomeHist]=useState(function(){ try{ var v=lsv9Get('gdb_home_hist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  const recordHomeHist = useCallback(function(pt){ if(!pt||!pt.d) return; setLiveHomeHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x.d===pt.d;}); if(i>=0) arr[i]=Object.assign({},arr[i],pt); else arr.push(pt); if(arr.length>800) arr=arr.slice(arr.length-800); saveBase('gdb_home_hist', arr); return arr; }); },[]);
   const saveFundComp = useCallback(function(next){
     setFundComp(next); setLiveFundComp(next); saveBase('gdb_fund_comp', next);
     // recalcul immédiat des VL avec la nouvelle composition (sans refetch)
@@ -9614,13 +9647,19 @@ function App(){
         const sp500L   = prices["QQQ"]  || null;
         const nqLive   = prices["QQQ"]  || null;
         const msciLive = prices["URTH"] || null;  // URTH = iShares MSCI World ETF
+        const goldLive = prices["GCF"]  || null;  // GC=F = or (once, future)
         if(btcR || ethLive || sp500L) {
           setLiveBench(b => {
             const last = b.length>0 ? b[b.length-1] : null;
-            const row = [todayStr, btcR||null, ethLive||null, sp500L||null, nqLive||null, msciLive||null];
+            const row = [todayStr, btcR||null, ethLive||null, sp500L||null, nqLive||null, msciLive||null, goldLive||null];
             return last && last[0]===todayStr ? [...b.slice(0,-1), row] : [...b, row];
           });
         }
+        // Historique Home : 1 point/jour {total(USD), Or(USD), xau(GC=F)}
+        try {
+          const orUSD = ((updated.stocks && updated.stocks.items) || []).filter(x=>x.cat==="Or").reduce((a,x)=>a+(x.val||0),0);
+          recordHomeHist({ d: todayStr, total: Math.round(updated.totalUSD||0), or: Math.round(orUSD), xau: (goldLive!=null?goldLive:null) });
+        } catch(e){}
         // v23.23 — setLiveGDBS / setLiveGC retirés du refresh.
         // Les séries GDB.S/GDB.C ne se mettent à jour QUE via les snapshots (contrôle
         // utilisateur). Cela évite que les dépôts/retraits ou les trades KuCoin
@@ -9770,6 +9809,7 @@ function App(){
       if(kv.gdb_alloc_targets && Array.isArray(kv.gdb_alloc_targets.targets) && kv.gdb_alloc_targets.targets.length) setLiveAllocTargets(kv.gdb_alloc_targets);
       if(kv.gdb_hf_read && typeof kv.gdb_hf_read==="object") setLiveHfRead(kv.gdb_hf_read);
       if(kv.gdb_fund_comp && typeof kv.gdb_fund_comp==="object"){ setFundComp(kv.gdb_fund_comp); setLiveFundComp(kv.gdb_fund_comp); }
+      if(Array.isArray(kv.gdb_home_hist)) setLiveHomeHist(kv.gdb_home_hist);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9810,6 +9850,7 @@ function App(){
       const lvAT = lsv9Get('gdb_alloc_targets'); if(lvAT && Array.isArray(lvAT.targets) && lvAT.targets.length){ setLiveAllocTargets(lvAT); }
       const lvHfR = lsv9Get('gdb_hf_read'); if(lvHfR && typeof lvHfR==="object"){ setLiveHfRead(lvHfR); }
       const lvFC = lsv9Get('gdb_fund_comp'); if(lvFC && typeof lvFC==="object"){ setFundComp(lvFC); setLiveFundComp(lvFC); }
+      const lvHH = lsv9Get('gdb_home_hist'); if(Array.isArray(lvHH)){ setLiveHomeHist(lvHH); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10885,7 +10926,7 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}

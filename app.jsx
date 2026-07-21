@@ -757,7 +757,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.39";
+const APP_VERSION = "v28.41";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9279,13 +9279,15 @@ function PageMarket({ eur=false, hfRead={}, onHfRead }){
   );
 }
 
-function PageFundComp({EFF, comp, onSave}){
+function PageFundComp({EFF, comp, onSave, onClose}){
   const fUSD=function(n){ if(n==null||!isFinite(n)) return "\u2014"; var x=Math.abs(n), sg=n<0?"\u2212":""; if(x>=1e6) return sg+"$"+(x/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(x>=1e3) return sg+"$"+Math.round(x/1e3)+"k"; return sg+"$"+Math.round(x); };
   const CANON = ["Crypto","Indices","Picking","Or","Cash"];
   const LABELS = { Crypto:"Crypto", Indices:"Indices", Picking:"Picking", Or:"Or", Cash:"Cash (EURO/USD/STRC/KuCoin)" };
   const def = defaultFundComp();
   const[draft,setDraft]=useState(function(){ var d=comp&&typeof comp==="object"?comp:def; return { cats:Object.assign({},def.cats,d.cats||{}), assets:Object.assign({},d.assets||{}) }; });
   const[exp,setExp]=useState({});
+  const[saved,setSaved]=useState(false);
+  function doSave(){ if(!changed||saved) return; onSave({cats:draft.cats,assets:draft.assets}); setSaved(true); setTimeout(function(){ if(onClose) onClose(); },850); }
   // Pool réel des actifs des fonds : crypto (cat Crypto) + stocks (leur cat)
   const pool = [].concat(
     ((EFF&&EFF.crypto&&EFF.crypto.items)||[]).map(function(x){ return { t:x.t, cat:x.cat||"Crypto", val:x.val||0 }; }),
@@ -9298,10 +9300,11 @@ function PageFundComp({EFF, comp, onSave}){
   function setCat(cat,v){ setDraft(function(d){ var n={cats:Object.assign({},d.cats),assets:Object.assign({},d.assets)}; n.cats[cat]=v; return n; }); }
   function setAsset(t,v){ setDraft(function(d){ var n={cats:Object.assign({},d.cats),assets:Object.assign({},d.assets)}; if(!v) delete n.assets[t]; else n.assets[t]=v; return n; }); }
 
-  const OPTS = [["S","GDB.S",C_blue()],["C","GDB.C",C.btc],["X","Hors-fonds",C.gray]];
-  function C_blue(){ return C.blue||"#4a9eff"; }
-  function Seg({value,onChange,withDefault}){
-    var opts = withDefault ? [["","Défaut",C.gray]].concat(OPTS) : OPTS;
+  const COL = { S:(C.blue||"#1E40AF"), C:(C.orange||"#F97316"), X:C.gray };
+  function colFor(v){ return COL[v]||C.gray; }
+  const OPTS = [["S","GDB.S",COL.S],["C","GDB.C",COL.C],["X","Hors-fonds",COL.X]];
+  function Seg({value,onChange,withDefault,defColor}){
+    var opts = withDefault ? [["","Défaut",defColor||C.gray]].concat(OPTS) : OPTS;
     return (
       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
         {opts.map(function(o){ var on=value===o[0]; return (
@@ -9344,7 +9347,7 @@ function PageFundComp({EFF, comp, onSave}){
                         <span style={{fontSize:12,fontWeight:700,color:C.text}}>{it.t}</span>
                         <span style={{fontSize:10,color:C.text3,marginLeft:6}}>{fUSD(it.val)}</span>
                       </div>
-                      <Seg value={ov} onChange={function(nv){setAsset(it.t,nv);}} withDefault={true}/>
+                      <Seg value={ov} onChange={function(nv){setAsset(it.t,nv);}} withDefault={true} defColor={colFor(draft.cats[cat]||def.cats[cat])}/>
                     </div>
                   );
                 })}
@@ -9357,8 +9360,8 @@ function PageFundComp({EFF, comp, onSave}){
       <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px"}}>
         <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Aperçu (avec cette composition)</div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.S</div><div style={{fontSize:15,fontWeight:800,color:C_blue()}}>{fUSD(S)}</div></div>
-          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.C</div><div style={{fontSize:15,fontWeight:800,color:C.btc}}>{fUSD(C)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.S</div><div style={{fontSize:15,fontWeight:800,color:COL.S}}>{fUSD(S)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.C</div><div style={{fontSize:15,fontWeight:800,color:COL.C}}>{fUSD(C)}</div></div>
           <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>Hors-fonds</div><div style={{fontSize:15,fontWeight:800,color:C.gray}}>{fUSD(X)}</div></div>
         </div>
       </div>
@@ -9371,7 +9374,7 @@ function PageFundComp({EFF, comp, onSave}){
 
       <div style={{display:"flex",gap:8}}>
         <button onClick={function(){ setDraft({cats:Object.assign({},def.cats),assets:{}}); }} style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px",color:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>Réinitialiser</button>
-        <button disabled={!changed} onClick={function(){ if(changed) onSave({cats:draft.cats,assets:draft.assets}); }} style={{flex:1,background:changed?C_blue():C.bg2,border:"none",borderRadius:10,padding:"11px",color:changed?"#fff":C.gray,fontSize:13,fontWeight:800,cursor:changed?"pointer":"default"}}>Enregistrer</button>
+        <button disabled={!changed||saved} onClick={doSave} style={{flex:1,background:saved?C.green:(changed?COL.S:C.bg2),border:"none",borderRadius:10,padding:"11px",color:(saved||changed)?"#fff":C.gray,fontSize:13,fontWeight:800,cursor:(changed&&!saved)?"pointer":"default",transition:"background .2s ease"}}>{saved?"\u2713 Enregistré":"Enregistrer"}</button>
       </div>
     </div>
   );
@@ -11084,7 +11087,7 @@ function App(){
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
               liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
-            {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }}/>}
+            {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }} onClose={function(){ setSettingsPage(null); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

@@ -111,18 +111,39 @@ function cumulFundParts(invArr){
   });
   return { S: Math.round(S*1e6)/1e6, C: Math.round(C*1e6)/1e6 };
 }
+// v28.38 — Composition des fonds : chaque catégorie/actif est affecté à GDB.S, GDB.C
+// ou Hors-fonds ("X" : patrimoine seulement, exclu des deux VL). Le DÉFAUT reproduit
+// exactement l'historique : Crypto→C, stocks (Indices/Picking/Or/Cash)→S, KUCOIN→C.
+function defaultFundComp(){
+  return { cats:{ "Crypto":"C", "Indices":"S", "Picking":"S", "Or":"S", "Cash":"S" }, assets:{ "KUCOIN":"C" } };
+}
+let FUND_COMP = defaultFundComp();
+function setFundComp(c){
+  const d = defaultFundComp();
+  if(c && typeof c==="object"){ FUND_COMP = { cats:Object.assign({},d.cats,c.cats||{}), assets:Object.assign({},d.assets,c.assets||{}) }; }
+  else { FUND_COMP = d; }
+}
+// Affectation d'un actif : override par ticker > catégorie > filet "S"
+function fundOf(item){
+  if(!item) return "X";
+  const a = FUND_COMP.assets && FUND_COMP.assets[item.t];
+  if(a==="S"||a==="C"||a==="X") return a;
+  const c = FUND_COMP.cats && FUND_COMP.cats[item.cat];
+  if(c==="S"||c==="C"||c==="X") return c;
+  return "S";
+}
 function calcGdbPrices(src){
-  // v23.21 — KuCoin appartient au fonds GDB.C (et non GDB.S). Un transfert
-  // crypto→KuCoin (vente crypto, contrepartie KuCoin) reste interne à GDB.C
-  // → n'impacte NI GDB.C NI GDB.S.
-  const kucoinUSD = (src.stocks.items.find(x=>x.t==="KUCOIN")?.val) || 0;
-  // GDB.S = tous les stocks SAUF KuCoin (Indices + Picking + Or + Cash EURO/USD/STRC)
-  const gdbSfondsUSD = src.stocks.items
-    .filter(x=>x.t!=="KUCOIN")
-    .reduce((s,x)=>s+x.val, 0);
+  let S=0, C=0;
+  const cItems = (src.crypto && src.crypto.items) || [];
+  if(cItems.length){
+    cItems.forEach(function(x){ const it = x.cat ? x : Object.assign({},x,{cat:"Crypto"}); const f=fundOf(it); if(f==="S") S+=x.val||0; else if(f==="C") C+=x.val||0; });
+  } else if(src.crypto && src.crypto.total){
+    // pas d'items détaillés (snapshot partiel) → traiter le total selon la catégorie Crypto
+    const f=fundOf({t:"__CRYPTO__",cat:"Crypto"}); if(f==="S") S+=src.crypto.total; else if(f==="C") C+=src.crypto.total;
+  }
+  ((src.stocks && src.stocks.items) || []).forEach(function(x){ const f=fundOf(x); if(f==="S") S+=x.val||0; else if(f==="C") C+=x.val||0; });
+  const gdbSfondsUSD = S, gdbCfondsUSD = C;
   const gdbS = parseFloat((gdbSfondsUSD / FUND_PARTS.S).toFixed(4));
-  // GDB.C = crypto + KuCoin
-  const gdbCfondsUSD = src.crypto.total + kucoinUSD;
   const gdbC = parseFloat((gdbCfondsUSD / FUND_PARTS.C).toFixed(4));
   return {gdbS, gdbC, gdbSfondsUSD, gdbCfondsUSD};
 }
@@ -736,7 +757,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.37";
+const APP_VERSION = "v28.38";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -835,7 +856,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -9258,6 +9279,103 @@ function PageMarket({ eur=false, hfRead={}, onHfRead }){
   );
 }
 
+function PageFundComp({EFF, comp, onSave}){
+  const CANON = ["Crypto","Indices","Picking","Or","Cash"];
+  const LABELS = { Crypto:"Crypto", Indices:"Indices", Picking:"Picking", Or:"Or", Cash:"Cash (EURO/USD/STRC/KuCoin)" };
+  const def = defaultFundComp();
+  const[draft,setDraft]=useState(function(){ var d=comp&&typeof comp==="object"?comp:def; return { cats:Object.assign({},def.cats,d.cats||{}), assets:Object.assign({},d.assets||{}) }; });
+  const[exp,setExp]=useState({});
+  // Pool réel des actifs des fonds : crypto (cat Crypto) + stocks (leur cat)
+  const pool = [].concat(
+    ((EFF&&EFF.crypto&&EFF.crypto.items)||[]).map(function(x){ return { t:x.t, cat:x.cat||"Crypto", val:x.val||0 }; }),
+    ((EFF&&EFF.stocks&&EFF.stocks.items)||[]).map(function(x){ return { t:x.t, cat:x.cat||"Picking", val:x.val||0 }; })
+  );
+  function catVal(cat){ return pool.filter(function(x){return x.cat===cat;}).reduce(function(s,x){return s+x.val;},0); }
+  function assignOf(it){ var a=draft.assets[it.t]; if(a==="S"||a==="C"||a==="X") return a; var c=draft.cats[it.cat]; return (c==="S"||c==="C"||c==="X")?c:"S"; }
+  var S=0,C=0,X=0; pool.forEach(function(it){ var f=assignOf(it); if(f==="S")S+=it.val; else if(f==="C")C+=it.val; else X+=it.val; });
+
+  function setCat(cat,v){ setDraft(function(d){ var n={cats:Object.assign({},d.cats),assets:Object.assign({},d.assets)}; n.cats[cat]=v; return n; }); }
+  function setAsset(t,v){ setDraft(function(d){ var n={cats:Object.assign({},d.cats),assets:Object.assign({},d.assets)}; if(!v) delete n.assets[t]; else n.assets[t]=v; return n; }); }
+
+  const OPTS = [["S","GDB.S",C_blue()],["C","GDB.C",C.btc],["X","Hors-fonds",C.gray]];
+  function C_blue(){ return C.blue||"#4a9eff"; }
+  function Seg({value,onChange,withDefault}){
+    var opts = withDefault ? [["","Défaut",C.gray]].concat(OPTS) : OPTS;
+    return (
+      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+        {opts.map(function(o){ var on=value===o[0]; return (
+          <button key={o[0]||"def"} onClick={function(){onChange(o[0]);}} style={{background:on?o[2]:C.bg2,border:"1px solid "+(on?o[2]:C.border),borderRadius:7,padding:"5px 9px",color:on?"#fff":C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{o[1]}</button>
+        );})}
+      </div>
+    );
+  }
+
+  // Avertissement discontinuité : catégorie non vide dont l'affectation diffère du défaut
+  var warns = CANON.filter(function(cat){ return catVal(cat)>1 && (draft.cats[cat]||def.cats[cat])!==def.cats[cat]; });
+  var changed = JSON.stringify({c:draft.cats,a:draft.assets})!==JSON.stringify({c:Object.assign({},def.cats,(comp&&comp.cats)||{}),a:(comp&&comp.assets)||{}});
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{fontSize:11,color:C.text3,lineHeight:1.5}}>
+        Affecte chaque catégorie — ou un actif précis — au fonds <b style={{color:C.text2}}>GDB.S</b>, <b style={{color:C.text2}}>GDB.C</b>, ou <b style={{color:C.text2}}>Hors-fonds</b> (compté dans le patrimoine mais exclu des deux valeurs liquidatives). Idéal pour un actif reçu par ailleurs (or, don…) qui ne doit pas gonfler une VL. Un override d'actif prime sur sa catégorie.
+      </div>
+
+      {CANON.map(function(cat){
+        var v=draft.cats[cat]||def.cats[cat]; var cv=catVal(cat); var items=pool.filter(function(x){return x.cat===cat;});
+        var open=!!exp[cat];
+        return (
+          <div key={cat} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{LABELS[cat]||cat}</div>
+                <div style={{fontSize:10,color:C.text3}}>{bigMcap(cv)} · {items.length} actif{items.length>1?"s":""}</div>
+              </div>
+              <Seg value={v} onChange={function(nv){setCat(cat,nv);}}/>
+            </div>
+            {items.length>0 && (
+              <div>
+                <button onClick={function(){setExp(function(p){var n=Object.assign({},p);n[cat]=!p[cat];return n;});}} style={{background:"none",border:"none",color:C.gray,fontSize:11,fontWeight:700,cursor:"pointer",padding:0}}>{open?"▾ masquer le détail":"▸ détailler par actif"}</button>
+                {open && items.map(function(it){
+                  var ov=draft.assets[it.t]||"";
+                  return (
+                    <div key={it.t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"7px 0 2px",borderTop:"1px solid "+C.border+"66",marginTop:6}}>
+                      <div style={{minWidth:0}}>
+                        <span style={{fontSize:12,fontWeight:700,color:C.text}}>{it.t}</span>
+                        <span style={{fontSize:10,color:C.text3,marginLeft:6}}>{bigMcap(it.val)}</span>
+                      </div>
+                      <Seg value={ov} onChange={function(nv){setAsset(it.t,nv);}} withDefault={true}/>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px"}}>
+        <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Aperçu (avec cette composition)</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.S</div><div style={{fontSize:15,fontWeight:800,color:C_blue()}}>{bigMcap(S)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.C</div><div style={{fontSize:15,fontWeight:800,color:C.btc}}>{bigMcap(C)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>Hors-fonds</div><div style={{fontSize:15,fontWeight:800,color:C.gray}}>{bigMcap(X)}</div></div>
+        </div>
+      </div>
+
+      {warns.length>0 && (
+        <div style={{background:C.orange+"14",border:"1px solid "+C.orange+"55",borderRadius:10,padding:"9px 11px",fontSize:11,color:C.orange,lineHeight:1.5}}>
+          ⚠︎ Tu réaffectes une catégorie qui contient déjà de la valeur ({warns.join(", ")}). La VL par part se décalera d'un coup au changement (marche dans la courbe), car les parts ne bougent pas. Sans impact si la catégorie est vide (cas d'un nouvel actif à ajouter ensuite).
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={function(){ setDraft({cats:Object.assign({},def.cats),assets:{}}); }} style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px",color:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>Réinitialiser</button>
+        <button disabled={!changed} onClick={function(){ if(changed) onSave({cats:draft.cats,assets:draft.assets}); }} style={{flex:1,background:changed?C_blue():C.bg2,border:"none",borderRadius:10,padding:"11px",color:changed?"#fff":C.gray,fontSize:13,fontWeight:800,cursor:changed?"pointer":"default"}}>Enregistrer</button>
+      </div>
+    </div>
+  );
+}
+
 function PageChangelog(){
   var LOG = [
     ["Naissance (v1–v8)", "App React mobile issue du dashboard Excel v5.5. Onglets Overview/Allocation/Stats/GDB/Portfolio, thème dark, données crypto/actions/banque, historique DD, sparkline/donut/charts, toggle €/$. Onglet Transactions (PA moyen pondéré). Storage GitHub Gist multi-appareils."],
@@ -9358,6 +9476,13 @@ function App(){
   // v28.37 — 13F lus par fonds (pastille NEW) : { cik: dateDuDernierDepotVu }
   const[liveHfRead,setLiveHfRead]=useState(function(){ try{ var v=lsv9Get('gdb_hf_read'); return (v&&typeof v==="object")?v:{}; }catch(e){ return {}; } });
   const markHfRead = useCallback(function(cik,date){ setLiveHfRead(function(prev){ if(prev && prev[cik]===date) return prev; var n=Object.assign({},prev); n[cik]=date; saveBase('gdb_hf_read', n); return n; }); },[]);
+  // v28.38 — composition des fonds (GDB.S / GDB.C / Hors-fonds) par catégorie ou actif
+  const[liveFundComp,setLiveFundComp]=useState(function(){ try{ var v=lsv9Get('gdb_fund_comp'); if(v&&typeof v==="object"){ setFundComp(v); return v; } }catch(e){} return defaultFundComp(); });
+  const saveFundComp = useCallback(function(next){
+    setFundComp(next); setLiveFundComp(next); saveBase('gdb_fund_comp', next);
+    // recalcul immédiat des VL avec la nouvelle composition (sans refetch)
+    setLive(function(prev){ if(!prev) return prev; try{ var g=calcGdbPrices(prev); return {...prev, gdbS:g.gdbS, gdbC:g.gdbC}; }catch(e){ return prev; } });
+  },[]);
   // v25.02 Phase 2b — cours GDB.C effectif : points post-Chart recalcules sur le cumul DB.
   const gcEff = React.useMemo(function(){ return recomputeGcFromDB(liveGC, liveDD, liveInv); }, [liveGC, liveDD, liveInv]);
   // v25.04 — liste des investisseurs connus (depuis la DB gdb_inv), grandit avec les nouveaux.
@@ -9640,6 +9765,7 @@ function App(){
       if(Array.isArray(kv.gdb_spot_excl)) setLiveSpotExcl(kv.gdb_spot_excl);
       if(kv.gdb_alloc_targets && Array.isArray(kv.gdb_alloc_targets.targets) && kv.gdb_alloc_targets.targets.length) setLiveAllocTargets(kv.gdb_alloc_targets);
       if(kv.gdb_hf_read && typeof kv.gdb_hf_read==="object") setLiveHfRead(kv.gdb_hf_read);
+      if(kv.gdb_fund_comp && typeof kv.gdb_fund_comp==="object"){ setFundComp(kv.gdb_fund_comp); setLiveFundComp(kv.gdb_fund_comp); }
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9679,6 +9805,7 @@ function App(){
       const lvExcl = lsv9Get('gdb_spot_excl'); if(Array.isArray(lvExcl)){ setLiveSpotExcl(lvExcl); }
       const lvAT = lsv9Get('gdb_alloc_targets'); if(lvAT && Array.isArray(lvAT.targets) && lvAT.targets.length){ setLiveAllocTargets(lvAT); }
       const lvHfR = lsv9Get('gdb_hf_read'); if(lvHfR && typeof lvHfR==="object"){ setLiveHfRead(lvHfR); }
+      const lvFC = lsv9Get('gdb_fund_comp'); if(lvFC && typeof lvFC==="object"){ setFundComp(lvFC); setLiveFundComp(lvFC); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10928,6 +11055,7 @@ function App(){
               {[
                 ["🎨","Thèmes",function(){ setShowSettings(false); setShowTheme(true); }],
                 ["🗄️","Bases de données",function(){ setShowSettings(false); setDataRestore(false); setSettingsPage("data"); }],
+                ["🧮","Composition des fonds",function(){ setShowSettings(false); setSettingsPage("fundcomp"); }],
                 ["📥","Importer trades / positions IBKR",function(){ setShowSettings(false); setIbkrOpen(true); }],
                 ["📤","Exporter les bases",function(){ setShowSettings(false); exportBasesJSON(); }],
                 ["♻️","Restaurer une sauvegarde",function(){ setShowSettings(false); setDataRestore(true); setSettingsPage("data"); }],
@@ -10948,13 +11076,14 @@ function App(){
       {settingsPage&&(
         <div style={{position:"fixed",inset:0,zIndex:1200,background:C.bg,display:"flex",flexDirection:"column",width:430,maxWidth:"100%",left:"50%",transform:"translateX(-50%)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
-            <span style={{fontSize:15,fontWeight:800,color:C.text}}>{settingsPage==="data"?"🗄️ Bases de données":(settingsPage==="changelog"?"📜 Changelog":"ℹ️ À propos")}</span>
+            <span style={{fontSize:15,fontWeight:800,color:C.text}}>{settingsPage==="data"?"🗄️ Bases de données":(settingsPage==="fundcomp"?"🧮 Composition des fonds":(settingsPage==="changelog"?"📜 Changelog":"ℹ️ À propos"))}</span>
             <button onClick={()=>setSettingsPage(null)} style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.border,background:C.bg1,color:C.text2,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
               liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+            {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

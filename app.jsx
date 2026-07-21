@@ -757,7 +757,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.38";
+const APP_VERSION = "v28.39";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9280,6 +9280,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead }){
 }
 
 function PageFundComp({EFF, comp, onSave}){
+  const fUSD=function(n){ if(n==null||!isFinite(n)) return "\u2014"; var x=Math.abs(n), sg=n<0?"\u2212":""; if(x>=1e6) return sg+"$"+(x/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(x>=1e3) return sg+"$"+Math.round(x/1e3)+"k"; return sg+"$"+Math.round(x); };
   const CANON = ["Crypto","Indices","Picking","Or","Cash"];
   const LABELS = { Crypto:"Crypto", Indices:"Indices", Picking:"Picking", Or:"Or", Cash:"Cash (EURO/USD/STRC/KuCoin)" };
   const def = defaultFundComp();
@@ -9328,7 +9329,7 @@ function PageFundComp({EFF, comp, onSave}){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:700,color:C.text}}>{LABELS[cat]||cat}</div>
-                <div style={{fontSize:10,color:C.text3}}>{bigMcap(cv)} · {items.length} actif{items.length>1?"s":""}</div>
+                <div style={{fontSize:10,color:C.text3}}>{fUSD(cv)} · {items.length} actif{items.length>1?"s":""}</div>
               </div>
               <Seg value={v} onChange={function(nv){setCat(cat,nv);}}/>
             </div>
@@ -9341,7 +9342,7 @@ function PageFundComp({EFF, comp, onSave}){
                     <div key={it.t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"7px 0 2px",borderTop:"1px solid "+C.border+"66",marginTop:6}}>
                       <div style={{minWidth:0}}>
                         <span style={{fontSize:12,fontWeight:700,color:C.text}}>{it.t}</span>
-                        <span style={{fontSize:10,color:C.text3,marginLeft:6}}>{bigMcap(it.val)}</span>
+                        <span style={{fontSize:10,color:C.text3,marginLeft:6}}>{fUSD(it.val)}</span>
                       </div>
                       <Seg value={ov} onChange={function(nv){setAsset(it.t,nv);}} withDefault={true}/>
                     </div>
@@ -9356,9 +9357,9 @@ function PageFundComp({EFF, comp, onSave}){
       <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px"}}>
         <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Aperçu (avec cette composition)</div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.S</div><div style={{fontSize:15,fontWeight:800,color:C_blue()}}>{bigMcap(S)}</div></div>
-          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.C</div><div style={{fontSize:15,fontWeight:800,color:C.btc}}>{bigMcap(C)}</div></div>
-          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>Hors-fonds</div><div style={{fontSize:15,fontWeight:800,color:C.gray}}>{bigMcap(X)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.S</div><div style={{fontSize:15,fontWeight:800,color:C_blue()}}>{fUSD(S)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>GDB.C</div><div style={{fontSize:15,fontWeight:800,color:C.btc}}>{fUSD(C)}</div></div>
+          <div style={{flex:1,minWidth:90}}><div style={{fontSize:10,color:C.text3}}>Hors-fonds</div><div style={{fontSize:15,fontWeight:800,color:C.gray}}>{fUSD(X)}</div></div>
         </div>
       </div>
 

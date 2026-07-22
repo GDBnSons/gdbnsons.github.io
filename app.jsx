@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.44";
+const APP_VERSION = "v28.45";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10005,6 +10005,10 @@ function App(){
             setLiveGSB(mergedGSB); lsv9Set('gdb_gsb', mergedGSB);
             const kvGSBl=(kvGSB&&kvGSB.length)||0;
             if(mergedGSB.length>kvGSBl){ saveBase('gdb_gsb', mergedGSB); console.info("[gsb] re-push KV : "+(mergedGSB.length-kvGSBl)+" date(s)"); }
+
+            // Historique or (écrit par le worker /gold-backfill) + historique Home : n'arrivent que par /read
+            if(Array.isArray(kvData.gdb_gold_hist)){ setLiveGoldHist(kvData.gdb_gold_hist); lsv9Set('gdb_gold_hist', kvData.gdb_gold_hist); console.info("[gold] "+kvData.gdb_gold_hist.length+" points chargés depuis KV"); }
+            if(Array.isArray(kvData.gdb_home_hist)){ setLiveHomeHist(kvData.gdb_home_hist); lsv9Set('gdb_home_hist', kvData.gdb_home_hist); }
 
             const kvBench = kvData.gdb_bench;
             const mergedBench = unionSeriesByDate(unionSeriesByDate(BENCH_IDX, lsv9Get('gdb_bench')), kvBench);

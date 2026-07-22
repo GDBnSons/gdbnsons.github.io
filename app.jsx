@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.46";
+const APP_VERSION = "v28.48";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1588,7 +1588,10 @@ function insValM(v){
 function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
-  const yfSym    = YF_MAP[ticker] || ticker;
+  const [symOverride, setSymOverride] = useState(null);
+  const [symDraft, setSymDraft] = useState("");
+  const yfSym    = symOverride || YF_MAP[ticker] || ticker;
+  const hasMap   = !!YF_MAP[ticker] || !!symOverride;
 
   const [tf, setTf]         = useState(function(){ return getDrawings(ticker).tf; });
   const [candleMode, setCandleMode] = useState(function(){ return getDrawings(ticker).candleMode; });
@@ -1714,7 +1717,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
     if(_tfCmInit.current){ _tfCmInit.current=false; return; }
     saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {tf:tf, candleMode:candleMode}));
   }, [tf, candleMode]);
-  useEffect(() => { fetchChart(tf); }, [ticker, tf]);
+  useEffect(() => { fetchChart(tf); }, [ticker, tf, symOverride]);
 
   // Tri news par pertinence avec le ticker
   const scoreNews = (newsArr) => {
@@ -2528,6 +2531,15 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                   <button onClick={()=>navigator.clipboard.writeText(err).catch(()=>{})} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.gray,cursor:"pointer"}}>
                     📋 Copier
                   </button>
+                </div>
+                <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.red}33`}}>
+                  <div style={{fontSize:10,color:C.text2,marginBottom:6}}>{hasMap?"Corriger le symbole Yahoo de ":"Aucun symbole Yahoo pour "}<b style={{color:C.text}}>{ticker}</b>{hasMap?" :":" — définis-le pour charger le graphe :"}</div>
+                  <div style={{display:"flex",gap:6}}>
+                    <input value={symDraft} onChange={e=>setSymDraft(e.target.value)} placeholder="ex. GC=F"
+                      style={{flex:1,minWidth:0,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 9px",color:C.text,fontSize:12,fontWeight:700}}/>
+                    <button onClick={()=>{ const v=(symDraft||"").trim(); if(!v) return; YF_MAP[ticker]=v; try{ saveBase('gdb_yfmap', {...YF_MAP}); }catch(_e){} setSymOverride(v); setErr(null); }}
+                      style={{fontSize:11,fontWeight:700,padding:"7px 12px",borderRadius:6,border:"none",background:C.blue,color:"#fff",cursor:"pointer",whiteSpace:"nowrap"}}>Enregistrer &amp; charger</button>
+                  </div>
                 </div>
               </div>
             )}
@@ -4897,23 +4909,21 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
 
     if(year === curYear && curMI < 12){
       if(category==="crypto"){
-        // Valeur live = total crypto en € (wallet crypto)
-        const liveEUR = EFF ? Math.round(EFF.crypto.total * (src?.usdEur || 0.86)) : null;
+        // v28.47 — Valeur live = fonds GDB.C selon la Composition des fonds (calcGdbPrices)
+        const usdEur  = src?.usdEur || 0.86;
+        const gC      = EFF ? calcGdbPrices(EFF).gdbCfondsUSD : null;
+        const liveEUR = gC != null ? Math.round(gC * usdEur) : null;
         const ddRows  = _DD_ST.filter(r=>r[0]&&r[0].startsWith(curYYMM)&&r[1]!=null);
         const ddEUR   = ddRows.length ? ddRows[ddRows.length-1][1] : null;
-        _applyLiveEOM(liveEUR || ddEUR);
+        _applyLiveEOM(liveEUR != null ? liveEUR : ddEUR);
       }
       if(category==="stocks"){
-        // v28.23 — MÊME périmètre que calcGdbPrices (GDB.S) et que les mois révolus
-        // (r[4]×parts) : GDB.S = tous les items stocks SAUF KUCOIN → le Cash Matelas
-        // est INCLUS. L'exclure ici créait une discontinuité à la frontière de mois
-        // (EOM révolu incluait le matelas, mois courant non) → EOM stocks faux.
+        // v28.47 — Périmètre = fonds GDB.S selon la Composition des fonds (calcGdbPrices).
+        // Ainsi une catégorie passée en "Hors-fonds" (ex. Or) n'est PLUS comptée dans
+        // Actions, exactement comme pour la VL GDB.S et les mois révolus (r[4]×parts).
         const usdEur  = src?.usdEur || 0.86;
-        const liveEUR = EFF ? Math.round(
-          EFF.stocks.items
-            .filter(x => x.t !== "KUCOIN")
-            .reduce((s, x) => s + (x.val || 0), 0) * usdEur
-        ) : null;
+        const gS      = EFF ? calcGdbPrices(EFF).gdbSfondsUSD : null;
+        const liveEUR = gS != null ? Math.round(gS * usdEur) : null;
         _applyLiveEOM(liveEUR);
       }
       if(category==="total"){
@@ -6192,6 +6202,11 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
       // donc un nouveau ticker sans icône n'était jamais sauvegardé → perdu au rechargement).
       saveBase('gdb_yfmap', {...YF_MAP});
       if(form.newIcon) saveBase('gdb_icons', serializeIconDb());
+    }
+    // Filet de sécurité : tout ticker acheté doit avoir une entrée YF_MAP (sinon prix/graphe KO)
+    if(form.side!=="SELL" && resolvedTicker && !YF_MAP[resolvedTicker]){
+      YF_MAP[resolvedTicker] = (form.yahooSymbol||"").trim() || resolvedTicker;
+      try { saveBase('gdb_yfmap', {...YF_MAP}); } catch(_e){}
     }
     // v23.20 — catégorie d'une VENTE = catégorie réelle de l'actif vendu.
     // Sinon form.cat reste "Picking" → txn mal classée ET applyTrade ne route pas

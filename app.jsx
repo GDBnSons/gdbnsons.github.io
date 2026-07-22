@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.45";
+const APP_VERSION = "v28.46";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2970,7 +2970,7 @@ function useWindowSize(){
   return s;
 }
 
-function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC, liveHomeHist}){
+function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, liveDD, liveGDBS, liveGC, liveHomeHist, liveGoldHist}){
   const _DD=liveDD||DD;
   const _GDBS=liveGDBS||GDBS;
   const _GC=liveGC||GC_FULL;
@@ -3057,24 +3057,27 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   /* ── Nouvelles séries : Patrimoine ex. Or, Patrimoine total, Or (XAU) ── */
   // gdb_home_hist : [{d, total(USD), or(USD), xau(GC=F)}] enregistré quotidiennement (dès le 22/07)
   const _HH = {}; (liveHomeHist||[]).forEach(r=>{ if(r&&r.d) _HH[r.d]=r; });
-  const rateUE = src.usdEur || 0.86;               // USD → EUR (approx courant, fenêtre courte)
-  const OR_CUT = "2026-07-20", TOT_CUT = "2026-07-22";
-  // Valeur de la poche Or par date (devise d'affichage)
+  const rateUE = src.usdEur || 0.86;               // USD → EUR (approx courant)
+  const OR_CUT = "2026-07-20";
+  // Valeur de la poche Or par date (devise d'affichage) — sert à retrancher l'Or du patrimoine
   const orDisp = dates.map(d=>{ const h=_HH[d]; if(!h||h.or==null) return 0; return eur ? Math.round(h.or*rateUE) : h.or; });
-  // Patrimoine ex. Or = portefeuille − Or (à partir du 20/07)
+  // Patrimoine ex. Or = portefeuille − Or (à partir du 20/07 ; avant, pas d'or → identique au total)
   const exOrAbs = dates.map((d,i)=> portAbs[i]==null ? null : (portAbs[i] - (d>=OR_CUT ? orDisp[i] : 0)));
   const exOrB   = exOrAbs.map(v=> v!=null && p0abs ? round2(v / p0abs * 100) : null);
-  // Patrimoine total (avec Or) — à partir du 22/07 uniquement
-  const totAbs  = dates.map((d,i)=> d>=TOT_CUT ? portAbs[i] : null);
+  // Patrimoine total (avec Or) = portefeuille complet, sur toute la plage affichée
+  const totAbs  = portAbs.slice();
   const totB    = totAbs.map(v=> v!=null && p0abs ? round2(v / p0abs * 100) : null);
-  // Or : cours XAU (GC=F) en base 100 depuis le 22/07
-  const xauArr  = dates.map(d=>{ const h=_HH[d]; return (d>=TOT_CUT && h && h.xau!=null) ? h.xau : null; });
+  // Or : cours XAU (GC=F) sur tout l'historique via gdb_gold_hist (base 100 au début de la plage)
+  const _GH = {}; (liveGoldHist||[]).forEach(r=>{ if(Array.isArray(r)&&r[0]!=null&&r[1]!=null) _GH[r[0]]=r[1]; });
+  const _gdates = Object.keys(_GH).sort();
+  const goldAt = (d)=>{ if(_GH[d]!=null) return _GH[d]; var best=null; for(var gi=0; gi<_gdates.length; gi++){ if(_gdates[gi]<=d) best=_GH[_gdates[gi]]; else break; } return best; };
+  const xauArr  = dates.map(d=> goldAt(d));
   const xau0    = xauArr.find(v=>v!=null);
   const orB     = xauArr.map(v=> v!=null && xau0 ? round2(v / xau0 * 100) : null);
 
     return { gSlice:gSlice, dates:dates, n:n, gsB:gsB, gcB:gcB, portAbs:portAbs, portB:portB, p0abs:p0abs,
              exOrB:exOrB, exOrAbs:exOrAbs, totB:totB, totAbs:totAbs, orB:orB, xauArr:xauArr };
-  }, [src, tf, eur, _DD, _GDBS, chartData, liveHomeHist]);
+  }, [src, tf, eur, _DD, _GDBS, chartData, liveHomeHist, liveGoldHist]);
   if(!_GM) return null;
   const { gSlice, dates, n, gsB, gcB, portAbs, portB, p0abs, exOrB, exOrAbs, totB, totAbs, orB, xauArr } = _GM;
 
@@ -3994,7 +3997,7 @@ function buildSections(L){
 /* ═══════════════════════════════════════════════════════════
    PAGE OVERVIEW
 ═══════════════════════════════════════════════════════════ */
-function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,liveHomeHist,chosenSource,iconDbVersion=0,bumpIconDb}){
+function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,liveHomeHist,liveGoldHist,chosenSource,iconDbVersion=0,bumpIconDb}){
   const _DD_PO=liveDD||DD;
   const _CM_PO=liveCM||CRYPTO_MONTHLY;
   const [chartTF, setChartTF] = useState("YTD");
@@ -4252,7 +4255,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
 
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine" color={C.gray}/>
-      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveHomeHist={liveHomeHist}/>
+      <GdbCompareChart eur={eur} setEur={setEur} EFF={EFF} tf={chartTF} setTF={setChartTF} onSparkData={setSparkData} chartData={chartData} liveDD={liveDD} liveGDBS={liveGDBS} liveGC={liveGC} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist}/>
 
       {/* Version discrète */}
       <div style={{
@@ -7777,7 +7780,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 }
 
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, onImportIbkr, autoRestore}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, liveHomeHist, liveGoldHist, onImportIbkr, autoRestore}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7789,6 +7792,8 @@ function PageData(
   var _SM   = liveSM   || STOCKS_MONTHLY;
   var _TM   = liveTM   || TOTAL_MONTHLY;
   var _BENCH = liveBench || BENCH_IDX;
+  var _HOMEH = Array.isArray(liveHomeHist)?liveHomeHist:[];
+  var _GOLDH = Array.isArray(liveGoldHist)?liveGoldHist:[];
   var db_state = useState("DD");
   var db = db_state[0]; var setDb = db_state[1];
   var search_state = useState(""); 
@@ -7885,8 +7890,20 @@ function PageData(
     "BENCH_IDX": {
       label:"BENCH_IDX — Indices de référence",
       desc:"BTC/ETH/SP500/NASDAQ/MSCI World depuis 2020 ("+_BENCH.length+" points)",
-      headers:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World"],
-      rows: _BENCH.slice().reverse().map(function(r){return[r[0],fmtF(r[1],0),fmtF(r[2],2),fmtF(r[3],2),fmtF(r[4],2),fmtF(r[5],2)];}),
+      headers:["Date","BTC $","ETH $","S&P 500","Nasdaq","MSCI World","Or $"],
+      rows: _BENCH.slice().reverse().map(function(r){return[r[0],fmtF(r[1],0),fmtF(r[2],2),fmtF(r[3],2),fmtF(r[4],2),fmtF(r[5],2),r[6]!=null?fmtF(r[6],2):"—"];}),
+    },
+    "HOME_HIST": {
+      label:"HOME_HIST — Historique graphe Home",
+      desc:"Total / valeur Or / cours XAU quotidien ("+_HOMEH.length+" points)",
+      headers:["Date","Total $","Or $","XAU (GC=F)"],
+      rows: _HOMEH.slice().reverse().map(function(o){return[o.d, fmt(o.total), fmt(o.or), o.xau!=null?fmtF(o.xau,2):"—"];}),
+    },
+    "GOLD_HIST": {
+      label:"GOLD_HIST — Cours de l'or (GC=F)",
+      desc:"Once d'or $ depuis 2020 ("+_GOLDH.length+" points)",
+      headers:["Date","Or $ (GC=F)"],
+      rows: _GOLDH.slice().reverse().map(function(r){return[r[0], fmtF(r[1],2)];}),
     },
     "PORTFOLIO": {
       label:"Portfolio — Vue unifiee",
@@ -8020,6 +8037,8 @@ function PageData(
     {name:"GC_FULL",     dbKey:"GC_FULL",      count:_GC.length,              last:getLast(_GC)},
     {name:"GS_B100_EXT", dbKey:"GS_B100",      count:_GSB.length,             last:getLast(_GSB)},
     {name:"BENCH_IDX",   dbKey:"BENCH_IDX",    count:_BENCH.length,           last:getLast(_BENCH)},
+    {name:"HOME_HIST",   dbKey:"HOME_HIST",    count:_HOMEH.length,           last:(_HOMEH.length?_HOMEH[_HOMEH.length-1].d:"—")},
+    {name:"GOLD_HIST",   dbKey:"GOLD_HIST",    count:_GOLDH.length,           last:(_GOLDH.length?_GOLDH[_GOLDH.length-1][0]:"—")},
     // Monthly
     {name:"CRYPTO_M",    dbKey:"MONTHLY",      count:countMonthly(_CM),       last:lastMonthly(_CM)},
     {name:"STOCKS_M",    dbKey:"STOCKS_M",     count:countMonthly(_SM),       last:lastMonthly(_SM)},
@@ -10943,7 +10962,7 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist}/>}
+        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
@@ -11144,7 +11163,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
             {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }} onClose={function(){ setSettingsPage(null); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}

@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.49";
+const APP_VERSION = "v28.51";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3904,7 +3904,7 @@ function buildSections(L){
       totalEUR: Math.round(orUSD*usdEur),
       pct: pct(orUSD),
       items: src.stocks.items.filter(x=>x.cat==="Or").map(x=>({
-        ticker: x.t, icon: TICKER_ICONS[x.t]||"🥇", label:"Gold ETF",
+        ticker: x.t, icon: TICKER_ICONS[x.t]||"🥇", label: x.t,
         detail: `${fmtQty(x.qty)} parts · $${x.live.toFixed(2)}`,
         valUSD: x.val, valEUR: Math.round(x.val*usdEur),
         pnl: x.pnl, pct: x.pct,
@@ -9471,6 +9471,11 @@ function PageChangelog(){
     ["v28.2x — Baromètre risk-on/off", "Ouverture de Market → Macro : verdict RISK-ON / NEUTRE / RISK-OFF + curseur, 12 critères à poids égal (DXY, SPY vs open hebdo, MA9/18 hebdo et daily, régime 50MA, VIX, Fear & Greed, ampleur sectorielle, High Yield, cycliques/défensives, cuivre/or, or refuge). Carte repliable, tuiles cliquables avec explication détaillée. Repris en ouverture de la newsletter (remplace l'Humeur du jour)."],
     ["v28.2x — Carte cross-asset", "Market → Secteurs : Or, Argent, Mines, Cuivre, Obligations (TLT/HYG/LQD), Semi-conducteurs, Services pétroliers, Brent, Robotique, Spatial (SPCX+JEDI.L) + market cap crypto totale avec dominance BTC. Δ jour, tuiles cliquables."],
     ["v28.2x — Corrections & confort", "Trades spot supprimables durablement (Legend : corbeille + restauration, base dédiée immunisée contre la ré-injection). Refresh au lancement différé après chargement complet. Stats : valeur de fin de mois Actions corrigée (reconstruction au nombre de parts réel) et périmètre aligné entre mois courant et mois révolus."],
+    ["v28.3x — Récap hebdo & historique baromètre", "Édition newsletter du dimanche : perf 7 jours par poche, trades de la semaine, évolution du baromètre. Historique du baromètre enregistré chaque jour (score, SPY, portefeuille) et affiché en graphe dans Market → Macro. Newsletter : top/flop secteurs tous actifs confondus, nouveautés Hedge funds (13F) & Congrès. Correctif majeur : l'envoi automatique de 6h échouait (limite de sous-requêtes) — invocation cron dédiée."],
+    ["v28.3x — Cibles d'allocation multiples", "Portfolio → Allocation : gérer plusieurs cibles nommées (Gérer les cibles), basculer d'un tap entre elles, comparer le réel à la cible de son choix. 6 poches, total 100 % requis. Persistant (local + cloud). Pastille NEW sur les fonds 13F mis à jour, effacée à la lecture."],
+    ["v28.3x — Composition des fonds", "Nouvel écran Paramètres : affecter chaque catégorie (ou un actif précis) à GDB.S, GDB.C ou Hors-fonds — pour intégrer un actif (or, don…) au patrimoine sans impacter une valeur liquidative. Défaut identique à l'historique. Répercuté partout : VL, Stats (Actions/Crypto/Total), allocation."],
+    ["v28.4x — Or dans les graphes", "Cours de l'or (GC=F) intégré : backfill de l'historique depuis 2020 dans BENCH_IDX (courbe Or de l'onglet GDB) + série quotidienne. Graphe Home refondu : légende sous le graphe, cliquable, échelle adaptative ; courbes Patrimoine ex. Or, Patrimoine total et Or. Bases HOME_HIST / GOLD_HIST consultables."],
+    ["v28.5x — Correctifs", "Modal titre : champ « Définir le symbole Yahoo » quand le mapping manque, + enregistrement automatique du mapping à l'achat. Nom de position Or : suppression du libellé « Gold ETF » codé en dur (affiche le vrai ticker). Curseur du baromètre fiabilisé."],
   ];
   return (
     <div style={{paddingBottom:40}}>
@@ -9497,7 +9502,8 @@ function PageAbout(){
     ["Backend", "Cloudflare Worker (JavaScript) + KV storage"],
     ["Hébergement", "GitHub Pages"],
     ["Sources de données", "Yahoo Finance · CoinGecko · FMP · SEC EDGAR · Nasdaq · House Stock Watcher · Finnhub · RSS (CoinDesk, Cointelegraph, Decrypt)"],
-    ["Newsletter", "Envoi quotidien 6h00 (Nouméa) — e-mail (Resend) + Telegram · résumé des news par IA (Claude, Anthropic) · baromètre risk-on/off 12 critères"],
+    ["Newsletter", "Envoi quotidien 6h00 (Nouméa) — e-mail (Resend) + Telegram · résumé des news par IA (Claude, Anthropic) · baromètre risk-on/off 12 critères · récap hebdo le dimanche"],
+    ["Composition des fonds", "GDB.S / GDB.C / Hors-fonds paramétrables par catégorie ou actif · cours de l'or GC=F suivi depuis 2020"],
   ];
   return (
     <div style={{paddingBottom:40}}>
@@ -9805,7 +9811,7 @@ function App(){
         } : prev);
       }
       try {
-        const res=await cfGet("/read",{timeout:8000});
+        const res=await cfGet("/read",{timeout:12000});
         if(res.ok){
           const kv=await res.json();
           // Phase 1 v23.01 — seeder le miroir local v9 depuis KV (écriture additive)

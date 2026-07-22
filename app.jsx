@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.43";
+const APP_VERSION = "v28.44";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -857,7 +857,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -9515,6 +9515,16 @@ function App(){
   // v28.42 — historique quotidien pour le graphe Home : [{d, total(USD), or(USD), xau(GC=F)}]
   const[liveHomeHist,setLiveHomeHist]=useState(function(){ try{ var v=lsv9Get('gdb_home_hist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
   const recordHomeHist = useCallback(function(pt){ if(!pt||!pt.d) return; setLiveHomeHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x.d===pt.d;}); if(i>=0) arr[i]=Object.assign({},arr[i],pt); else arr.push(pt); if(arr.length>800) arr=arr.slice(arr.length-800); saveBase('gdb_home_hist', arr); return arr; }); },[]);
+  // Historique du cours de l'or (GC=F) : [[date, prix]] — backfill worker 2020+ puis ajout quotidien
+  const[liveGoldHist,setLiveGoldHist]=useState(function(){ try{ var v=lsv9Get('gdb_gold_hist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
+  // BENCH_IDX enrichi de la colonne Or (7e) depuis l'historique dédié — robuste aux fusions
+  const benchWithGold = React.useMemo(function(){
+    var base = liveBench || BENCH_IDX;
+    if(!liveGoldHist || !liveGoldHist.length) return base;
+    var gmap={}; liveGoldHist.forEach(function(r){ if(Array.isArray(r)&&r[0]!=null&&r[1]!=null) gmap[r[0]]=r[1]; });
+    return base.map(function(row){ var g=gmap[row[0]]; if(g==null) return row; var r2=row.slice(); while(r2.length<6) r2.push(null); r2[6]=g; return r2; });
+  }, [liveBench, liveGoldHist]);
   const saveFundComp = useCallback(function(next){
     setFundComp(next); setLiveFundComp(next); saveBase('gdb_fund_comp', next);
     // recalcul immédiat des VL avec la nouvelle composition (sans refetch)
@@ -9659,6 +9669,7 @@ function App(){
         try {
           const orUSD = ((updated.stocks && updated.stocks.items) || []).filter(x=>x.cat==="Or").reduce((a,x)=>a+(x.val||0),0);
           recordHomeHist({ d: todayStr, total: Math.round(updated.totalUSD||0), or: Math.round(orUSD), xau: (goldLive!=null?goldLive:null) });
+          if(goldLive!=null) recordGoldHist(todayStr, Math.round(goldLive*100)/100);
         } catch(e){}
         // v23.23 — setLiveGDBS / setLiveGC retirés du refresh.
         // Les séries GDB.S/GDB.C ne se mettent à jour QUE via les snapshots (contrôle
@@ -9810,6 +9821,7 @@ function App(){
       if(kv.gdb_hf_read && typeof kv.gdb_hf_read==="object") setLiveHfRead(kv.gdb_hf_read);
       if(kv.gdb_fund_comp && typeof kv.gdb_fund_comp==="object"){ setFundComp(kv.gdb_fund_comp); setLiveFundComp(kv.gdb_fund_comp); }
       if(Array.isArray(kv.gdb_home_hist)) setLiveHomeHist(kv.gdb_home_hist);
+      if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9851,6 +9863,7 @@ function App(){
       const lvHfR = lsv9Get('gdb_hf_read'); if(lvHfR && typeof lvHfR==="object"){ setLiveHfRead(lvHfR); }
       const lvFC = lsv9Get('gdb_fund_comp'); if(lvFC && typeof lvFC==="object"){ setFundComp(lvFC); setLiveFundComp(lvFC); }
       const lvHH = lsv9Get('gdb_home_hist'); if(Array.isArray(lvHH)){ setLiveHomeHist(lvHH); }
+      const lvGH = lsv9Get('gdb_gold_hist'); if(Array.isArray(lvGH)){ setLiveGoldHist(lvGH); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10929,7 +10942,7 @@ function App(){
         {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
-        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={liveBench} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
+        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
@@ -11127,7 +11140,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={liveBench} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
             {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }} onClose={function(){ setSettingsPage(null); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}

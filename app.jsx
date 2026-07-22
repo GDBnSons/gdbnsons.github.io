@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.48";
+const APP_VERSION = "v28.49";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4927,11 +4927,15 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         _applyLiveEOM(liveEUR);
       }
       if(category==="total"){
-        // v23.26 — Total = valeur live du portefeuille total en € (crypto + stocks + banque)
-        const liveEUR = EFF ? Math.round(EFF.totalEUR || (EFF.totalUSD||0) * (src?.usdEur || 0.86)) : null;
+        // v28.49 — Total = Stocks + Crypto (les deux fonds), selon la Composition des fonds.
+        // Ainsi l'Or hors-fonds n'est PLUS compté dans le Total, cohérent avec les
+        // catégories Actions/Crypto corrigées (avant : EFF.totalEUR = patrimoine complet).
+        const usdEur  = src?.usdEur || 0.86;
+        const g       = EFF ? calcGdbPrices(EFF) : null;
+        const liveEUR = g ? Math.round((g.gdbSfondsUSD + g.gdbCfondsUSD) * usdEur) : null;
         const ddRows  = _DD_ST.filter(r=>r[0]&&r[0].startsWith(curYYMM)&&r[2]!=null);
         const ddEUR   = ddRows.length ? ddRows[ddRows.length-1][2] : null;
-        _applyLiveEOM(liveEUR || ddEUR);
+        _applyLiveEOM(liveEUR != null ? liveEUR : ddEUR);
       }
     }
     return result;

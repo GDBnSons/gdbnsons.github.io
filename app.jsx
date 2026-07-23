@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.51";
+const APP_VERSION = "v28.52";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4879,24 +4879,30 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         const r = ddLastOfMonth(mi);
         if(!r) continue;
         let eomEUR = null;
+        // v28.52 — reconstruction Actions factorisée (utilisée AUSSI par Total)
+        const _stocksEom = (row, monthIdx) => {
+          // v28.26 — mois PRÉSENT dans STOCKS_MONTHLY (ex. Jan→Mai) : nb de parts figé
+          // (GDB_S_NB_PARTS). Mois ABSENT : GDB.S = valeur ÷ parts DYNAMIQUES → on
+          // reconstruit avec les parts RÉELLES à la date (cumul gdb_inv ≤ row[0]).
+          if(row[4]==null || row[5]==null) return null;
+          let partsS = GDB_S_NB_PARTS;
+          const sBase = STOCKS_MONTHLY[year];
+          const hasBase = sBase && sBase.eom && sBase.eom[monthIdx]!=null;
+          if(!hasBase){
+            let _S=0;
+            (_INV_ST||[]).forEach(function(m){ if(m && typeof m.shares==="number" && m.fonds==="GDB.S" && (!m.date || m.date <= row[0])) _S += m.shares; });
+            if(_S>0) partsS = _S;
+          }
+          return Math.round(row[4]*partsS*row[5]);
+        };
         if(category==="crypto")      eomEUR = r[1];
-        else if(category==="total")  eomEUR = r[2];
-        else if(category==="stocks"){
-          // v28.26 — mois PRÉSENT dans STOCKS_MONTHLY (ex. Jan→Mai) : on garde la
-          // reconstruction historique au nb de parts figé (GDB_S_NB_PARTS), inchangée.
-          // Mois ABSENT (ex. juin) : GDB.S est enregistré = valeur ÷ parts DYNAMIQUES ;
-          // après un dépôt/retrait le nb de parts change → 11942 fige une mauvaise base.
-          // On reconstruit alors avec les parts RÉELLES à la date (cumul gdb_inv ≤ r[0]).
-          if(r[4]!=null && r[5]!=null){
-            let partsS = GDB_S_NB_PARTS;
-            const hasBase = base.eom && base.eom[mi]!=null;
-            if(!hasBase){
-              let _S=0;
-              (_INV_ST||[]).forEach(function(m){ if(m && typeof m.shares==="number" && m.fonds==="GDB.S" && (!m.date || m.date <= r[0])) _S += m.shares; });
-              if(_S>0) partsS = _S;
-            }
-            eomEUR = Math.round(r[4]*partsS*r[5]);
-          } else eomEUR = null;
+        else if(category==="stocks") eomEUR = _stocksEom(r, mi);
+        else if(category==="total"){
+          // v28.52 — Total = Crypto + Actions (mêmes reconstructions), et NON la colonne
+          // DD "patrimoine total" (r[2]) qui englobe aussi ce qui est hors des deux fonds
+          // (ex. Or passé en Hors-fonds) → Total ≠ Crypto + Actions sur l'année courante.
+          const _c = r[1], _s = _stocksEom(r, mi);
+          eomEUR = (_c!=null && _s!=null) ? (_c + _s) : r[2];
         }
         if(eomEUR!=null) result.eom[mi] = eomEUR;
       }

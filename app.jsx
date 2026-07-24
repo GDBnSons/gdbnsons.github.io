@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.52";
+const APP_VERSION = "v28.53";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -7867,9 +7867,10 @@ function PageData(
       var n=Number(String(v).replace(",",".")); return isNaN(n)? v : n;
     }); });
   }
-  function saveEdit(kv){
+  function saveEdit(ed){
+    var kv = (ed && ed.kv) ? ed.kv : ed;
     setEditSaving(true); setEditMsg(null);
-    var payload={}; payload[kv]=buildTyped(editData);
+    var payload={}; payload[kv] = (ed && ed.fromRows) ? ed.fromRows(editData) : buildTyped(editData);
     cfPost("/write-bases",payload,{timeout:15000})
       .then(function(r){return r.json();})
       .then(function(d){ setEditSaving(false);
@@ -8046,6 +8047,14 @@ function PageData(
     "GC_FULL":   { kv:"gdb_gc",    raw:_GC },
     "GS_B100":   { kv:"gdb_gsb",   raw:_GSB },
     "BENCH_IDX": { kv:"gdb_bench", raw:_BENCH },
+    // Bases à structure particulière : conversion lignes ⇄ stockage
+    "HOME_HIST": { kv:"gdb_home_hist", raw:_HOMEH,
+      toRows: function(a){ return (a||[]).map(function(o){ return [o.d, o.total, o.or, o.xau].map(function(v){ return v==null?"":String(v); }); }); },
+      fromRows: function(rows){
+        function n(x){ if(x===""||x==null) return null; var v=Number(String(x).replace(",",".")); return isNaN(v)?null:v; }
+        return (rows||[]).filter(function(r){ return r && r[0]; }).map(function(r){ return { d:r[0], total:n(r[1]), or:n(r[2]), xau:n(r[3]) }; });
+      } },
+    "GOLD_HIST": { kv:"gdb_gold_hist", raw:_GOLDH },
   };
   var currentDB = DATABASES[db];
   var filtered = search
@@ -8309,11 +8318,11 @@ function PageData(
                         <span>{previewDB.desc} — {inEdit ? (editData.length+" lignes (édition)") : (Math.min(100, previewDB.rows.length)+" / "+previewDB.rows.length+" lignes")}</span>
                         {editable && (inEdit ? (
                           <span style={{display:"flex",gap:6,flexShrink:0}}>
-                            <button onClick={function(){ saveEdit(ed.kv); }} disabled={editSaving} style={{background:C.green,border:"none",borderRadius:6,color:"#000",fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer"}}>{editSaving?"…":"💾 Enregistrer"}</button>
+                            <button onClick={function(){ saveEdit(ed); }} disabled={editSaving} style={{background:C.green,border:"none",borderRadius:6,color:"#000",fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer"}}>{editSaving?"…":"💾 Enregistrer"}</button>
                             <button onClick={function(){ setEditBase(null); setEditData([]); setEditMsg(null); }} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,color:C.gray,fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer"}}>✕</button>
                           </span>
                         ) : (
-                          <button onClick={function(){ setEditBase(b.name); setEditData(ed.raw.map(function(r){return r.map(function(v){return v==null?"":String(v);});})); setEditMsg(null); }} style={{background:C.btc+"22",border:"1px solid "+C.btc+"66",borderRadius:6,color:C.btc,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",flexShrink:0}}>✎ Modifier</button>
+                          <button onClick={function(){ setEditBase(b.name); setEditData(ed.toRows ? ed.toRows(ed.raw) : ed.raw.map(function(r){return r.map(function(v){return v==null?"":String(v);});})); setEditMsg(null); }} style={{background:C.btc+"22",border:"1px solid "+C.btc+"66",borderRadius:6,color:C.btc,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",flexShrink:0}}>✎ Modifier</button>
                         ))}
                       </div>
                       {inEdit && editMsg && <div style={{fontSize:9,padding:"5px 8px",color: editMsg.indexOf("Erreur")>=0?C.red:C.green, background:C.bg2}}>{editMsg}</div>}
@@ -8325,6 +8334,7 @@ function PageData(
                                 <th key={hi} style={{padding:"4px 7px",textAlign:"left",color:C.gray,fontWeight:700,borderBottom:"1px solid "+C.border+"44",whiteSpace:"nowrap"}}>{h}</th>
                               );})}
                               {b.name==="YF_MAP" && !inEdit && <th style={{padding:"4px 7px",borderBottom:"1px solid "+C.border+"44"}}></th>}
+                              {inEdit && <th style={{padding:"4px 7px",borderBottom:"1px solid "+C.border+"44"}}></th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -8338,6 +8348,9 @@ function PageData(
                                         <input value={cell} onChange={function(e){ var nv=e.target.value; setEditData(function(prev){ var cp=prev.map(function(rr){return rr.slice();}); cp[rawIdx][ci]=nv; return cp; }); }} style={{width:ci===0?80:62,background:C.bg1,border:"1px solid "+C.border,borderRadius:4,color:ci===0?C.btc:C.text,fontSize:10,padding:"2px 4px",fontFamily:ci===0?"monospace":"inherit"}}/>
                                       </td>
                                     );})}
+                                    <td style={{padding:"2px 4px",textAlign:"right"}}>
+                                      <button onClick={function(){ setEditData(function(prev){ return prev.filter(function(_r,ix){ return ix!==rawIdx; }); }); }} title="Supprimer cette ligne" style={{background:C.red+"22",border:"1px solid "+C.red+"55",borderRadius:5,color:C.red,fontSize:11,padding:"1px 7px",cursor:"pointer",lineHeight:1.3}}>🗑</button>
+                                    </td>
                                   </tr>
                                 );
                               })
@@ -9642,6 +9655,8 @@ function App(){
   const[kvData_snap,setKvData_snap]=useState(null); // {totalUSD, totalEUR, date, raw}
   const[kvError,setKvError]=useState(null);         // message si KV inaccessible
   const[chosenSource,setChosenSource]=useState("local"); // "local" | "cloudflare"
+  const chosenSourceRef = useRef("local");
+  useEffect(function(){ chosenSourceRef.current = chosenSource; },[chosenSource]);
   // localData initialisé avec liveDD (peut inclure des snapshots précédents)
   const[localData,setLocalData]=useState(()=>{
     // v23.18 — refléter les données LOCALES fraîches (miroir v9) plutôt que le build figé.
@@ -9718,7 +9733,15 @@ function App(){
         // Historique Home : 1 point/jour {total(USD), Or(USD), xau(GC=F)}
         try {
           const orUSD = ((updated.stocks && updated.stocks.items) || []).filter(x=>x.cat==="Or").reduce((a,x)=>a+(x.val||0),0);
-          recordHomeHist({ d: todayStr, total: Math.round(updated.totalUSD||0), or: Math.round(orUSD), xau: (goldLive!=null?goldLive:null) });
+          // v28.53 — n'enregistrer un point QUE depuis la source cloud (référence).
+          // Une session démarrée sur la "Base locale" (build intégré) travaille sur des
+          // positions figées (ancien or, sans les derniers trades) → le point écrit était
+          // faux et créait un pic dans les courbes (cas du 23/07).
+          if(chosenSourceRef.current === "cloudflare"){
+            recordHomeHist({ d: todayStr, total: Math.round(updated.totalUSD||0), or: Math.round(orUSD), xau: (goldLive!=null?goldLive:null) });
+          } else {
+            console.info("[home_hist] point non enregistré (source locale — données du build, non représentatives)");
+          }
           if(goldLive!=null) recordGoldHist(todayStr, Math.round(goldLive*100)/100);
         } catch(e){}
         // v23.23 — setLiveGDBS / setLiveGC retirés du refresh.

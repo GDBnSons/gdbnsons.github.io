@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.53";
+const APP_VERSION = "v28.54";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -857,7 +857,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -7805,7 +7805,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
 }
 
 function PageData(
-{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, liveHomeHist, liveGoldHist, onImportIbkr, autoRestore}){
+{EFF, hidden, txns, chartData, liveDD, liveGDBS, liveGC, liveGSB, liveCM, liveSM, liveTM, liveBench, liveInv, liveFutures, liveIbkrAnnex, liveHomeHist, liveGoldHist, liveQuad, onImportIbkr, autoRestore}){
   var _DD   = liveDD   || DD;
   var _INV  = liveInv  || INV_SEED;
   var _FUT  = liveFutures || SEED_FUTURES;
@@ -7819,6 +7819,7 @@ function PageData(
   var _BENCH = liveBench || BENCH_IDX;
   var _HOMEH = Array.isArray(liveHomeHist)?liveHomeHist:[];
   var _GOLDH = Array.isArray(liveGoldHist)?liveGoldHist:[];
+  var _QUAD  = (Array.isArray(liveQuad)&&liveQuad.length)?liveQuad:QUAD_HIST;
   var db_state = useState("DD");
   var db = db_state[0]; var setDb = db_state[1];
   var search_state = useState(""); 
@@ -7924,6 +7925,12 @@ function PageData(
       desc:"Total / valeur Or / cours XAU quotidien ("+_HOMEH.length+" points)",
       headers:["Date","Total $","Or $","XAU (GC=F)"],
       rows: _HOMEH.slice().reverse().map(function(o){return[o.d, fmt(o.total), fmt(o.or), o.xau!=null?fmtF(o.xau,2):"—"];}),
+    },
+    "QUADRANTS": {
+      label:"QUADRANTS — 4 quadrants de Charles Gave",
+      desc:"Série annuelle ("+_QUAD.length+" ans) : ratios, MM7, régimes, pentes",
+      headers:["Année","Ratio S&P/pétr.","MM7 croiss.","Ratio Or/oblig.","MM7 infl.","Rég. C","Rég. I","Pente C","Pente I","Quadrant"],
+      rows: _QUAD.slice().reverse().map(function(r){ return [r[0], fmtF(r[1],1), fmtF(r[2],1), fmtF(r[3],4), fmtF(r[4],4), (r[5]==null?"—":(r[5]>0?"+1":"-1")), (r[6]==null?"—":(r[6]>0?"+1":"-1")), fmtF(r[7],1), fmtF(r[8],1), (r[9]||"—")]; }),
     },
     "GOLD_HIST": {
       label:"GOLD_HIST — Cours de l'or (GC=F)",
@@ -8055,6 +8062,7 @@ function PageData(
         return (rows||[]).filter(function(r){ return r && r[0]; }).map(function(r){ return { d:r[0], total:n(r[1]), or:n(r[2]), xau:n(r[3]) }; });
       } },
     "GOLD_HIST": { kv:"gdb_gold_hist", raw:_GOLDH },
+    "QUADRANTS": { kv:"gdb_quadrants", raw:_QUAD },
   };
   var currentDB = DATABASES[db];
   var filtered = search
@@ -8073,6 +8081,7 @@ function PageData(
     {name:"BENCH_IDX",   dbKey:"BENCH_IDX",    count:_BENCH.length,           last:getLast(_BENCH)},
     {name:"HOME_HIST",   dbKey:"HOME_HIST",    count:_HOMEH.length,           last:(_HOMEH.length?_HOMEH[_HOMEH.length-1].d:"—")},
     {name:"GOLD_HIST",   dbKey:"GOLD_HIST",    count:_GOLDH.length,           last:(_GOLDH.length?_GOLDH[_GOLDH.length-1][0]:"—")},
+    {name:"QUADRANTS",   dbKey:"QUADRANTS",    count:_QUAD.length,            last:(_QUAD.length?String(_QUAD[_QUAD.length-1][0]):"—")},
     // Monthly
     {name:"CRYPTO_M",    dbKey:"MONTHLY",      count:countMonthly(_CM),       last:lastMonthly(_CM)},
     {name:"STOCKS_M",    dbKey:"STOCKS_M",     count:countMonthly(_SM),       last:lastMonthly(_SM)},
@@ -8542,7 +8551,221 @@ function PageNewsletter(){
   );
 }
 
-function PageMarket({ eur=false, hfRead={}, onHfRead }){
+const QUAD_HIST=[[1877,1.3,2.167,0.69404,0.84727,1,-1,null,null,"CD"],[1878,2.84,2.419,0.6595,0.79862,1,-1,null,null,"CD"],[1879,4.79,2.906,0.62545,0.75118,1,-1,null,null,"CD"],[1880,5.48,3.315,0.58985,0.70513,1,-1,14.17,-6.12,"CD"],[1881,7.27,3.796,0.55932,0.66352,1,-1,15.02,-6.18,"CD"],[1882,7.56,4.406,0.53801,0.6283,1,-1,13.87,-5.95,"CD"],[1883,5.63,4.984,0.51923,0.59791,1,-1,13.59,-5.5,"CD"],[1884,5.64,5.605,0.49918,0.57008,1,-1,12.99,-5.06,"CD"],[1885,5.22,5.945,0.47768,0.5441,1,-1,9.99,-4.8,"CD"],[1886,7.56,6.339,0.46131,0.52066,1,-1,8.02,-4.61,"CD"],[1887,8.26,6.736,0.45093,0.50081,1,-1,6.13,-4.32,"CD"],[1888,5.91,6.542,0.43467,0.483,1,-1,3.19,-3.97,"CD"],[1889,5.66,6.271,0.41541,0.46549,1,-1,-0.36,-3.73,"CD"],[1890,6.06,6.331,0.40405,0.44904,1,-1,-2.07,-3.64,"CD"],[1891,7.5,6.597,0.39359,0.43395,1,-1,0.28,-3.57,"CD"],[1892,9.91,7.266,0.38149,0.42021,-1,-1,4.91,-3.41,"RD"],[1893,7.46,7.253,0.36959,0.40711,-1,-1,4.53,-3.27,"RD"],[1894,5.22,6.819,0.35239,0.39303,-1,-1,1.1,-3.3,"RD"],[1895,3.33,6.449,0.33836,0.37927,-1,-1,-3.98,-3.42,"RD"],[1896,3.59,6.153,0.32733,0.36669,-1,-1,-5.48,-3.49,"RD"],[1897,5.63,6.093,0.31321,0.35371,-1,-1,-3.75,-3.51,"RD"],[1898,5.55,5.814,0.2998,0.34031,-1,-1,-3.46,-3.61,"RD"],[1899,4.87,5.094,0.28735,0.32686,-1,-1,-6.29,-3.83,"RD"],[1900,5.17,4.766,0.27904,0.31393,1,-1,-8.18,-3.98,"CD"],[1901,8.17,5.187,0.27107,0.30231,1,-1,-3.8,-3.95,"CD"],[1902,10.52,6.215,0.26463,0.29178,1,-1,6.63,-3.79,"CD"],[1903,7.67,6.798,0.25819,0.2819,1,-1,11.84,-3.59,"CD"],[1904,8.2,7.165,0.25165,0.2731,1,-1,10.76,-3.39,"CD"],[1905,14.49,8.442,0.24315,0.26501,1,-1,10.21,-3.21,"CD"],[1906,13.18,9.628,0.2362,0.2577,1,-1,11.6,-2.99,"CD"],[1907,10.89,10.446,0.23235,0.25103,1,-1,12.57,-2.81,"CD"],[1908,10.8,10.822,0.22498,0.24445,1,-1,8.28,-2.69,"CD"],[1909,13.88,11.301,0.21695,0.23764,1,-1,5.34,-2.7,"CD"],[1910,15.33,12.395,0.21024,0.23079,1,-1,5.7,-2.8,"CD"],[1911,15.14,13.387,0.20301,0.22384,-1,-1,7.09,-2.94,"RD"],[1912,12.89,13.157,0.19838,0.21744,-1,-1,5.07,-2.96,"RD"],[1913,8.96,12.553,0.19168,0.21108,-1,-1,0.42,-2.97,"RD"],[1914,9.81,12.399,0.18288,0.20402,-1,-1,-2.55,-3.09,"RD"],[1915,12.98,12.71,0.17497,0.19687,-1,-1,-1.15,-3.31,"RD"],[1916,8.61,11.957,0.16774,0.18984,-1,-1,-1.62,-3.54,"RD"],[1917,5.45,10.545,0.16402,0.18324,-1,-1,-5.4,-3.58,"RD"],[1918,3.81,8.926,0.1588,0.17692,-1,-1,-11.78,-3.56,"RD"],[1919,4.37,7.71,0.16155,0.17166,-1,-1,-14.63,-3.36,"RD"],[1920,2.6,6.802,0.16336,0.16762,-1,-1,-14.62,-2.97,"RD"],[1921,3.96,5.967,0.15171,0.16316,-1,-1,-13.43,-2.7,"RD"],[1922,5.22,4.859,0.14144,0.15837,-1,-1,-15.39,-2.69,"RD"],[1923,6.4,4.544,0.13887,0.15425,1,-1,-13.45,-2.77,"CD"],[1924,6.33,4.67,0.12702,0.14896,1,-1,-8.17,-3.03,"CD"],[1925,6.64,5.074,0.12024,0.14346,1,-1,1.44,-3.3,"CD"],[1926,6.7,5.406,0.11368,0.13662,1,-1,5.79,-4.05,"CD"],[1927,11.8,6.721,0.10834,0.12876,1,-1,12.14,-4.86,"CD"],[1928,17.05,8.591,0.10588,0.12221,1,-1,17.55,-5.34,"CD"],[1929,20.49,10.771,0.10223,0.11661,1,-1,22.98,-5.28,"CD"],[1930,17.67,12.382,0.09785,0.11075,1,-1,20.37,-5.02,"CD"],[1931,21.01,14.48,0.07931,0.10393,1,-1,17.4,-5.4,"CD"],[1932,7.96,14.669,0.09304,0.10005,1,-1,10.3,-5.11,"CD"],[1933,13.37,15.623,0.11199,0.09981,-1,-1,7.75,-3.47,"RD"],[1934,9.84,15.343,0.14025,0.10436,-1,-1,1.93,0.14,"RD"],[1935,10.93,14.468,0.1343,0.10842,-1,-1,-0.46,2.68,"RD"],[1936,14.19,13.569,0.13023,0.11242,-1,-1,-4.7,3.97,"RD"],[1937,13.06,12.909,0.12618,0.11647,-1,-1,-5.76,3.66,"RD"],[1938,10.17,11.36,0.12168,0.12252,-1,-1,-8.06,4.07,"RD"],[1939,11.83,11.912,0.11568,0.12576,-1,-1,-4.34,3.74,"RD"],[1940,10.8,11.545,0.10947,0.1254,-1,-1,-3.72,2.46,"RD"],[1941,8.62,11.37,0.10803,0.12079,-1,-1,0.03,-0.47,"RD"],[1942,7.29,10.85,0.10808,0.11705,-1,-1,-3.11,-2.39,"RD"],[1943,9.59,10.192,0.10557,0.11353,-1,-1,-4.15,-3.32,"RD"],[1944,10.3,9.799,0.10265,0.11016,1,-1,-4.96,-3.07,"CD"],[1945,14.43,10.409,0.10164,0.1073,1,-1,-1.38,-2.9,"CD"],[1946,15.25,10.898,0.09881,0.10489,1,-1,2.23,-2.64,"CD"],[1947,7.98,10.495,0.09758,0.10319,1,-1,2.29,-2.18,"CD"],[1948,7.81,10.379,0.09568,0.10143,1,-1,-0.1,-1.88,"CD"],[1949,8.56,10.56,0.08488,0.09812,1,-1,-1.05,-2.23,"CD"],[1950,10.76,10.728,0.09175,0.09614,1,-1,0.73,-2.36,"CD"],[1951,13.06,11.121,0.09088,0.09446,1,-1,2.3,-2.37,"CD"],[1952,14.33,11.106,0.08914,0.09268,1,-1,1.68,-1.9,"CD"],[1953,12.81,10.758,0.08805,0.09114,1,-1,0.09,-1.78,"CD"],[1954,15.38,11.815,0.08318,0.08908,1,-1,2.02,-1.95,"CD"],[1955,20.98,13.697,0.08388,0.0874,1,-1,6.99,-1.96,"CD"],[1956,24.16,15.926,0.08379,0.08724,1,-1,13.08,-1.46,"CD"],[1957,23.36,17.726,0.08397,0.08613,1,-1,13.52,-1.12,"CD"],[1958,22.23,19.036,0.07941,0.08449,1,-1,10.97,-1.13,"CD"],[1959,27.59,20.93,0.08284,0.08359,1,-1,9.11,-1.43,"CD"],[1960,29.39,23.299,0.07837,0.08221,1,-1,9.11,-1.55,"CD"],[1961,36.82,26.361,0.07387,0.08088,1,-1,10.85,-1.46,"CD"],[1962,34.66,28.314,0.0715,0.07911,1,-1,10.07,-1.84,"CD"],[1963,38.81,30.408,0.06884,0.07697,1,-1,8.88,-2.19,"CD"],[1964,45.2,33.529,0.06718,0.07457,1,-1,8.02,-2.7,"CD"],[1965,48.98,37.351,0.06482,0.07249,1,-1,9.23,-2.91,"CD"],[1966,47.36,40.177,0.06502,0.06994,1,-1,9.29,-3.19,"CD"],[1967,51.07,43.273,0.06252,0.06768,1,-1,8.5,-3.23,"CD"],[1968,54.83,45.846,0.06885,0.06696,1,-1,6.83,-2.64,"CD"],[1969,54.36,48.661,0.07313,0.0672,1,-1,6.39,-1.34,"CD"],[1970,46.23,49.72,0.06254,0.0663,-1,-1,4.63,-0.69,"CD"],[1971,43.88,49.531,0.06195,0.06555,-1,1,2.58,-0.71,"RI"],[1972,44.04,48.824,0.08327,0.06818,-1,1,0.11,0.49,"RI"],[1973,32.65,46.722,0.13645,0.07839,-1,1,-2.07,5.58,"RI"],[1974,7.13,40.444,0.21826,0.10064,-1,1,-6.76,14.29,"RI"],[1975,7.47,33.679,0.21026,0.12084,-1,1,-12.38,19.07,"RI"],[1976,7.97,27.053,0.14779,0.1315,-1,1,-18.21,17.25,"RI"],[1977,7.06,21.456,0.16058,0.14551,-1,1,-21.13,12.29,"RI"],[1978,6.85,16.166,0.20739,0.16629,-1,1,-24.47,10.64,"RI"],[1979,3.26,10.341,0.32177,0.20036,-1,1,-32.06,14.04,"RI"],[1980,3.23,6.137,0.64754,0.27337,-1,1,-41.72,21.02,"RI"],[1981,3.56,5.628,0.4932,0.31265,-1,1,-35.17,21.05,"RI"],[1982,3.63,5.079,0.33997,0.33118,-1,1,-23.7,16.75,"RI"],[1983,5.43,4.716,0.30968,0.3543,-1,1,-8.78,8.64,"RI"],[1984,5.58,4.505,0.25368,0.36761,-1,-1,-7.42,5.4,"RI"],[1985,6.78,4.495,0.1825,0.36405,1,-1,-4.07,3.15,"CD"],[1986,15.71,6.273,0.16328,0.34141,1,-1,9.51,-1.24,"CD"],[1987,14.94,7.947,0.1918,0.2763,1,-1,18.92,-9.52,"CD"],[1988,16.65,9.816,0.17783,0.23125,1,-1,26.04,-15.13,"CD"],[1989,16.44,11.646,0.13984,0.20266,1,-1,20.62,-17.39,"CD"],[1990,13.64,12.819,0.12997,0.17699,1,-1,15.94,-14.85,"CD"],[1991,17.46,14.517,0.10873,0.15628,1,-1,13.05,-13.06,"CD"],[1992,20.21,16.435,0.09098,0.1432,1,-1,11.48,-11.57,"CD"],[1993,24.49,17.69,0.08295,0.13173,1,-1,10.74,-9.84,"CD"],[1994,26.77,19.38,0.09033,0.11723,1,-1,9.63,-9.58,"CD"],[1995,29.39,21.2,0.08186,0.10352,1,-1,8.49,-10.82,"CD"],[1996,30.33,23.184,0.07683,0.09452,1,-1,9.02,-11.06,"CD"],[1997,42.35,27.285,0.06132,0.08471,1,-1,11.4,-10.83,"CD"],[1998,75.18,35.53,0.04779,0.07601,1,-1,17.21,-10.3,"CD"],[1999,68.55,42.437,0.0441,0.06931,1,-1,20.15,-10.34,"CD"],[2000,46.97,45.649,0.04287,0.06359,1,-1,17.15,-9.56,"CD"],[2001,45.88,48.379,0.03676,0.05593,1,-1,10.29,-10.22,"CD"],[2002,38.02,49.612,0.03897,0.04981,1,-1,5.21,-11.02,"CD"],[2003,31.01,49.709,0.04191,0.04482,-1,-1,2.84,-11.66,"CD"],[2004,27.24,47.551,0.0462,0.04266,-1,1,-0.58,-9.03,"RI"],[2005,21.31,39.855,0.04822,0.04272,-1,1,-7.3,-5.12,"RI"],[2006,19.84,32.897,0.06506,0.04571,-1,1,-13.76,0.66,"RI"],[2007,20.41,29.103,0.07077,0.0497,-1,1,-16.37,5.09,"RI"],[2008,12.25,24.298,0.07914,0.05575,-1,1,-16.49,8.88,"RI"],[2009,15.28,21.05,0.08269,0.062,-1,1,-14.88,10.16,"RI"],[2010,14.34,18.667,0.10048,0.07036,-1,1,-14.8,11.59,"RI"],[2011,13.37,16.687,0.1208,0.08102,-1,1,-12.53,12.46,"RI"],[2012,14.67,15.737,0.1159,0.09069,-1,1,-9.69,12.68,"RI"],[2013,16.76,15.298,0.10061,0.09577,1,1,-6.64,10.28,"CI"],[2014,20.72,15.342,0.08946,0.09844,1,1,-2.8,6.49,"CI"],[2015,42.36,19.644,0.07753,0.09821,1,1,7.39,2.65,"CI"],[2016,48.32,24.363,0.07978,0.09779,1,1,15.51,0.7,"CI"],[2017,48.19,29.2,0.08203,0.09516,1,1,21.45,-1.13,"CI"],[2018,42.08,33.301,0.08467,0.09,1,1,17.59,-2.91,"CI"],[2019,51.11,38.506,0.08514,0.0856,1,1,15.26,-4.44,"CI"],[2020,82.19,47.852,0.09585,0.08492,1,1,16.47,-3.79,"CI"],[2021,62.62,53.838,0.10119,0.0866,1,1,16.01,-1.28,"CI"],[2022,43.21,53.959,0.11292,0.09165,1,1,11.25,2.28,"CI"],[2023,55.34,54.963,0.12762,0.09849,1,1,4.62,4.94,"CI"],[2024,70.81,58.194,0.15361,0.10871,1,1,2.59,7.58,"CI"],[2025,94.99,65.753,0.21372,0.12715,1,1,6.59,10.91,"CI"],[2026,84.42,70.512,0.27925,0.15488,1,1,8.3,15.09,"CI"]];
+
+/* ── Market → 4 quadrants (modèle de Charles Gave) ─────────────────────────
+   Croissance = sens de la MM7 du ratio S&P 500 / pétrole
+   Inflation  = sens de la MM7 du ratio Or / obligations d'État US
+   Ligne : [annee, ratioG, mm7G, ratioI, mm7I, regG(+1/-1), regI(+1/-1), penteG, penteI] */
+const QUAD_META = {
+  "CI": { lbl:"Croissance inflationniste",  actif:"Or, valeurs de rareté",     col:"#C9A227" },
+  "CD": { lbl:"Croissance déflationniste",  actif:"Valeurs d'efficacité",      col:"#4A9A6B" },
+  "RI": { lbl:"Récession inflationniste",   actif:"Cash, meilleure monnaie",   col:"#C0392B" },
+  "RD": { lbl:"Récession déflationniste",   actif:"Obligations d'État",        col:"#3C7EA8" },
+};
+function quadKey(rg, ri){ if(rg==null||ri==null) return null; return (rg>0?"C":"R")+(ri>0?"I":"D"); }
+// La colonne "quadrant" de la base fait foi (elle rattache l'année de retournement
+// au régime précédent, comme la frise de référence) ; repli sur le croisement.
+function quadOf(r){ return (r && r[9]) ? r[9] : quadKey(r&&r[5], r&&r[6]); }
+
+function PageQuadrants({rows}){
+  const [showRaw,setShowRaw] = useState({g:false, i:false});
+  const data = (rows||[]).filter(function(r){ return Array.isArray(r) && r[0]!=null; });
+  if(data.length<2) return <div style={{fontSize:12,color:C.text3}}>Base des quadrants indisponible.</div>;
+
+  const y0 = data[0][0], y1 = data[data.length-1][0];
+  const last = data[data.length-1];
+  const curK = quadOf(last);
+  const curM = QUAD_META[curK] || {lbl:"—",actif:"—",col:C.gray};
+
+  // Séquence : regroupement des années consécutives de même quadrant
+  const seq = [];
+  data.forEach(function(r){
+    const k = quadOf(r); if(!k) return;
+    const cur = seq[seq.length-1];
+    if(cur && cur.k===k) cur.b = r[0]; else seq.push({k:k, a:r[0], b:r[0]});
+  });
+  const totalY = seq.reduce(function(s,x){ return s + (x.b-x.a+1); },0);
+  const share = {}; seq.forEach(function(x){ share[x.k]=(share[x.k]||0)+(x.b-x.a+1); });
+  const curSeq = seq[seq.length-1];
+
+  // Retournements = années où le régime change
+  function turns(idx){
+    const out=[]; for(let i=1;i<data.length;i++){ if(data[i][idx]!=null && data[i-1][idx]!=null && data[i][idx]!==data[i-1][idx]) out.push(data[i][0]); } return out;
+  }
+  const turnG = turns(5), turnI = turns(6);
+
+  const W = 340;
+  const xOf = function(y){ return 6 + (y-y0)/(y1-y0) * (W-12); };
+
+  /* ── Frise : 3 bandes (croissance / inflation / quadrant) ── */
+  function Bande({idx, h, yTop, mode}){
+    // segments consécutifs de même signe (ou même quadrant si mode="quad")
+    const segs=[];
+    data.forEach(function(r){
+      const k = mode==="quad" ? quadOf(r) : (r[idx]==null?null:(r[idx]>0?"P":"N"));
+      if(!k) return;
+      const cur=segs[segs.length-1];
+      if(cur && cur.k===k) cur.b=r[0]; else segs.push({k:k,a:r[0],b:r[0]});
+    });
+    return segs.map(function(s,i){
+      let col, lab;
+      if(mode==="quad"){ col=QUAD_META[s.k].col; lab=""; }
+      else if(idx===5){ col = s.k==="P" ? "#4A9A6B" : "#C0392B"; lab = s.k==="P"?"CROIS.":"RÉC."; }
+      else { col = s.k==="P" ? "#C9A227" : "#3C7EA8"; lab = s.k==="P"?"INFL.":"DÉFL."; }
+      const x=xOf(s.a), w=Math.max(1.5, xOf(s.b+1)-x);
+      return (
+        <g key={i}>
+          <rect x={x} y={yTop} width={w} height={h} fill={col} opacity="0.92" rx="1.5"/>
+          {w>34 && lab && <text x={x+w/2} y={yTop+h/2+3} textAnchor="middle" fontSize="7" fontWeight="800" fill="#fff">{lab}</text>}
+        </g>
+      );
+    });
+  }
+
+  /* ── Courbe MM7 (échelle log) avec zones de régime ── */
+  function Courbe({idxRatio, idxMm7, idxReg, colLine, colUp, colDn, titre, sousTitre, rawKey}){
+    const H=132, PT=8, PB=16;
+    const vals=[]; data.forEach(function(r){ if(r[idxMm7]!=null) vals.push(r[idxMm7]); if(showRaw[rawKey] && r[idxRatio]!=null) vals.push(r[idxRatio]); });
+    if(!vals.length) return null;
+    const mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals);
+    const lo=Math.log(mn), hi=Math.log(mx), rg=(hi-lo)||1;
+    const yOf=function(v){ return PT + (1-(Math.log(v)-lo)/rg)*(H-PT-PB); };
+    function path(idx){
+      let d="", pen=false;
+      data.forEach(function(r){ const v=r[idx]; if(v==null||v<=0){ pen=false; return; }
+        const x=xOf(r[0]).toFixed(1), y=yOf(v).toFixed(1); d += (pen?" L":" M")+x+","+y; pen=true; });
+      return d.trim();
+    }
+    // zones de régime
+    const zones=[]; let cur=null;
+    data.forEach(function(r){ const s=r[idxReg]; if(s==null) return;
+      if(cur && cur.s===s) cur.b=r[0]; else { cur={s:s,a:r[0],b:r[0]}; zones.push(cur); } });
+    return (
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"11px 12px",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:1}}>{titre}</div>
+        <div style={{fontSize:9,color:C.text3,marginBottom:8,lineHeight:1.4}}>{sousTitre}</div>
+        <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
+          {zones.map(function(z,i){ const x=xOf(z.a), w=Math.max(1,xOf(z.b+1)-x);
+            return <rect key={i} x={x} y={PT} width={w} height={H-PT-PB} fill={z.s>0?colUp:colDn} opacity="0.13"/>; })}
+          {turns(idxReg).map(function(y,i){ return <line key={i} x1={xOf(y)} y1={PT} x2={xOf(y)} y2={H-PB} stroke={C.text3} strokeWidth="0.7" strokeDasharray="3 2"/>; })}
+          {showRaw[rawKey] && <path d={path(idxRatio)} fill="none" stroke={C.text3} strokeWidth="0.9" opacity="0.75"/>}
+          <path d={path(idxMm7)} fill="none" stroke={colLine} strokeWidth="2.1" strokeLinejoin="round"/>
+          {[y0, 1920, 1970, 2000, y1].map(function(y,i){ return <text key={i} x={xOf(y)} y={H-4} textAnchor="middle" fontSize="7.5" fill={C.text3}>{y}</text>; })}
+        </svg>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:6}}>
+          <button onClick={function(){ setShowRaw(function(p){ var n=Object.assign({},p); n[rawKey]=!p[rawKey]; return n; }); }}
+            style={{display:"flex",alignItems:"center",gap:5,background:showRaw[rawKey]?C.bg2:"transparent",border:"1px solid "+(showRaw[rawKey]?C.text3:C.border),borderRadius:20,padding:"3px 9px",cursor:"pointer"}}>
+            <span style={{width:10,height:2,background:C.text3,borderRadius:1,display:"inline-block"}}/>
+            <span style={{fontSize:9,color:showRaw[rawKey]?C.text2:C.gray,fontWeight:700}}>Ratio brut</span>
+          </button>
+          <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+            <span style={{width:11,height:2.5,background:colLine,borderRadius:1,display:"inline-block"}}/>
+            <span style={{fontSize:9,color:C.text2,fontWeight:700}}>Moyenne mobile 7 ans</span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const FH = 128; // hauteur frise
+  return (
+    <div>
+      {/* Régime actuel */}
+      <div style={{background:curM.col+"18",border:"1px solid "+curM.col+"66",borderRadius:12,padding:"13px 14px",marginBottom:10}}>
+        <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>Régime actuel · {y1}</div>
+        <div style={{fontSize:17,fontWeight:900,color:curM.col,lineHeight:1.15}}>{curM.lbl}</div>
+        <div style={{fontSize:12,color:C.text,marginTop:3,fontWeight:700}}>→ {curM.actif}</div>
+        <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+          {[["Croissance",last[7],"%/an"],["Inflation",last[8],"%/an"]].map(function(x,i){
+            var v=x[1], col=v==null?C.gray:(v>=0?C.green:C.red);
+            return (
+              <div key={i} style={{flex:1,minWidth:96,background:C.bg1,borderRadius:9,padding:"7px 9px",border:"1px solid "+C.border}}>
+                <div style={{fontSize:9,color:C.text3}}>{x[0]} (pente 3 ans)</div>
+                <div style={{fontSize:14,fontWeight:800,color:col}}>{v==null?"—":((v>=0?"+":"")+v.toFixed(1)+" "+x[2])}</div>
+              </div>
+            );
+          })}
+        </div>
+        {curSeq && <div style={{fontSize:10,color:C.text2,marginTop:9}}>Depuis <b style={{color:C.text}}>{curSeq.a}</b> · {curSeq.b-curSeq.a+1} ans · ce quadrant représente {Math.round((share[curK]||0)/totalY*100)} % du temps depuis {y0}</div>}
+      </div>
+
+      {/* Frise */}
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"11px 12px",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:1}}>Frise des 4 quadrants · {y0}-{y1}</div>
+        <div style={{fontSize:9,color:C.text3,marginBottom:9,lineHeight:1.4}}>Croissance = sens de la MM7 S&P 500/pétrole · Inflation = sens de la MM7 Or/obligations</div>
+        <svg viewBox={"0 0 "+W+" "+FH} style={{width:"100%",height:"auto",display:"block"}}>
+          <text x="6" y="10" fontSize="8" fontWeight="700" fill={C.text2}>① S&P 500 / pétrole</text>
+          <Bande idx={5} h={17} yTop={14}/>
+          {turnG.map(function(y,i){ return <text key={i} x={xOf(y)} y={11} textAnchor="middle" fontSize="6.5" fill={C.text3}>{y}</text>; })}
+          <text x="6" y="47" fontSize="8" fontWeight="700" fill={C.text2}>② Or / obligations</text>
+          <Bande idx={6} h={17} yTop={51}/>
+          {turnI.map(function(y,i){ return <text key={i} x={xOf(y)} y={48} textAnchor="middle" fontSize="6.5" fill={C.text3}>{y}</text>; })}
+          <text x="6" y="84" fontSize="8" fontWeight="700" fill={C.text2}>③ Quadrant résultant</text>
+          <Bande mode="quad" h={20} yTop={88}/>
+          {[y0,1920,1970,2000,y1].map(function(y,i){ return <text key={i} x={xOf(y)} y={FH-3} textAnchor="middle" fontSize="7.5" fill={C.text3}>{y}</text>; })}
+        </svg>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {Object.keys(QUAD_META).map(function(k){ var m=QUAD_META[k]; return (
+            <span key={k} style={{display:"inline-flex",alignItems:"center",gap:5}}>
+              <span style={{width:9,height:9,background:m.col,borderRadius:2,display:"inline-block"}}/>
+              <span style={{fontSize:8.5,color:C.text2}}>{m.lbl}</span>
+            </span>
+          );})}
+        </div>
+      </div>
+
+      <Courbe idxRatio={1} idxMm7={2} idxReg={5} colLine="#B23A2E" colUp="#4A9A6B" colDn="#C0392B"
+        titre="① S&P 500 / pétrole — croissance" rawKey="g"
+        sousTitre="Combien de barils de brut « achète » un point d'indice. MM7 qui monte = croissance, qui baisse = récession. Échelle log."/>
+      <Courbe idxRatio={3} idxMm7={4} idxReg={6} colLine="#1F6091" colUp="#C9A227" colDn="#3C7EA8"
+        titre="② Or / obligations d'État US — inflation" rawKey="i"
+        sousTitre="Performance de l'or face à une obligation 10 ans réinvestie (base 1 en 1871). MM7 qui monte = inflation. Échelle log."/>
+
+      {/* Séquence */}
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"11px 12px"}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>Séquence des quadrants</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+            <thead><tr style={{color:C.text3}}>
+              <th style={{textAlign:"left",padding:"3px 4px",fontWeight:700}}>Période</th>
+              <th style={{textAlign:"right",padding:"3px 4px",fontWeight:700}}>Durée</th>
+              <th style={{textAlign:"left",padding:"3px 6px",fontWeight:700}}>Quadrant</th>
+              <th style={{textAlign:"left",padding:"3px 4px",fontWeight:700}}>Actif gagnant</th>
+            </tr></thead>
+            <tbody>
+              {seq.slice().reverse().map(function(s,i){ var m=QUAD_META[s.k]; var isCur=i===0;
+                return (
+                  <tr key={i} style={{borderTop:"1px solid "+C.border+"55",background:isCur?m.col+"14":"transparent"}}>
+                    <td style={{padding:"4px",color:C.text,fontWeight:isCur?800:400,whiteSpace:"nowrap"}}>{s.a}–{s.b}</td>
+                    <td style={{padding:"4px",textAlign:"right",color:C.text3,whiteSpace:"nowrap"}}>{s.b-s.a+1} ans</td>
+                    <td style={{padding:"4px 6px",color:m.col,fontWeight:700}}>{m.lbl}</td>
+                    <td style={{padding:"4px",color:C.text2}}>{m.actif}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,paddingTop:9,borderTop:"1px solid "+C.border}}>
+          {Object.keys(QUAD_META).map(function(k){ var m=QUAD_META[k]; var pc=Math.round((share[k]||0)/totalY*100);
+            return (
+              <div key={k} style={{flex:1,minWidth:74,textAlign:"center"}}>
+                <div style={{fontSize:15,fontWeight:900,color:m.col}}>{pc}%</div>
+                <div style={{fontSize:8,color:C.text3,lineHeight:1.25}}>{m.lbl}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:8.5,color:C.text3,marginTop:9,lineHeight:1.45}}>
+          Retournements = extrema des MM7 (échelle log, proéminence ≥ 0,13, écart ≥ 5 ans). Sources : Shiller, Energy Institute/BP via OWID, EIA, LBMA, FRED. {y1} = données partielles.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(null);
@@ -8712,7 +8935,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; if(n>=1e6)return "$"+(n/1e6).toFixed(0)+" M"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["macro","Macro"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
+  const SUBS=[["macro","Macro"],["quad","4 quadrants"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
 
   function Gauge(props){
     var v=props.value;
@@ -8806,6 +9029,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead }){
         </div>
       );})()}
 
+      {sub==="quad" && <PageQuadrants rows={quadRows && quadRows.length ? quadRows : QUAD_HIST}/>}
       {mkt && !loading && sub==="macro" && (function(){ var p=mkt.pulse||{}; var m=mkt.macro||{};
         var flag=function(cc){ return cc?<img src={"https://flagcdn.com/20x15/"+cc+".png"} alt="" style={{width:18,height:13,borderRadius:2,objectFit:"cover",flexShrink:0}}/>:null; };
         var sectTitle=function(t){ return <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{t}</div>; };
@@ -9580,6 +9804,8 @@ function App(){
   const recordHomeHist = useCallback(function(pt){ if(!pt||!pt.d) return; setLiveHomeHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x.d===pt.d;}); if(i>=0) arr[i]=Object.assign({},arr[i],pt); else arr.push(pt); if(arr.length>800) arr=arr.slice(arr.length-800); saveBase('gdb_home_hist', arr); return arr; }); },[]);
   // Historique du cours de l'or (GC=F) : [[date, prix]] — backfill worker 2020+ puis ajout quotidien
   const[liveGoldHist,setLiveGoldHist]=useState(function(){ try{ var v=lsv9Get('gdb_gold_hist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  // v28.54 — base des 4 quadrants (série annuelle, surcharge la constante QUAD_HIST)
+  const[liveQuad,setLiveQuad]=useState(function(){ try{ var v=lsv9Get('gdb_quadrants'); return Array.isArray(v)&&v.length?v:[]; }catch(e){ return []; } });
   const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
   // BENCH_IDX enrichi de la colonne Or (7e) depuis l'historique dédié — robuste aux fusions
   const benchWithGold = React.useMemo(function(){
@@ -9895,6 +10121,7 @@ function App(){
       if(kv.gdb_fund_comp && typeof kv.gdb_fund_comp==="object"){ setFundComp(kv.gdb_fund_comp); setLiveFundComp(kv.gdb_fund_comp); }
       if(Array.isArray(kv.gdb_home_hist)) setLiveHomeHist(kv.gdb_home_hist);
       if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
+      if(Array.isArray(kv.gdb_quadrants) && kv.gdb_quadrants.length) setLiveQuad(kv.gdb_quadrants);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -9937,6 +10164,7 @@ function App(){
       const lvFC = lsv9Get('gdb_fund_comp'); if(lvFC && typeof lvFC==="object"){ setFundComp(lvFC); setLiveFundComp(lvFC); }
       const lvHH = lsv9Get('gdb_home_hist'); if(Array.isArray(lvHH)){ setLiveHomeHist(lvHH); }
       const lvGH = lsv9Get('gdb_gold_hist'); if(Array.isArray(lvGH)){ setLiveGoldHist(lvGH); }
+      const lvQD = lsv9Get('gdb_quadrants'); if(Array.isArray(lvQD)&&lvQD.length){ setLiveQuad(lvQD); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -10082,6 +10310,7 @@ function App(){
             // Historique or (écrit par le worker /gold-backfill) + historique Home : n'arrivent que par /read
             if(Array.isArray(kvData.gdb_gold_hist)){ setLiveGoldHist(kvData.gdb_gold_hist); lsv9Set('gdb_gold_hist', kvData.gdb_gold_hist); console.info("[gold] "+kvData.gdb_gold_hist.length+" points chargés depuis KV"); }
             if(Array.isArray(kvData.gdb_home_hist)){ setLiveHomeHist(kvData.gdb_home_hist); lsv9Set('gdb_home_hist', kvData.gdb_home_hist); }
+            if(Array.isArray(kvData.gdb_quadrants) && kvData.gdb_quadrants.length){ setLiveQuad(kvData.gdb_quadrants); lsv9Set('gdb_quadrants', kvData.gdb_quadrants); }
 
             const kvBench = kvData.gdb_bench;
             const mergedBench = unionSeriesByDate(unionSeriesByDate(BENCH_IDX, lsv9Get('gdb_bench')), kvBench);
@@ -11021,7 +11250,7 @@ function App(){
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
-        {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead}/>}
+        {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>
@@ -11217,7 +11446,7 @@ function App(){
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist} liveQuad={liveQuad} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
             {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }} onClose={function(){ setSettingsPage(null); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}

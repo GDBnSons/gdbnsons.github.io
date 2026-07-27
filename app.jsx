@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.54";
+const APP_VERSION = "v28.55";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8765,6 +8765,112 @@ function PageQuadrants({rows}){
   );
 }
 
+/* ── Market → ETF : flux nets (BTC/ETH/SOL/HYPE), daily/weekly/monthly ── */
+const ETF_META = { btc:{lbl:"Bitcoin", col:"#F7931A"}, eth:{lbl:"Ethereum", col:"#627EEA"}, sol:{lbl:"Solana", col:"#14F195"}, hype:{lbl:"Hyperliquid", col:"#2DD4BF"} };
+function etfBucket(rows, gran){
+  // rows:[[YYYY-MM-DD, val M$]] chrono → agrège par jour/semaine(lundi)/mois
+  var map = {};
+  (rows||[]).forEach(function(r){
+    if(!r||r[0]==null||r[1]==null) return;
+    var d=r[0], key=d;
+    if(gran==="monthly") key=d.slice(0,7);
+    else if(gran==="weekly"){
+      var dt=new Date(d+"T00:00:00Z"), day=(dt.getUTCDay()+6)%7; // lundi=0
+      dt.setUTCDate(dt.getUTCDate()-day); key=dt.toISOString().slice(0,10);
+    }
+    map[key]=(map[key]||0)+r[1];
+  });
+  return Object.keys(map).sort().map(function(k){ return [k, Math.round(map[k]*100)/100]; });
+}
+function fmtFlow(v){ if(v==null) return "—"; var a=Math.abs(v), s=v<0?"-":"+"; if(a>=1000) return s+"$"+(a/1000).toFixed(2)+"B"; return s+"$"+a.toFixed(1)+"M"; }
+
+function PageEtf({flows}){
+  const [asset,setAsset] = useState("btc");
+  const [gran,setGran]   = useState("daily");
+  const [showCum,setShowCum] = useState(true);
+  const meta = ETF_META[asset] || {lbl:asset,col:C.btc};
+  const rows = (flows && flows[asset]) || [];
+  const agg = etfBucket(rows, gran);
+  const NSHOW = gran==="daily"?60 : gran==="weekly"?52 : 36;
+  const view = agg.slice(-NSHOW);
+
+  if(!rows.length) return <div style={{fontSize:12,color:C.text3}}>Flux ETF indisponibles — lancer le backfill.</div>;
+
+  // stats fenêtre
+  const sum = view.reduce(function(s,x){ return s+x[1]; },0);
+  const last = view.length?view[view.length-1]:null;
+  // cumul TOTAL (toute l'histoire) — dernier point = actif net cumulé
+  var cumAll=0; const cumSeries = agg.map(function(x){ cumAll+=x[1]; return cumAll; });
+  const cumView = cumSeries.slice(-NSHOW);
+  const cumNow = cumSeries.length?cumSeries[cumSeries.length-1]:0;
+
+  // graphe barres + ligne cumul (échelle droite)
+  const W=340, H=170, PADB=22, PADT=8, PADX=6;
+  const vals=view.map(function(x){return x[1];});
+  const mx=Math.max(0.01, Math.max.apply(null,vals.map(Math.abs)));
+  const n=view.length, bw=Math.max(1.2,(W-2*PADX)/n - 1);
+  const zeroY = PADT + (H-PADT-PADB)*(mx/(2*mx));
+  const yBar=function(v){ return PADT + (H-PADT-PADB)*((mx-v)/(2*mx)); };
+  const cmn=Math.min.apply(null,cumView), cmx=Math.max.apply(null,cumView), crg=(cmx-cmn)||1;
+  const yCum=function(v){ return PADT + (1-(v-cmn)/crg)*(H-PADT-PADB); };
+  const xOf=function(i){ return PADX + i*((W-2*PADX)/n) + ((W-2*PADX)/n - bw)/2; };
+  const cumPath = cumView.map(function(v,i){ return (i?"L":"M")+(xOf(i)+bw/2).toFixed(1)+","+yCum(v).toFixed(1); }).join(" ");
+
+  const GRAN=[["daily","Jour"],["weekly","Semaine"],["monthly","Mois"]];
+  function tick(i){ var d=view[i][0]; if(gran==="monthly") return d.slice(2); if(gran==="weekly") return d.slice(5); return d.slice(5); }
+
+  return (
+    <div>
+      {/* actif */}
+      <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+        {Object.keys(ETF_META).map(function(k){ var m=ETF_META[k], on=k===asset; return (
+          <button key={k} onClick={function(){setAsset(k);}} style={{flex:1,minWidth:70,background:on?m.col+"22":C.bg1,border:"1px solid "+(on?m.col:C.border),borderRadius:10,padding:"7px 6px",color:on?m.col:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{m.lbl}</button>
+        );})}
+      </div>
+      {/* granularité */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {GRAN.map(function(g){ var on=g[0]===gran; return (
+          <button key={g[0]} onClick={function(){setGran(g[0]);}} style={{flex:1,background:on?C.text+"18":C.bg1,border:"1px solid "+(on?C.text2:C.border),borderRadius:9,padding:"6px",color:on?C.text:C.gray,fontSize:11,fontWeight:700,cursor:"pointer"}}>{g[1]}</button>
+        );})}
+      </div>
+
+      {/* résumé */}
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        {[["Dernier "+(gran==="daily"?"jour":gran==="weekly"?"semaine":"mois"), last?last[1]:null],
+          ["Somme fenêtre", sum],
+          ["Actif net cumulé", cumNow]].map(function(x,i){
+          var v=x[1], col=v==null?C.gray:(v>=0?C.green:C.red);
+          return (
+            <div key={i} style={{flex:1,minWidth:98,background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"8px 9px"}}>
+              <div style={{fontSize:9,color:C.text3}}>{x[0]}</div>
+              <div style={{fontSize:14,fontWeight:800,color:col}}>{fmtFlow(v)}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* graphe */}
+      <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"11px 12px",marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:12,fontWeight:800,color:meta.col}}>{meta.lbl} · flux nets ({gran==="daily"?"quotidien":gran==="weekly"?"hebdo":"mensuel"})</span>
+          <button onClick={function(){setShowCum(function(v){return !v;});}} style={{display:"flex",alignItems:"center",gap:5,background:showCum?C.bg2:"transparent",border:"1px solid "+(showCum?C.text3:C.border),borderRadius:20,padding:"3px 9px",cursor:"pointer"}}>
+            <span style={{width:10,height:2,background:C.text2,borderRadius:1,display:"inline-block"}}/>
+            <span style={{fontSize:9,color:showCum?C.text2:C.gray,fontWeight:700}}>Cumul</span>
+          </button>
+        </div>
+        <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
+          <line x1={PADX} y1={zeroY} x2={W-PADX} y2={zeroY} stroke={C.border} strokeWidth="1"/>
+          {view.map(function(x,i){ var v=x[1], y=v>=0?yBar(v):zeroY, hgt=Math.abs(yBar(v)-zeroY);
+            return <rect key={i} x={xOf(i)} y={y} width={bw} height={Math.max(0.6,hgt)} rx="1" fill={v>=0?C.green:C.red} opacity="0.9"/>; })}
+          {showCum && cumView.length>1 && <path d={cumPath} fill="none" stroke={meta.col} strokeWidth="1.8" strokeLinejoin="round" opacity="0.95"/>}
+          {view.map(function(x,i){ if(n>14 && i%Math.ceil(n/8)!==0) return null; return <text key={i} x={xOf(i)+bw/2} y={H-6} textAnchor="middle" fontSize="7" fill={C.text3}>{tick(i)}</text>; })}
+        </svg>
+        <div style={{fontSize:8.5,color:C.text3,marginTop:5}}>Barres = flux net {gran==="daily"?"du jour":gran==="weekly"?"de la semaine":"du mois"} (vert entrées / rouge sorties). {showCum && "Ligne = actif net cumulé (forme, échelle propre)."} Montants en M$ (Source : Farside).</div>
+      </div>
+    </div>
+  );
+}
+
 function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -8773,6 +8879,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const [mt,setMt]=useState(null);
   const [risk,setRisk]=useState(null),[riskL,setRiskL]=useState(false),[riskE,setRiskE]=useState(null);
   const [riskSel,setRiskSel]=useState(null);
+  const [etf,setEtf]=useState(null),[etfL,setEtfL]=useState(false),[etfE,setEtfE]=useState(null);
   const [riskOpen,setRiskOpen]=useState(false);
   const [histR,setHistR]=useState(null),[histL,setHistL]=useState(false),[histE,setHistE]=useState(null);
   const [histOpen,setHistOpen]=useState(false);
@@ -8915,6 +9022,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
     if(sub==="congress" && cong===null && !congL) loadSec("/market/congress",setCong,setCongL,setCongE,false);
     if(sub==="macro"    && fund===null && !fundL) loadSec("/funding",setFund,setFundL,setFundE,false);
     if(sub==="macro"    && risk===null && !riskL) loadSec("/market/risk",setRisk,setRiskL,setRiskE,false);
+    if(sub==="etf"      && etf===null  && !etfL)  loadSec("/market/etf-flows",setEtf,setEtfL,setEtfE,false);
     if(sub==="secteurs" && cross===null && !crossL) loadSec("/market/cross",setCross,setCrossL,setCrossE,false);
     if(sub==="btc"      && btcSig===null && !btcSigL) loadBtc(false);
   },[sub]);
@@ -8935,7 +9043,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; if(n>=1e6)return "$"+(n/1e6).toFixed(0)+" M"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["macro","Macro"],["quad","4 quadrants"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
+  const SUBS=[["macro","Macro"],["quad","4 quadrants"],["etf","ETF"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
 
   function Gauge(props){
     var v=props.value;
@@ -9030,6 +9138,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
       );})()}
 
       {sub==="quad" && <PageQuadrants rows={quadRows && quadRows.length ? quadRows : QUAD_HIST}/>}
+      {sub==="etf" && (etf ? <PageEtf flows={etf.flows||etf}/> : (etfE ? <div style={{fontSize:12,color:C.red}}>{etfE}</div> : <div style={{fontSize:12,color:C.text3}}>Chargement…</div>))}
       {mkt && !loading && sub==="macro" && (function(){ var p=mkt.pulse||{}; var m=mkt.macro||{};
         var flag=function(cc){ return cc?<img src={"https://flagcdn.com/20x15/"+cc+".png"} alt="" style={{width:18,height:13,borderRadius:2,objectFit:"cover",flexShrink:0}}/>:null; };
         var sectTitle=function(t){ return <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{t}</div>; };

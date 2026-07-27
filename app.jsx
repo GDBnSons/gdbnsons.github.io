@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.55";
+const APP_VERSION = "v28.56";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8783,13 +8783,21 @@ function etfBucket(rows, gran){
   return Object.keys(map).sort().map(function(k){ return [k, Math.round(map[k]*100)/100]; });
 }
 function fmtFlow(v){ if(v==null) return "—"; var a=Math.abs(v), s=v<0?"-":"+"; if(a>=1000) return s+"$"+(a/1000).toFixed(2)+"B"; return s+"$"+a.toFixed(1)+"M"; }
+function etfPxMap(pxRows){ var sorted=(pxRows||[]).slice().sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); return {get:function(d){ var best=null; for(var i=0;i<sorted.length;i++){ if(sorted[i][0]<=d) best=sorted[i][1]; else break; } return best; }}; }
+function etfToCoins(rows, pxRows){ if(!pxRows||!pxRows.length) return null; var pm=etfPxMap(pxRows); return (rows||[]).map(function(r){ var px=pm.get(r[0]); return [r[0], (px&&px>0)? (r[1]*1e6/px) : null]; }).filter(function(r){ return r[1]!=null; }); }
+function fmtCoins(v, sym){ if(v==null) return "—"; var s=v<0?"-":"+", a=Math.abs(v); var d = a>=1000?0:(a>=1?2:4); return s+a.toLocaleString("en-US",{maximumFractionDigits:d})+" "+sym; }
 
-function PageEtf({flows}){
+function PageEtf({flows, px}){
   const [asset,setAsset] = useState("btc");
   const [gran,setGran]   = useState("daily");
+  const [unit,setUnit]   = useState("usd");
   const [showCum,setShowCum] = useState(true);
   const meta = ETF_META[asset] || {lbl:asset,col:C.btc};
-  const rows = (flows && flows[asset]) || [];
+  const SYM = {btc:"BTC",eth:"ETH",sol:"SOL",hype:"HYPE"};
+  const rowsUsd = (flows && flows[asset]) || [];
+  const pxRows = (px && px[asset]) || [];
+  const noCoins = unit==="coins" && !pxRows.length;
+  const rows = unit==="coins" ? (etfToCoins(rowsUsd, pxRows) || []) : rowsUsd;
   const agg = etfBucket(rows, gran);
   const NSHOW = gran==="daily"?60 : gran==="weekly"?52 : 36;
   const view = agg.slice(-NSHOW);
@@ -8827,12 +8835,18 @@ function PageEtf({flows}){
           <button key={k} onClick={function(){setAsset(k);}} style={{flex:1,minWidth:70,background:on?m.col+"22":C.bg1,border:"1px solid "+(on?m.col:C.border),borderRadius:10,padding:"7px 6px",color:on?m.col:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{m.lbl}</button>
         );})}
       </div>
-      {/* granularité */}
-      <div style={{display:"flex",gap:6,marginBottom:12}}>
+      {/* granularité + unité */}
+      <div style={{display:"flex",gap:6,marginBottom:8}}>
         {GRAN.map(function(g){ var on=g[0]===gran; return (
           <button key={g[0]} onClick={function(){setGran(g[0]);}} style={{flex:1,background:on?C.text+"18":C.bg1,border:"1px solid "+(on?C.text2:C.border),borderRadius:9,padding:"6px",color:on?C.text:C.gray,fontSize:11,fontWeight:700,cursor:"pointer"}}>{g[1]}</button>
         );})}
       </div>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["usd","Valeur $"],["coins","Nombre de coins"]].map(function(u){ var on=u[0]===unit; return (
+          <button key={u[0]} onClick={function(){setUnit(u[0]);}} style={{flex:1,background:on?meta.col+"22":C.bg1,border:"1px solid "+(on?meta.col:C.border),borderRadius:9,padding:"6px",color:on?meta.col:C.gray,fontSize:11,fontWeight:700,cursor:"pointer"}}>{u[1]}</button>
+        );})}
+      </div>
+      {noCoins && <div style={{fontSize:11,color:C.orange,marginBottom:10,lineHeight:1.4}}>Prix quotidiens indisponibles pour {meta.lbl} — lance le backfill des prix (ou coin non coté sur Yahoo, cas possible de HYPE).</div>}
 
       {/* résumé */}
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
@@ -8843,7 +8857,7 @@ function PageEtf({flows}){
           return (
             <div key={i} style={{flex:1,minWidth:98,background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"8px 9px"}}>
               <div style={{fontSize:9,color:C.text3}}>{x[0]}</div>
-              <div style={{fontSize:14,fontWeight:800,color:col}}>{fmtFlow(v)}</div>
+              <div style={{fontSize:14,fontWeight:800,color:col}}>{unit==="coins"?fmtCoins(v,SYM[asset]):fmtFlow(v)}</div>
             </div>
           );
         })}
@@ -8865,7 +8879,7 @@ function PageEtf({flows}){
           {showCum && cumView.length>1 && <path d={cumPath} fill="none" stroke={meta.col} strokeWidth="1.8" strokeLinejoin="round" opacity="0.95"/>}
           {view.map(function(x,i){ if(n>14 && i%Math.ceil(n/8)!==0) return null; return <text key={i} x={xOf(i)+bw/2} y={H-6} textAnchor="middle" fontSize="7" fill={C.text3}>{tick(i)}</text>; })}
         </svg>
-        <div style={{fontSize:8.5,color:C.text3,marginTop:5}}>Barres = flux net {gran==="daily"?"du jour":gran==="weekly"?"de la semaine":"du mois"} (vert entrées / rouge sorties). {showCum && "Ligne = actif net cumulé (forme, échelle propre)."} Montants en M$ (Source : Farside).</div>
+        <div style={{fontSize:8.5,color:C.text3,marginTop:5}}>Barres = flux net {gran==="daily"?"du jour":gran==="weekly"?"de la semaine":"du mois"} (vert entrées / rouge sorties). {showCum && "Ligne = actif net cumulé (forme, échelle propre)."} {unit==="coins"?"Nombre de coins (flux $ ÷ prix du jour).":"Montants en M$."} Source : Farside / Yahoo.</div>
       </div>
     </div>
   );
@@ -9138,7 +9152,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
       );})()}
 
       {sub==="quad" && <PageQuadrants rows={quadRows && quadRows.length ? quadRows : QUAD_HIST}/>}
-      {sub==="etf" && (etf ? <PageEtf flows={etf.flows||etf}/> : (etfE ? <div style={{fontSize:12,color:C.red}}>{etfE}</div> : <div style={{fontSize:12,color:C.text3}}>Chargement…</div>))}
+      {sub==="etf" && (etf ? <PageEtf flows={etf.flows||etf} px={etf.px||null}/> : (etfE ? <div style={{fontSize:12,color:C.red}}>{etfE}</div> : <div style={{fontSize:12,color:C.text3}}>Chargement…</div>))}
       {mkt && !loading && sub==="macro" && (function(){ var p=mkt.pulse||{}; var m=mkt.macro||{};
         var flag=function(cc){ return cc?<img src={"https://flagcdn.com/20x15/"+cc+".png"} alt="" style={{width:18,height:13,borderRadius:2,objectFit:"cover",flexShrink:0}}/>:null; };
         var sectTitle=function(t){ return <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{t}</div>; };

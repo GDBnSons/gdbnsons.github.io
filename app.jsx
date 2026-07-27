@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.57";
+const APP_VERSION = "v28.58";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8793,6 +8793,7 @@ function PageEtf({flows, px}){
   const [unit,setUnit]   = useState("usd");
   const [showCum,setShowCum] = useState(true);
   const [sel,setSel] = useState(null); // index sélectionné dans la fenêtre
+  const touchRef = useRef(0);
   const meta = ETF_META[asset] || {lbl:asset,col:C.btc};
   const SYM = {btc:"BTC",eth:"ETH",sol:"SOL",hype:"HYPE"};
   const rowsUsd = (flows && flows[asset]) || [];
@@ -8907,10 +8908,13 @@ function PageEtf({flows, px}){
             </g>
           );})()}
           {/* zones tactiles (une par période) */}
-          {view.map(function(x,i){ var slot=(W-2*PADX)/n; return (
+          {view.map(function(x,i){ var slot=(W-2*PADX)/n; var recent=function(){ return Date.now()-touchRef.current < 700; }; return (
             <rect key={"h"+i} x={PADX+i*slot} y={PADT} width={slot} height={H-PADT} fill="transparent"
-              onMouseEnter={function(){setSel(i);}} onMouseLeave={function(){setSel(null);}}
-              onClick={function(){ setSel(function(p){ return p===i?null:i; }); }} style={{cursor:"pointer"}}/>
+              onMouseEnter={function(){ if(!recent()) setSel(i); }}
+              onMouseLeave={function(){ if(!recent()) setSel(null); }}
+              onTouchStart={function(){ touchRef.current=Date.now(); setSel(function(p){ return p===i?null:i; }); }}
+              onClick={function(){ if(!recent()) setSel(function(p){ return p===i?null:i; }); }}
+              style={{cursor:"pointer"}}/>
           );})}
         </svg>
         <div style={{fontSize:8.5,color:C.text3,marginTop:5}}>Barres = flux net {gran==="daily"?"du jour":gran==="weekly"?"de la semaine":"du mois"} (vert entrées / rouge sorties). {showCum && "Ligne = actif net cumulé (forme, échelle propre)."} {unit==="coins"?"Nombre de coins (flux $ ÷ prix du jour).":"Montants en M$."} Source : Farside / Yahoo.</div>

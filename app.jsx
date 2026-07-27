@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.56";
+const APP_VERSION = "v28.57";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8792,12 +8792,14 @@ function PageEtf({flows, px}){
   const [gran,setGran]   = useState("daily");
   const [unit,setUnit]   = useState("usd");
   const [showCum,setShowCum] = useState(true);
+  const [sel,setSel] = useState(null); // index sélectionné dans la fenêtre
   const meta = ETF_META[asset] || {lbl:asset,col:C.btc};
   const SYM = {btc:"BTC",eth:"ETH",sol:"SOL",hype:"HYPE"};
   const rowsUsd = (flows && flows[asset]) || [];
   const pxRows = (px && px[asset]) || [];
   const noCoins = unit==="coins" && !pxRows.length;
   const rows = unit==="coins" ? (etfToCoins(rowsUsd, pxRows) || []) : rowsUsd;
+  useEffect(function(){ setSel(null); }, [asset, gran, unit]);
   const agg = etfBucket(rows, gran);
   const NSHOW = gran==="daily"?60 : gran==="weekly"?52 : 36;
   const view = agg.slice(-NSHOW);
@@ -8865,6 +8867,25 @@ function PageEtf({flows, px}){
 
       {/* graphe */}
       <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"11px 12px",marginBottom:10}}>
+        {(function(){
+          if(sel==null || !view[sel]) return null;
+          var d=view[sel][0], v=view[sel][1], cum=cumView[sel];
+          var per = gran==="monthly" ? d : (gran==="weekly" ? ("Semaine du "+d) : d);
+          var fmtV = unit==="coins" ? fmtCoins(v,SYM[asset]) : fmtFlow(v);
+          var fmtC = unit==="coins" ? fmtCoins(cum,SYM[asset]) : fmtFlow(cum);
+          return (
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:C.bg2,border:"1px solid "+meta.col+"55",borderRadius:9,padding:"7px 10px",marginBottom:8}}>
+              <div>
+                <div style={{fontSize:11,color:C.text3}}>{per}</div>
+                <div style={{fontSize:15,fontWeight:800,color:v>=0?C.green:C.red}}>{v>=0?"Entrée ":"Sortie "}{fmtV}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:9,color:C.text3}}>Cumulé à date</div>
+                <div style={{fontSize:13,fontWeight:800,color:meta.col}}>{fmtC}</div>
+              </div>
+            </div>
+          );
+        })()}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <span style={{fontSize:12,fontWeight:800,color:meta.col}}>{meta.lbl} · flux nets ({gran==="daily"?"quotidien":gran==="weekly"?"hebdo":"mensuel"})</span>
           <button onClick={function(){setShowCum(function(v){return !v;});}} style={{display:"flex",alignItems:"center",gap:5,background:showCum?C.bg2:"transparent",border:"1px solid "+(showCum?C.text3:C.border),borderRadius:20,padding:"3px 9px",cursor:"pointer"}}>
@@ -8872,12 +8893,25 @@ function PageEtf({flows, px}){
             <span style={{fontSize:9,color:showCum?C.text2:C.gray,fontWeight:700}}>Cumul</span>
           </button>
         </div>
-        <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block"}}>
+        <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block",touchAction:"pan-y"}}>
           <line x1={PADX} y1={zeroY} x2={W-PADX} y2={zeroY} stroke={C.border} strokeWidth="1"/>
-          {view.map(function(x,i){ var v=x[1], y=v>=0?yBar(v):zeroY, hgt=Math.abs(yBar(v)-zeroY);
-            return <rect key={i} x={xOf(i)} y={y} width={bw} height={Math.max(0.6,hgt)} rx="1" fill={v>=0?C.green:C.red} opacity="0.9"/>; })}
+          {view.map(function(x,i){ var v=x[1], y=v>=0?yBar(v):zeroY, hgt=Math.abs(yBar(v)-zeroY); var isSel=sel===i;
+            return <rect key={i} x={xOf(i)} y={y} width={bw} height={Math.max(0.6,hgt)} rx="1" fill={v>=0?C.green:C.red} opacity={sel==null||isSel?0.92:0.4}/>; })}
           {showCum && cumView.length>1 && <path d={cumPath} fill="none" stroke={meta.col} strokeWidth="1.8" strokeLinejoin="round" opacity="0.95"/>}
           {view.map(function(x,i){ if(n>14 && i%Math.ceil(n/8)!==0) return null; return <text key={i} x={xOf(i)+bw/2} y={H-6} textAnchor="middle" fontSize="7" fill={C.text3}>{tick(i)}</text>; })}
+          {sel!=null && (function(){ var cx=xOf(sel)+bw/2; return (
+            <g pointerEvents="none">
+              <line x1={cx} y1={PADT} x2={cx} y2={H-PADB} stroke={C.text3} strokeWidth="0.8" strokeDasharray="3 2"/>
+              <rect x={xOf(sel)-1} y={PADT} width={bw+2} height={H-PADT-PADB} fill={meta.col} opacity="0.08"/>
+              {showCum && cumView[sel]!=null && <circle cx={cx} cy={yCum(cumView[sel])} r="3.2" fill={meta.col} stroke={C.bg1} strokeWidth="1.5"/>}
+            </g>
+          );})()}
+          {/* zones tactiles (une par période) */}
+          {view.map(function(x,i){ var slot=(W-2*PADX)/n; return (
+            <rect key={"h"+i} x={PADX+i*slot} y={PADT} width={slot} height={H-PADT} fill="transparent"
+              onMouseEnter={function(){setSel(i);}} onMouseLeave={function(){setSel(null);}}
+              onClick={function(){ setSel(function(p){ return p===i?null:i; }); }} style={{cursor:"pointer"}}/>
+          );})}
         </svg>
         <div style={{fontSize:8.5,color:C.text3,marginTop:5}}>Barres = flux net {gran==="daily"?"du jour":gran==="weekly"?"de la semaine":"du mois"} (vert entrées / rouge sorties). {showCum && "Ligne = actif net cumulé (forme, échelle propre)."} {unit==="coins"?"Nombre de coins (flux $ ÷ prix du jour).":"Montants en M$."} Source : Farside / Yahoo.</div>
       </div>

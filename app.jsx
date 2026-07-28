@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.58";
+const APP_VERSION = "v28.59";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4107,155 +4107,49 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           })()}
         </div>
 
-        {/* ── 3 cases Crypto / Actions / Banque ── */}
-        {(()=>{
-          const _p = _effSrc;
-          const _uE = _p.usdEur || 0.86;
-          const _eU = _p.eurUsd || 1.162;
-          const _kuCoin = (_p.stocks?.items||[]).find(x=>x.t==="KUCOIN");
-          const _cryptoUSD = (_p.crypto?.total||0) + (_kuCoin?.val||0);
-          const _stocksUSD = (_p.stocks?.total||0) - (_kuCoin?.val||0);
-          const _bankEUR   = _p.bank?.totalEUR || CURRENT.bank?.totalEUR || 0;
-          const boxes = eur ? [
-            {label:"Crypto",  val:"€"+fmtK(Math.round(_cryptoUSD*_uE)), c:C.btc},
-            {label:"Actions", val:"€"+fmtK(Math.round(_stocksUSD*_uE)), c:C.blue},
-            {label:"Banque",  val:"€"+fmtK(_bankEUR),                   c:C.green},
-          ] : [
-            {label:"Crypto",  val:"$"+fmtK(_cryptoUSD),                 c:C.btc},
-            {label:"Actions", val:"$"+fmtK(_stocksUSD),                 c:C.blue},
-            {label:"Banque",  val:"$"+fmtK(Math.round(_bankEUR*_eU)),   c:C.green},
-          ];
-          return(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:C.border,borderTop:`1px solid ${C.border}`}}>
-              {boxes.map((b,i)=>(
-                <div key={i} style={{background:C.bg1,padding:"8px 10px",textAlign:"center"}}>
-                  <div style={{fontSize:9,color:C.gray,marginBottom:2}}>{b.label}</div>
-                  <div style={{fontSize:13,fontWeight:800,color:b.c}}>{msk(b.val,hidden)}</div>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-
-        {/* P&L 1J / 1S / 1M / 6M / 1A */}
-        {(()=>{
-          const _src2 = EFF||CURRENT;
-          const _cur2 = eur ? "€" : "$";
-          const usdEurNow = _src2.usdEur;
-
-          // Valeur portefeuille courante en €
-          const _ddLast2 = _DD_PO.reduceRight((a,r)=>a!=null?a:(r[2]!=null?r[2]:null),null);
-          const _nowEUR = _src2.totalEUR || _ddLast2;
-          const _nowUSD = _nowEUR / usdEurNow;
-
-          // Ligne DD la plus proche (en valeur absolue) d'une date cible
-          // Prend la ligne avec |r[0] - targetDate| minimal parmi les lignes ayant totalEUR non null
-          const _ddClosest = days => {
-            const t = new Date(Date.now() + NC_OFFSET_MS);
-            t.setUTCDate(t.getUTCDate() - days);
-            const ds = t.toISOString().slice(0, 10);
-            let best = null, bestDiff = Infinity;
-            for (const r of _DD_PO) {
-              if (!r[0] || r[2] == null) continue;
-              const diff = Math.abs(new Date(r[0]) - new Date(ds));
-              if (diff < bestDiff) { bestDiff = diff; best = r; }
-            }
-            return best;
-          };
-
-          // Formule : var€ = totalEUR(today) − totalEUR(today − X jours)
-          //           var$ = (totalEUR(today) / usdEurNow) − (totalEUR(ref) / usdEurRef)
-          // Aucune soustraction d'investissements — variation brute du patrimoine
-          const _cell = days => {
-            const row = _ddClosest(days);
-            if (!row || !row[2]) return { pnl:0, pct:0 };
-            const startEUR  = row[2];
-            const usdEurRef = row[5] || usdEurNow;
-            if (eur) {
-              const pnl = Math.round(_nowEUR - startEUR);
-              return { pnl, pct: _nowEUR ? pnl / _nowEUR : 0 };
-            } else {
-              const nowUSD   = _nowEUR  / usdEurNow;
-              const startUSD = startEUR / usdEurRef;
-              const pnl = Math.round(nowUSD - startUSD);
-              return { pnl, pct: startUSD ? pnl / startUSD : 0 };
-            }
-          };
-
-          const cells = [
-            { label:"1J",  ..._cell(1)   },
-            { label:"1S",  ..._cell(7)   },
-            { label:"1M",  ..._cell(30)  },
-            { label:"6M",  ..._cell(182) },
-            { label:"1A",  ..._cell(365) },
-          ];
-          return(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:C.border}}>
-              {cells.map((c,i)=>(
-                <div key={i} style={{background:C.bg2,padding:"8px 6px",textAlign:"center"}}>
-                  <div style={{fontSize:9,color:C.gray,marginBottom:3}}>{c.label}</div>
-                  <div style={{fontSize:12,fontWeight:800,color:clr(c.pnl),letterSpacing:-.3}}>
-                    {hidden?"***":(c.pnl>=0?"+":"")+_cur2+fmtK(Math.abs(c.pnl))}
-                  </div>
-                  <div style={{
-                    fontSize:10,fontWeight:700,color:clr(c.pct),
-                    background:clr(c.pct)+"18",borderRadius:4,
-                    padding:"1px 4px",display:"inline-block",marginTop:2,
-                  }}>{fmtP(c.pct)}</div>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
       </div>
 
-      {/* ── GDB.C + GDB.S encarts ── */}
+      {/* ── Totaux par catégorie + variation D/W/M ── */}
       {(()=>{
-        const _ov_src = EFF||CURRENT;
-        const _ov_gdbs = liveGDBS || GDBS;
-        const usdEurNow2 = _ov_src.usdEur;
-        const _ov_gdbsAt = days => {
-          const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
-          const ds=t.toISOString().slice(0,10);
-          return _ov_gdbs.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null);
-        };
-        const _ov_ddAt = days => {
-          const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days);
-          const ds=t.toISOString().slice(0,10);
-          return _DD_PO.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[5]?r:null),null);
-        };
-        const _gcNow2 = _ov_src.gdbC || calcGdbPrices(_ov_src).gdbC;
-        const _gsNow2 = _ov_src.gdbS || calcGdbPrices(_ov_src).gdbS;
-        const _gcPerf = d => {
-          const r=_ov_gdbsAt(d); if(!r||!r[2]) return null;
-          if(eur){ const dd=_ov_ddAt(d); const ref=dd?dd[5]:usdEurNow2; return parseFloat(((_gcNow2*usdEurNow2)/(r[2]*ref)-1).toFixed(4)); }
-          return parseFloat((_gcNow2/r[2]-1).toFixed(4));
-        };
-        const _gsPerf = d => {
-          const r=_ov_gdbsAt(d); if(!r||!r[1]) return null;
-          if(eur){ const dd=_ov_ddAt(d); const ref=dd?dd[5]:usdEurNow2; return parseFloat(((_gsNow2*usdEurNow2)/(r[1]*ref)-1).toFixed(4)); }
-          return parseFloat((_gsNow2/r[1]-1).toFixed(4));
-        };
-        const gdb = [
-          { label:"GDB.C", price:gcPrice, d:_gcPerf(1), w:_gcPerf(7), m:_gcPerf(30), color:C.orange },
-          { label:"GDB.S", price:gsPrice, d:_gsPerf(1), w:_gsPerf(7), m:_gsPerf(30), color:C.blue },
+        const _s = EFF||CURRENT;
+        const uE = _s.usdEur||0.86;
+        const cur = eur?"€":"$";
+        const items = (_s.portfolio&&_s.portfolio.items)||[];
+        const sumCat = arr => items.filter(x=>arr.indexOf(x.cat)>=0).reduce((s,x)=>s+(eur?(x.valEUR||0):(x.val||0)),0);
+        const cats = [
+          {label:"Crypto",  val:sumCat(["Crypto"]),            c:C.btc,   kind:"crypto"},
+          {label:"Actions", val:sumCat(["Indices","Picking"]), c:C.blue,  kind:"actions"},
+          {label:"Or",      val:sumCat(["Or"]),                c:C.gold,  kind:"or"},
+          {label:"Cash",    val:sumCat(["Cash","Cash Matelas"]),c:C.green, kind:"cash"},
         ];
-        return(
+        // ── séries pour la variation D/W/M ──
+        const ddAt = days => { const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-days); const ds=t.toISOString().slice(0,10); let best=null,bd=Infinity; for(const r of _DD_PO){ if(!r[0]) continue; const df=Math.abs(new Date(r[0])-new Date(ds)); if(df<bd){bd=df;best=r;} } return best; };
+        const cryptoNowEUR = Math.round((_s.crypto&&_s.crypto.total||0)*uE);
+        const gs = liveGDBS||GDBS;
+        const gsAt = d => { const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-d); const ds=t.toISOString().slice(0,10); return gs.reduceRight((a,r)=>a!=null?a:(r[0]<=ds&&r[1]?r:null),null); };
+        const gsNow = _s.gdbS || calcGdbPrices(_s).gdbS;
+        const gh = liveGoldHist||[];
+        const goldAt = d => { const t=new Date(Date.now()+NC_OFFSET_MS); t.setUTCDate(t.getUTCDate()-d); const ds=t.toISOString().slice(0,10); let best=null; for(let i=0;i<gh.length;i++){ if(gh[i][0]<=ds) best=gh[i][1]; else break; } return best; };
+        const goldNow = gh.length?gh[gh.length-1][1]:null;
+        const perf = (kind, d) => {
+          if(kind==="crypto"){ const r=ddAt(d); return (r&&r[1])? cryptoNowEUR/r[1]-1 : null; }
+          if(kind==="actions"){ const r=gsAt(d); return (r&&r[1]&&gsNow)? gsNow/r[1]-1 : null; }
+          if(kind==="or"){ const ref=goldAt(d); return (ref&&goldNow)? goldNow/ref-1 : null; }
+          return 0; // cash ~ stable
+        };
+        return (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
-            {gdb.map((g,i)=>(
-              <div key={i} style={{
-                background:C.bg1, borderRadius:10, padding:"8px 10px",
-                border:`1px solid ${C.border}`,
-              }}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                  <span style={{fontSize:12,fontWeight:800,color:g.color,letterSpacing:.3}}>{g.label}</span>
-                  <span style={{fontSize:16,fontWeight:900,color:g.color,letterSpacing:-0.5}}>{hidden?"***":gcCur+g.price}</span>
+            {cats.map((ct,i)=>(
+              <div key={i} style={{background:C.bg1,borderRadius:10,padding:"9px 11px",border:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                  <span style={{fontSize:12,fontWeight:800,color:ct.c,letterSpacing:.3}}>{ct.label}</span>
+                  <span style={{fontSize:16,fontWeight:900,color:ct.c,letterSpacing:-0.5}}>{msk(cur+fmtK(Math.round(ct.val)),hidden)}</span>
                 </div>
                 <div style={{display:"flex",gap:4}}>
-                  {[["1J",g.d],["1S",g.w],["1M",g.m]].map(([tf,v])=>(
+                  {[["1J",perf(ct.kind,1)],["1S",perf(ct.kind,7)],["1M",perf(ct.kind,30)]].map(([tf,v])=>(
                     <div key={tf} style={{flex:1,textAlign:"center"}}>
                       <div style={{fontSize:8,color:C.text3}}>{tf}</div>
-                      <div style={{fontSize:10,fontWeight:800,color:clr(v)}}>{fmtP(v,1)}</div>
+                      <div style={{fontSize:10,fontWeight:800,color:clr(v)}}>{v==null?"—":fmtP(v,1)}</div>
                     </div>
                   ))}
                 </div>
@@ -4264,6 +4158,7 @@ function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refr
           </div>
         );
       })()}
+
 
       {/* ── GDB Comparison Chart ── */}
       <SH label="GDB.C · GDB.S · Patrimoine" color={C.gray}/>

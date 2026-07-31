@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.59";
+const APP_VERSION = "v28.63";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1505,7 +1505,7 @@ var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes 
 
 // ── Dessins & moyennes mobiles du modal ticker (persistance local + cloud) ──
 var DRAWINGS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_drawings_v1")||"{}")||{}; }catch(e){ return {}; } })();
-function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], tradeZone:d.tradeZone||null, ma:d.ma||{}, tf:(d.tf!=null?d.tf:3), candleMode:(d.candleMode!=null?d.candleMode:true) }; }
+function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], fibs:d.fibs||[], magnet:(d.magnet!=null?d.magnet:false), tradeZone:d.tradeZone||null, ma:d.ma||{}, tf:(d.tf!=null?d.tf:3), candleMode:(d.candleMode!=null?d.candleMode:true) }; }
 var _drawSaveTimer=null;
 function saveDrawings(t, obj){
   DRAWINGS[t]=obj;
@@ -1522,20 +1522,21 @@ function mergeDrawingsKV(kvObj){
   }
 }
 const TF_CONFIG = [
-  { label:"1J",  interval:"5m",   range:"1d"   },
-  { label:"1S",  interval:"30m",  range:"5d"   },
-  { label:"1M",  interval:"1d",   range:"1mo"  },
-  { label:"6M",  interval:"1d",   range:"6mo"  },
-  { label:"1A",  interval:"1d",   range:"1y"   },
-  { label:"5A",  interval:"1wk",  range:"5y"   },
-  { label:"ALL", interval:"1mo",  range:"max"  },
+  { label:"1h",  interval:"5m",   range:"1d"   },
+  { label:"4h",  interval:"15m",  range:"5d"   },
+  { label:"1J",  interval:"1h",   range:"5d"   },
+  { label:"1S",  interval:"1d",   range:"1mo"  },
+  { label:"1M",  interval:"1d",   range:"3mo"  },
+  { label:"1A",  interval:"1wk",  range:"1y"   },
+  { label:"5A",  interval:"1mo",  range:"5y"   },
+  { label:"ALL", interval:"3mo",  range:"max"  },
 ];
 
 // Timeframes CoinGecko : days valides = 1,7,14,30,90,180,365,max
 // Mapping TF_CONFIG index → days CoinGecko
-const TF_CG_DAYS = ["1","7","30","180","365","max","max"];
+const TF_CG_DAYS = ["1","7","7","14","30","365","1825","max"];
 // Plages étendues pour le warm-up des moyennes mobiles (≥200 bougies avant la fenêtre affichée)
-const EXT_RANGE = ["5d","1mo","2y","2y","2y","10y","max"];
+const EXT_RANGE = ["5d","1mo","1mo","2y","2y","5y","max","max"];
 
 // v27.01 — Ratios financiers : seuils indicatifs, jauges et explications neophytes
 var RATIO_DEFS=[
@@ -1585,6 +1586,98 @@ function insValM(v){
   return "$" + Math.round(v);
 }
 
+// v28.60 — Indicateurs techniques (adaptés du dashboard de John) : SMA / RSI / MACD.
+function cgiSMA(vals, period){
+  if(!vals || vals.length < period) return null;
+  var s=0; for(var i=vals.length-period;i<vals.length;i++) s+=vals[i];
+  return s/period;
+}
+function cgiRSI(closes, period){
+  if(!closes || closes.length < period+1) return null;
+  var g=0,l=0;
+  for(var i=closes.length-period;i<closes.length;i++){ var d=closes[i]-closes[i-1]; if(d>=0) g+=d; else l-=d; }
+  var ag=g/period, al=l/period;
+  return al===0?100:100-100/(1+ag/al);
+}
+function cgiMACD(closes){
+  if(!closes || closes.length < 35) return null;
+  var ema=function(arr,p){ var k=2/(p+1),e=arr[0],out=[e]; for(var i=1;i<arr.length;i++){ e=arr[i]*k+e*(1-k); out.push(e); } return out; };
+  var e12=ema(closes,12), e26=ema(closes,26);
+  var macd=[]; for(var i=0;i<closes.length;i++) macd.push(e12[i]-e26[i]);
+  var sig=ema(macd,9);
+  var n=macd.length;
+  var h0=macd[n-1]-sig[n-1], h1=macd[n-2]-sig[n-2];
+  return { crossUp:(h1<=0&&h0>0), crossDown:(h1>=0&&h0<0), hist:h0 };
+}
+function computeKeyIndicators(candles){
+  if(!candles || candles.length<5) return [];
+  var closes=candles.map(function(k){return k.c;}).filter(function(v){return v!=null;});
+  var vols=candles.map(function(k){return k.v;}).filter(function(v){return v!=null;});
+  var highs=candles.map(function(k){return k.h!=null?k.h:k.c;});
+  var last=closes[closes.length-1];
+  var out=[];
+  var f=function(v){return v==null?"\u2014":(Math.round(v*100)/100).toLocaleString("fr-FR");};
+  var perf=function(n){ if(closes.length<n+1) return null; var p=closes[closes.length-1-n]; return p?((last-p)/p*100):null; };
+  var p1=perf(1), p5=perf(5), p21=perf(21), p252=perf(252);
+  if(p1!=null)   out.push({label:"Perf 1j",   value:(p1>=0?"+":"")+f(p1)+"%",  tone:p1>=0?"up":"down"});
+  if(p5!=null)   out.push({label:"Perf 1sem", value:(p5>=0?"+":"")+f(p5)+"%",  tone:p5>=0?"up":"down"});
+  if(p21!=null)  out.push({label:"Perf 1mois",value:(p21>=0?"+":"")+f(p21)+"%",tone:p21>=0?"up":"down"});
+  if(p252!=null) out.push({label:"Perf 1an",  value:(p252>=0?"+":"")+f(p252)+"%",tone:p252>=0?"up":"down"});
+  [9,20,50,200].forEach(function(per){
+    var sma=cgiSMA(closes,per); if(sma==null) return;
+    var above=last>sma;
+    out.push({label:"MM"+per,value:f(sma)+(above?" \u2191":" \u2193"),tone:above?"up":"down"});
+  });
+  var rsi=cgiRSI(closes,14);
+  if(rsi!=null) out.push({label:"RSI 14",value:f(rsi),tone:rsi>=70?"down":(rsi<=30?"up":"neutral")});
+  var macd=cgiMACD(closes);
+  if(macd) out.push({label:"MACD",value:macd.crossUp?"Haussier":(macd.crossDown?"Baissier":"Neutre"),tone:macd.crossUp?"up":(macd.crossDown?"down":"neutral")});
+  if(highs.length){ var maxH=Math.max.apply(null,highs); out.push({label:"ATH (fen\u00eatre)",value:f(maxH)+" ("+f((maxH-last)/maxH*100)+"%)",tone:"neutral"}); }
+  if(vols.length>=21){ var avg=cgiSMA(vols.slice(0,-1),20); if(avg){ var ratio=vols[vols.length-1]/avg; out.push({label:"Volume / moy20",value:"x"+f(ratio),tone:ratio>=1.5?"up":"neutral"}); } }
+  return out;
+}
+
+// v28.62 — Trades perso par ticker (depuis GLOBAL_TXNS) : historique + position FIFO.
+// v28.63 — Niveaux de Fibonacci (repris du dashboard de John).
+var FIB_LV  = [0,0.236,0.382,0.5,0.618,0.786,1];
+var FIBX_LV = [0,0.618,1,1.272,1.618,2,2.618];   // extension : projections de cibles
+var FIBC    = ["#9CA3AF","#22C55E","#3B82F6","#EAB308","#A855F7","#F97316","#EF4444"];
+function gdbTickerTrades(ticker){
+  var T=String(ticker||"").toUpperCase().trim();
+  if(!T) return [];
+  return (GLOBAL_TXNS||[]).filter(function(t){ return t && t.ticker && String(t.ticker).toUpperCase().trim()===T; })
+    .slice().sort(function(a,b){ return String(a.date||"")<String(b.date||"")?-1:(String(a.date||"")>String(b.date||"")?1:0); });
+}
+// FIFO : enrichit chaque vente (P&L réalisé, %, durée) et renvoie la position ouverte (qty restante, PRU).
+function gdbFifo(trades){
+  var lots=[], enriched=[];
+  (trades||[]).forEach(function(t){
+    var side=String(t.side||"").toUpperCase();
+    var q=Math.abs(+t.qty||0), p=+t.price||0;
+    if(side==="BUY"){ lots.push({qty:q,price:p,date:t.date}); enriched.push(Object.assign({},t,{_side:"BUY",_pnl:null,_pct:null,_held:null})); return; }
+    if(side==="SELL"){
+      var rem=q, cost=0, matched=0, wDays=0;
+      while(rem>1e-9 && lots.length){
+        var lot=lots[0], take=Math.min(rem,lot.qty);
+        cost+=take*lot.price; matched+=take;
+        var days=Math.round((new Date(t.date)-new Date(lot.date))/864e5);
+        wDays+=take*days; lot.qty-=take; rem-=take;
+        if(lot.qty<=1e-9) lots.shift();
+      }
+      var avg=matched>0?cost/matched:null;
+      var pnl=avg!=null?(p-avg)*matched:null;
+      var pct=(avg!=null&&avg>0)?(p/avg-1):null;
+      var held=matched>0?Math.round(wDays/matched):null;
+      enriched.push(Object.assign({},t,{_side:"SELL",_pnl:pnl,_pct:pct,_held:held}));
+      return;
+    }
+    enriched.push(Object.assign({},t,{_side:side,_pnl:null,_pct:null,_held:null}));
+  });
+  var openQty=0, openCost=0;
+  lots.forEach(function(l){ openQty+=l.qty; openCost+=l.qty*l.price; });
+  return { enriched:enriched, openQty:openQty, pru:(openQty>1e-9?openCost/openQty:null) };
+}
+
 function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
@@ -1600,6 +1693,8 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [tool, setTool] = useState(null);            // null | "line" | "anno"
   const [lines, setLines] = useState(function(){ return getDrawings(ticker).lines; });
   const [annos, setAnnos] = useState(function(){ return getDrawings(ticker).annotations; });
+  const [fibs, setFibs] = useState(function(){ return getDrawings(ticker).fibs; });      // v28.63 — retracements / extensions Fib
+  const [magnet, setMagnet] = useState(function(){ return getDrawings(ticker).magnet; }); // v28.63 — aimantation aux hauts/bas
   const [pendingPt, setPendingPt] = useState(null);  // 1er point d'une droite
   const [tradeZone, setTradeZone] = useState(function(){ return getDrawings(ticker).tradeZone; });
   const [pendingTrade, setPendingTrade] = useState(null); // {entry?, sl?} en cours de saisie
@@ -1621,6 +1716,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [ins, setIns] = useState(null);
   const [insL, setInsL] = useState(false);
   const [insOpen, setInsOpen] = useState(false);
+  const [techOpen, setTechOpen] = useState(false);
+  const [posOpen, setPosOpen] = useState(false);
+  const [trdOpen, setTrdOpen] = useState(false);
   const [hold13f, setHold13f] = useState(null);
   const [holdOpen, setHoldOpen] = useState(false);
   const [congT, setCongT] = useState(null);
@@ -1810,7 +1908,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   // Chart
   const candlesAll = data?.candles || [];
   // Crop : on n'affiche que la fenêtre du TF (le surplus sert au warm-up des MM)
-  const _D=864e5, _SPANS=[1*_D,5*_D,31*_D,186*_D,372*_D,5*372*_D,Infinity];
+  const _D=864e5, _SPANS=[1*_D,5*_D,5*_D,31*_D,93*_D,372*_D,5*372*_D,Infinity];
   let _ds=0;
   if(candlesAll.length && isFinite(_SPANS[tf])){
     const _cut = candlesAll[candlesAll.length-1].t - _SPANS[tf];
@@ -1832,7 +1930,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   })();
   const W=320, PAD=6;
   const _availW = Math.max(240, win.w - 8), _availH = Math.max(180, win.h - 70);
-  const H = full ? Math.max(160, Math.round(320*_availH/_availW) - 18) : 110;
+  const H = full ? Math.max(160, Math.round(320*_availH/_availW) - 18) : 175;
   const minV = Math.min(...closes), maxV = Math.max(...closes);
   const rng  = maxV - minV || 1;
   const toY  = v => PAD + (1-(v-minV)/rng)*(H-PAD*2);
@@ -1859,13 +1957,28 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const screenToData = (cx,cy)=>{ const el=svgRef.current; if(!el||!candles.length) return null; const r=el.getBoundingClientRect(); const relX=(cx-r.left)/r.width*W; const relY=(cy-r.top)/r.height*SVG_H2; let frac=(relX-PAD)/((W-PAD*2)||1)*((candles.length-1)||1); frac=Math.max(0,Math.min(candles.length-1,frac)); const lo=Math.floor(frac),hi=Math.ceil(frac),fr=frac-lo; const t=lo===hi?candles[lo].t:(candles[lo].t+fr*(candles[hi].t-candles[lo].t)); const p=minV+(1-(relY-PAD)/((H-PAD*2)||1))*rng; return {t,p}; };
   const persistDraw = (L,A)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:L, annotations:A}));
   const persistTrade = (TZ)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {tradeZone:TZ}));
+  const persistFibs  = (F)=> saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {fibs:F}));
+  // v28.63 — magnetisme : aimante le point au haut/bas/ouverture/cloture de la bougie la plus proche.
+  const snapPt = (pt)=>{
+    if(!magnet || !pt || !candles.length) return pt;
+    var bi=0, bd=Infinity;
+    for(var i=0;i<candles.length;i++){ var dd=Math.abs(candles[i].t-pt.t); if(dd<bd){ bd=dd; bi=i; } }
+    var b=candles[bi]; if(!b) return pt;
+    var y=toY(pt.p), best=pt.p, bestD=Infinity;
+    [b.h,b.l,b.o,b.c].forEach(function(v){ if(v==null) return; var dy=Math.abs(toY(v)-y); if(dy<bestD){ bestD=dy; best=v; } });
+    return (bestD<12) ? {t:b.t, p:best} : pt;
+  };
   const onSvgClick = (e)=>{
     if(justDragRef.current){ justDragRef.current=false; return; }
     if(!tool) return;
-    const pt=screenToData(e.clientX, e.clientY); if(!pt) return;
+    const pt0=screenToData(e.clientX, e.clientY); if(!pt0) return;
+    const pt=snapPt(pt0);
     if(tool==="line"){
       if(!pendingPt){ setPendingPt(pt); }
       else { const nl=lines.concat([{a:pendingPt,b:pt,color:"#3B82F6"}]); setLines(nl); setPendingPt(null); persistDraw(nl, annos); }
+    } else if(tool==="fib" || tool==="fibext"){
+      if(!pendingPt){ setPendingPt(pt); }
+      else { const nf=fibs.concat([{a:pendingPt,b:pt,kind:tool}]); setFibs(nf); setPendingPt(null); persistFibs(nf); }
     } else if(tool==="anno"){
       const txt=(window.prompt("Texte de l'annotation :","")||"").trim();
       if(txt){ const na=annos.concat([{t:pt.t,p:pt.p,text:txt}]); setAnnos(na); persistDraw(lines, na); }
@@ -1878,29 +1991,37 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       else { const tz={entry:pendingTrade.entry, sl:pendingTrade.sl, tp:pr}; setTradeZone(tz); setPendingTrade(null); setTool(null); persistTrade(tz); }
     }
   };
-  const clearDraw = ()=>{ setLines([]); setAnnos([]); setTradeZone(null); setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(null); saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:[], annotations:[], tradeZone:null})); };
+  const clearDraw = ()=>{ setLines([]); setAnnos([]); setFibs([]); setTradeZone(null); setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(null); saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {lines:[], annotations:[], fibs:[], tradeZone:null})); };
   // ── Sélection d'objet (Phase F) ──
   const clientToView = (cx,cy)=>{ const el=svgRef.current; if(!el) return null; const r=el.getBoundingClientRect(); return { x:(cx-r.left)/r.width*W, y:(cy-r.top)/r.height*(H+18) }; };
   const _distToSeg = (px,py,x1,y1,x2,y2)=>{ const dx=x2-x1, dy=y2-y1, L2=dx*dx+dy*dy; let t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=Math.max(0,Math.min(1,t)); return Math.hypot(px-(x1+t*dx), py-(y1+t*dy)); };
   const pickObject = (vx,vy)=>{ let best=null, bestD=12;
     lines.forEach(function(ln,i){ const d=_distToSeg(vx,vy,tToX(ln.a.t),toY(ln.a.p),tToX(ln.b.t),toY(ln.b.p)); if(d<bestD){bestD=d; best={type:"line",index:i};} });
     annos.forEach(function(an,i){ const d=Math.hypot(vx-tToX(an.t), vy-toY(an.p)); if(d<bestD){bestD=d; best={type:"anno",index:i};} });
+    fibs.forEach(function(fb,i){
+      const dA=Math.hypot(vx-tToX(fb.a.t), vy-toY(fb.a.p)), dB=Math.hypot(vx-tToX(fb.b.t), vy-toY(fb.b.p));
+      if(Math.min(dA,dB)<bestD){ bestD=Math.min(dA,dB); best={type:"fib",index:i}; }
+      const LV = fb.kind==="fibext" ? FIBX_LV : FIB_LV;
+      LV.forEach(function(fv){ const d=Math.abs(vy-toY(fb.a.p+(fb.b.p-fb.a.p)*fv)); if(d<bestD && vx>=PAD-3 && vx<=W-PAD+3){ bestD=d; best={type:"fib",index:i}; } });
+    });
     if(tradeZone){ [tradeZone.entry,tradeZone.sl,tradeZone.tp].forEach(function(lv){ const d=Math.abs(vy-toY(lv)); if(d<bestD && vx>=PAD-3 && vx<=W-PAD+3){bestD=d; best={type:"trade",index:0};} }); }
     return best; };
   const deleteSelected = ()=>{ if(!selected) return;
     if(selected.type==="line"){ const nl=lines.filter(function(_,i){return i!==selected.index;}); setLines(nl); persistDraw(nl, annos); }
     else if(selected.type==="anno"){ const na=annos.filter(function(_,i){return i!==selected.index;}); setAnnos(na); persistDraw(lines, na); }
+    else if(selected.type==="fib"){ const nf=fibs.filter(function(_,i){return i!==selected.index;}); setFibs(nf); persistFibs(nf); }
     else if(selected.type==="trade"){ setTradeZone(null); persistTrade(null); }
     setSelected(null); };
   const editSelectedAnno = ()=>{ if(!selected || selected.type!=="anno") return; const c0=annos[selected.index]; if(!c0) return; const txt=(window.prompt("Modifier l'annotation :", c0.text)||"").trim(); if(txt){ const na=annos.map(function(a,i){ return i===selected.index?Object.assign({},a,{text:txt}):a; }); setAnnos(na); persistDraw(lines, na); } };
   // ── Déplacement d'une extrémité de droite sélectionnée ──
   const linesRef = useRef(lines); linesRef.current = lines;
+  const fibsRef = useRef(fibs); fibsRef.current = fibs;
   const dragRef = useRef(null);
   const justDragRef = useRef(false);
-  const hitHandle = (cx,cy)=>{ if(tool!=="select" || !selected || selected.type!=="line") return null; const ln=lines[selected.index]; if(!ln) return null; const v=clientToView(cx,cy); if(!v) return null; const ax=tToX(ln.a.t),ay=toY(ln.a.p),bx=tToX(ln.b.t),by=toY(ln.b.p); const da=Math.hypot(v.x-ax,v.y-ay), db=Math.hypot(v.x-bx,v.y-by); const TH=11; if(da<=TH && da<=db) return {index:selected.index,end:"a"}; if(db<=TH) return {index:selected.index,end:"b"}; return null; };
+  const hitHandle = (cx,cy)=>{ if(tool!=="select" || !selected || (selected.type!=="line" && selected.type!=="fib")) return null; const ln=(selected.type==="fib"?fibs:lines)[selected.index]; if(!ln) return null; const v=clientToView(cx,cy); if(!v) return null; const ax=tToX(ln.a.t),ay=toY(ln.a.p),bx=tToX(ln.b.t),by=toY(ln.b.p); const da=Math.hypot(v.x-ax,v.y-ay), db=Math.hypot(v.x-bx,v.y-by); const TH=11; if(da<=TH && da<=db) return {index:selected.index,end:"a",kind:selected.type}; if(db<=TH) return {index:selected.index,end:"b",kind:selected.type}; return null; };
   const beginDrag = (cx,cy)=>{ const h=hitHandle(cx,cy); if(h){ dragRef.current=h; return true; } return false; };
-  const moveDrag = (cx,cy)=>{ if(!dragRef.current) return false; const pt=screenToData(cx,cy); if(pt){ const h=dragRef.current; setLines(function(prev){ return prev.map(function(ln,i){ return i===h.index?Object.assign({},ln, h.end==="a"?{a:{t:pt.t,p:pt.p}}:{b:{t:pt.t,p:pt.p}}):ln; }); }); } return true; };
-  const endDrag = ()=>{ if(dragRef.current){ dragRef.current=null; justDragRef.current=true; persistDraw(linesRef.current, annos); return true; } return false; };
+  const moveDrag = (cx,cy)=>{ if(!dragRef.current) return false; const pt0=screenToData(cx,cy); if(pt0){ const pt=snapPt(pt0); const h=dragRef.current; const upd=function(prev){ return prev.map(function(ln,i){ return i===h.index?Object.assign({},ln, h.end==="a"?{a:{t:pt.t,p:pt.p}}:{b:{t:pt.t,p:pt.p}}):ln; }); }; if(h.kind==="fib") setFibs(upd); else setLines(upd); } return true; };
+  const endDrag = ()=>{ if(dragRef.current){ const k=dragRef.current.kind; dragRef.current=null; justDragRef.current=true; if(k==="fib") persistFibs(fibsRef.current); else persistDraw(linesRef.current, annos); return true; } return false; };
 
   const fmtTs = ts => {
     const d = new Date(ts);
@@ -2168,6 +2289,310 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             );
           })()}
 
+          {/* Timeframes — 2 rangées */}
+          <div style={{marginBottom:12}}>
+            {[TF_ROW1, TF_ROW2].map((row, ri)=>(
+              <div key={ri} style={{display:"flex",gap:4,background:C.bg1,borderRadius:10,padding:3,marginBottom:ri===0?4:0}}>
+                {row.map((t,i)=>{
+                  const idx = ri*5+i;
+                  return (
+                    <button key={idx} onClick={()=>setTf(idx)} style={{
+                      flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
+                      border:"none",cursor:"pointer",
+                      background:tf===idx?C.blue:"transparent",
+                      color:tf===idx?"#fff":C.gray,
+                    }}>{t.label}</button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          {/* Chart */}
+          {(()=>{
+            const chartCore = (<>
+            {candleMode && candles.length>0 && (function(){ var cd=crosshair?candles[crosshair.i]:candles[candles.length-1]; if(!cd) return null; var f=function(v){ return v==null?"\u2014":(eur?(v*usdEur):v).toFixed(2); }; return (
+              <div style={{display:"flex",gap:10,fontSize:9,color:C.text2,padding:"0 38px 6px 8px"}}>
+                <span>O <b style={{color:C.text}}>{f(cd.o)}</b></span>
+                <span>H <b style={{color:C.green}}>{f(cd.h)}</b></span>
+                <span>L <b style={{color:C.red}}>{f(cd.l)}</b></span>
+                <span>C <b style={{color:C.text}}>{f(cd.c)}</b></span>
+              </div>
+            ); })()}
+            {loading && (
+              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:12}}>
+                Chargement…
+              </div>
+            )}
+            {err && (
+              <div style={{padding:"12px 16px",background:C.red+"11",borderRadius:8,border:`1px solid ${C.red}44`,marginBottom:4}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:4}}>⚠ Erreur de chargement</div>
+                <div style={{fontSize:10,color:C.red+"cc",wordBreak:"break-all"}}>{err}</div>
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={()=>fetchChart(tf)} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer"}}>
+                    Réessayer
+                  </button>
+                  <button onClick={()=>navigator.clipboard.writeText(err).catch(()=>{})} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.gray,cursor:"pointer"}}>
+                    📋 Copier
+                  </button>
+                </div>
+                <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.red}33`}}>
+                  <div style={{fontSize:10,color:C.text2,marginBottom:6}}>{hasMap?"Corriger le symbole Yahoo de ":"Aucun symbole Yahoo pour "}<b style={{color:C.text}}>{ticker}</b>{hasMap?" :":" — définis-le pour charger le graphe :"}</div>
+                  <div style={{display:"flex",gap:6}}>
+                    <input value={symDraft} onChange={e=>setSymDraft(e.target.value)} placeholder="ex. GC=F"
+                      style={{flex:1,minWidth:0,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 9px",color:C.text,fontSize:12,fontWeight:700}}/>
+                    <button onClick={()=>{ const v=(symDraft||"").trim(); if(!v) return; YF_MAP[ticker]=v; try{ saveBase('gdb_yfmap', {...YF_MAP}); }catch(_e){} setSymOverride(v); setErr(null); }}
+                      style={{fontSize:11,fontWeight:700,padding:"7px 12px",borderRadius:6,border:"none",background:C.blue,color:"#fff",cursor:"pointer",whiteSpace:"nowrap"}}>Enregistrer &amp; charger</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {!loading && !err && closes.length > 1 && (()=>{
+              // Crosshair handlers
+              const SVG_W = 320, SVG_H = H + 18;
+              const hitTest = (clientX, svgEl) => {
+                if(!svgEl) return null;
+                const rect = svgEl.getBoundingClientRect();
+                const relX = (clientX - rect.left) / rect.width * SVG_W;
+                const n = closes.length;
+                // Trouver l'index le plus proche
+                let best = 0, bestDist = Infinity;
+                for(let i=0;i<n;i++){
+                  const d = Math.abs(toX(i,n) - relX);
+                  if(d < bestDist){ bestDist=d; best=i; }
+                }
+                return { i:best, x:toX(best,n), y:toY(closes[best]), price:closes[best], ts:candles[best]?.t };
+              };
+              const rawPos = (cx, cy, el) => { if(!el) return null; const rr=el.getBoundingClientRect(); const x=(cx-rr.left)/rr.width*SVG_W; const y=(cy-rr.top)/rr.height*SVG_H; const price=minV+(1-(y-PAD)/((H-PAD*2)||1))*rng; return {x,y,price}; };
+              const onSvgTouchStart = e => { if(beginDrag(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault(); };
+              const onSvgTouchMove = e => {
+                e.preventDefault();
+                if(moveDrag(e.touches[0].clientX, e.touches[0].clientY)) return;
+                if(tool){ const rp=rawPos(e.touches[0].clientX, e.touches[0].clientY, svgRef.current); if(rp) setFreeCursor(rp); return; }
+                const c2 = hitTest(e.touches[0].clientX, svgRef.current);
+                if(c2) setCrosshair(c2);
+              };
+              const onSvgTouchEnd = () => { endDrag(); setCrosshair(null); setFreeCursor(null); };
+              const onSvgMouseDown = e => { beginDrag(e.clientX, e.clientY); };
+              const onMouseMove = e => {
+                if(moveDrag(e.clientX, e.clientY)) return;
+                if(tool){ const rp=rawPos(e.clientX, e.clientY, svgRef.current); if(rp) setFreeCursor(rp); return; }
+                const c2 = hitTest(e.clientX, svgRef.current);
+                if(c2) setCrosshair(c2);
+              };
+              const onSvgMouseUp = () => { endDrag(); };
+              const onMouseLeave = () => { endDrag(); setCrosshair(null); setFreeCursor(null); };
+              const ch = tool ? null : crosshair;
+              const gradId = "tcg_"+ticker.replace(/[^a-z0-9]/gi,"_");
+              return (
+                <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
+                  style={full?{display:"block",overflow:"visible",touchAction:"none",width:"100%",height:"100%",flex:1,minHeight:0}:{display:"block",overflow:"visible",touchAction:"none"}}
+                  onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
+                  onTouchStart={onSvgTouchStart} onMouseDown={onSvgMouseDown} onMouseUp={onSvgMouseUp} onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} onClick={onSvgClick}>
+                  <defs>
+                    <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
+                      <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
+                    </linearGradient>
+                  </defs>
+                  {candleMode ? (
+                    candles.map(function(cd,i){
+                      if(cd.o==null||cd.c==null) return null;
+                      var x=toX(i,candles.length); var up=cd.c>=cd.o; var col=up?C.green:C.red;
+                      var yO=toY(cd.o), yC=toY(cd.c);
+                      var yH=toY(cd.h!=null?cd.h:Math.max(cd.o,cd.c)), yL=toY(cd.l!=null?cd.l:Math.min(cd.o,cd.c));
+                      var bw=Math.max(1.2,(W-PAD*2)/candles.length*0.62);
+                      var top=Math.min(yO,yC), bh=Math.max(1,Math.abs(yC-yO));
+                      return (<g key={"cd"+i}><line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={0.8}/><rect x={x-bw/2} y={top} width={bw} height={bh} fill={col}/></g>);
+                    })
+                  ) : (<>
+                    <polygon points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)} fill={"url(#"+gradId+")"}/>
+                    <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+                  </>)}
+                  {/* Moyennes mobiles */}
+                  {[20,50,100,200].map(function(p){
+                    if(!maOn[p]||!maSeries[p]) return null;
+                    var pl=maSeries[p].map(function(v,i){ return v==null?null:toX(i,closes.length).toFixed(1)+","+toY(v).toFixed(1); }).filter(Boolean).join(" ");
+                    if(!pl) return null;
+                    return <polyline key={"ma"+p} points={pl} fill="none" stroke={MA_COLORS[p]} strokeWidth={1} opacity={0.9}/>;
+                  })}
+                  {/* Marqueurs achats (vert ▲) / ventes (rouge ▼) */}
+                  {chartMarkers.map(function(m,mi){
+                    var x=toX(m.i,candles.length); var y=toY(candles[m.i].c);
+                    var col=m.side==="BUY"?C.green:C.red; var dir=m.side==="BUY"?1:-1; var yo=y+dir*8;
+                    var tri=m.side==="BUY" ? (x+","+(yo-4)+" "+(x-4)+","+(yo+3)+" "+(x+4)+","+(yo+3)) : (x+","+(yo+4)+" "+(x-4)+","+(yo-3)+" "+(x+4)+","+(yo-3));
+                    return <polygon key={"mk"+mi} points={tri} fill={col} stroke={C.bg1} strokeWidth={0.7}/>;
+                  })}
+                  {/* Droites dessinées */}
+                  {lines.map(function(ln,i){ return <line key={"ln"+i} x1={tToX(ln.a.t)} y1={toY(ln.a.p)} x2={tToX(ln.b.t)} y2={toY(ln.b.p)} stroke={ln.color||"#3B82F6"} strokeWidth={1.3} strokeLinecap="round"/>; })}
+                  {/* v28.63 — Fibonacci : retracement (Fib) et extension (Fib+) */}
+                  {fibs.map(function(fb,i){
+                    var LV  = fb.kind==="fibext" ? FIBX_LV : FIB_LV;
+                    var selF = !!(selected && selected.type==="fib" && selected.index===i);
+                    var p1=fb.a.p, p2=fb.b.p, xa=tToX(fb.a.t), xb=tToX(fb.b.t);
+                    var x0=PAD, xe=W-PAD;
+                    return (
+                      <g key={"fb"+i}>
+                        <line x1={xa} y1={toY(p1)} x2={xb} y2={toY(p2)} stroke={C.text3} strokeWidth={selF?1.2:0.7} strokeDasharray="2,2" opacity={0.75}/>
+                        {LV.map(function(fv,fi){
+                          var pv=p1+(p2-p1)*fv, yy=toY(pv);
+                          if(!isFinite(yy)) return null;
+                          var cc=FIBC[fi%FIBC.length];
+                          var pd=cvPrice(pv);
+                          var ptxt=pd==null?"":(Math.abs(pd)>=1000?Math.round(pd).toLocaleString("fr-FR"):pd.toFixed(2));
+                          return (
+                            <g key={"fl"+fi}>
+                              <line x1={x0} y1={yy} x2={xe} y2={yy} stroke={cc} strokeWidth={selF?1.5:0.8} strokeDasharray={fv>1?"2,3":"4,3"} opacity={0.9}/>
+                              <text x={x0+1} y={yy-1.5} fontSize={6.5} fontWeight="700" fill={cc}>{(fv*100).toFixed(1)+"%"}</text>
+                              <text x={xe-1} y={yy-1.5} textAnchor="end" fontSize={6.5} fill={cc} opacity={0.85}>{ptxt}</text>
+                            </g>
+                          );
+                        })}
+                        {selF && (<>
+                          <circle cx={xa} cy={toY(p1)} r={3.2} fill="#FACC15" stroke={C.bg0} strokeWidth={1}/>
+                          <circle cx={xb} cy={toY(p2)} r={3.2} fill="#FACC15" stroke={C.bg0} strokeWidth={1}/>
+                        </>)}
+                      </g>
+                    );
+                  })}
+                  {/* Annotations */}
+                  {annos.map(function(an,i){ var x=tToX(an.t), y=toY(an.p); return (<g key={"an"+i}><circle cx={x} cy={y} r={2.6} fill="#FBBF24"/><text x={x+4} y={y-3} fontSize={8} fontWeight="700" fill="#FBBF24">{an.text}</text></g>); })}
+                  {/* Point en attente (1er point de droite) */}
+                  {pendingPt && <circle cx={tToX(pendingPt.t)} cy={toY(pendingPt.p)} r={3.2} fill="#3B82F6" stroke={C.bg0} strokeWidth={1}/>}
+                  {/* Zone de trade (SL / Entrée / TP) */}
+                  {tradeZone && (function(){ var fpx=function(v){ return (eur?(v*usdEur):v).toFixed(2); }; var yE=toY(tradeZone.entry), ySL=toY(tradeZone.sl), yTP=toY(tradeZone.tp); var x0=PAD, x1=W-PAD; var rr=Math.abs(tradeZone.entry-tradeZone.sl)>0?(Math.abs(tradeZone.tp-tradeZone.entry)/Math.abs(tradeZone.entry-tradeZone.sl)):0; return (
+                    <g>
+                      <rect x={x0} y={Math.min(yE,yTP)} width={x1-x0} height={Math.abs(yTP-yE)} fill="#10B98122"/>
+                      <rect x={x0} y={Math.min(yE,ySL)} width={x1-x0} height={Math.abs(ySL-yE)} fill="#EF444422"/>
+                      <line x1={x0} y1={yTP} x2={x1} y2={yTP} stroke="#10B981" strokeWidth={1} strokeDasharray="4 2"/>
+                      <line x1={x0} y1={yE} x2={x1} y2={yE} stroke={C.text2} strokeWidth={1}/>
+                      <line x1={x0} y1={ySL} x2={x1} y2={ySL} stroke="#EF4444" strokeWidth={1} strokeDasharray="4 2"/>
+                      <text x={x1-2} y={yTP-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#10B981">TP {fpx(tradeZone.tp)}</text>
+                      <text x={x1-2} y={yE-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill={C.text2}>Entrée {fpx(tradeZone.entry)}</text>
+                      <text x={x1-2} y={ySL+8} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#EF4444">SL {fpx(tradeZone.sl)}</text>
+                      <text x={x0+2} y={yE-2} fontSize={7.5} fontWeight="800" fill={C.text}>R/R {rr.toFixed(2)}</text>
+                    </g>
+                  ); })()}
+                  {/* Niveaux en cours de saisie de la zone de trade */}
+                  {pendingTrade && [["#9CA3AF",pendingTrade.entry],["#EF4444",pendingTrade.sl]].map(function(it,i){ return it[1]==null?null:<line key={"ptz"+i} x1={PAD} y1={toY(it[1])} x2={W-PAD} y2={toY(it[1])} stroke={it[0]} strokeWidth={1} strokeDasharray="3 3" opacity={0.7}/>; })}
+                  {/* Surbrillance objet sélectionné */}
+                  {tool==="select" && selected && (function(){
+                    if(selected.type==="line" && lines[selected.index]){ var ln=lines[selected.index]; var x1=tToX(ln.a.t),y1=toY(ln.a.p),x2=tToX(ln.b.t),y2=toY(ln.b.p); return (<g><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#FACC15" strokeWidth={2.6} opacity={0.45}/><circle cx={x1} cy={y1} r={3.6} fill="#FACC15"/><circle cx={x2} cy={y2} r={3.6} fill="#FACC15"/></g>); }
+                    if(selected.type==="anno" && annos[selected.index]){ var an=annos[selected.index]; return <circle cx={tToX(an.t)} cy={toY(an.p)} r={6} fill="none" stroke="#FACC15" strokeWidth={1.6}/>; }
+                    if(selected.type==="trade" && tradeZone){ var ya=toY(tradeZone.tp), yb=toY(tradeZone.sl); return <rect x={PAD} y={Math.min(ya,yb)} width={W-PAD*2} height={Math.abs(ya-yb)} fill="none" stroke="#FACC15" strokeWidth={1.6} strokeDasharray="3 2"/>; }
+                    return null;
+                  })()}
+                  {/* Labels X */}
+                  {xIdxs.map((ci,i)=>(
+                    <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
+                      {fmtTs(candles[ci]?.t)}
+                    </text>
+                  ))}
+                  {/* Point dernier prix */}
+                  {!ch && (()=>{
+                    const lx=toX(closes.length-1,closes.length), ly=toY(closes[closes.length-1]);
+                    return <circle cx={lx} cy={ly} r={3} fill={lineColor}/>;
+                  })()}
+                  {/* Crosshair */}
+                  {ch && (<>
+                    {/* Ligne verticale */}
+                    <line x1={ch.x} y1={PAD} x2={ch.x} y2={H-PAD}
+                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
+                    {/* Ligne horizontale */}
+                    <line x1={PAD} y1={ch.y} x2={SVG_W-PAD} y2={ch.y}
+                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
+                    {/* Point */}
+                    <circle cx={ch.x} cy={ch.y} r={4} fill={lineColor} stroke={C.bg0} strokeWidth={1.5}/>
+                    {/* Label prix — axe Y gauche */}
+                    {(()=>{
+                      const priceDisp2 = eur ? ch.price * usdEur : ch.price;
+                      const pLabel = cur + (priceDisp2 >= 100 ? Math.round(priceDisp2).toLocaleString("fr-FR") : priceDisp2.toFixed(2));
+                      const labelY = Math.max(10, Math.min(ch.y + 4, H-4));
+                      return (<>
+                        <rect x={PAD} y={labelY-8} width={pLabel.length*5.5+4} height={11} rx={3}
+                          fill={lineColor} opacity={0.9}/>
+                        <text x={PAD+3} y={labelY+1} fill="#000" fontSize={7.5} fontWeight="700">{pLabel}</text>
+                      </>);
+                    })()}
+                    {/* Label date — axe X bas */}
+                    {ch.ts && (()=>{
+                      const dLabel = fmtTs(ch.ts);
+                      const lx2 = Math.max(20, Math.min(ch.x, SVG_W-24));
+                      return (<>
+                        <rect x={lx2-dLabel.length*3-2} y={H+5} width={dLabel.length*6+4} height={10} rx={3}
+                          fill={lineColor} opacity={0.9}/>
+                        <text x={lx2} y={H+12} textAnchor="middle" fill="#000" fontSize={7} fontWeight="700">{dLabel}</text>
+                      </>);
+                    })()}
+                  </>)}
+                  {/* Curseur libre (outil actif) */}
+                  {tool && freeCursor && (function(){ var fx=Math.max(PAD,Math.min(freeCursor.x,SVG_W-PAD)); var fy=Math.max(PAD,Math.min(freeCursor.y,H-PAD)); var pd=eur?freeCursor.price*usdEur:freeCursor.price; var lbl=cur+(pd>=100?Math.round(pd).toLocaleString("fr-FR"):pd.toFixed(2)); var ly=Math.max(10,Math.min(fy+4,H-4)); return (<>
+                    <line x1={fx} y1={PAD} x2={fx} y2={H-PAD} stroke={C.text2} strokeWidth={0.7} strokeDasharray="3,2" opacity={0.65}/>
+                    <line x1={PAD} y1={fy} x2={SVG_W-PAD} y2={fy} stroke={C.text2} strokeWidth={0.7} strokeDasharray="3,2" opacity={0.65}/>
+                    <circle cx={fx} cy={fy} r={3} fill="none" stroke={C.text2} strokeWidth={1}/>
+                    <rect x={PAD} y={ly-8} width={lbl.length*5.5+4} height={11} rx={3} fill={C.text2} opacity={0.9}/>
+                    <text x={PAD+3} y={ly+1} fill="#000" fontSize={7.5} fontWeight="700">{lbl}</text>
+                  </>); })()}
+                </svg>
+              );
+            })()}
+            {!loading && !err && closes.length <= 1 && (
+              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:11}}>
+                Données insuffisantes
+              </div>
+            )}
+            </>);
+            const toolbar = (
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"max(6px,env(safe-area-inset-top)) 4px 8px",flexShrink:0}}>
+                <button onClick={()=>setFull(false)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"4px 10px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
+                <span style={{fontWeight:800,fontSize:14,color:C.text,marginRight:4}}>{ticker}</span>
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
+                </div>
+                <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
+                <div style={{display:"flex",gap:3}}>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setTool(tool==="select"?null:"select"); }} title="Sélectionner / supprimer un objet" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="select"?"#FACC15":C.border),background:tool==="select"?"#FACC1522":"transparent",color:tool==="select"?"#FACC15":C.text2}}>◎</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="line"?null:"line"); }} title="Tracer une droite (touchez 2 points)" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="line"?C.blue:C.border),background:tool==="line"?C.blue+"22":"transparent",color:tool==="line"?C.blue:C.text2}}>╱</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="anno"?null:"anno"); }} title="Annotation (touchez un point)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="anno"?"#FBBF24":C.border),background:tool==="anno"?"#FBBF2422":"transparent",color:tool==="anno"?"#FBBF24":C.text2}}>T</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="trade"?null:"trade"); }} title="Zone de trade (Entrée → SL → TP)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="trade"?"#10B981":C.border),background:tool==="trade"?"#10B98122":"transparent",color:tool==="trade"?"#10B981":C.text2}}>🎯</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="fib"?null:"fib"); }} title="Retracement de Fibonacci (touchez 2 points)" style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="fib"?"#A855F7":C.border),background:tool==="fib"?"#A855F722":"transparent",color:tool==="fib"?"#A855F7":C.text2}}>Fib</button>
+                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="fibext"?null:"fibext"); }} title="Extension de Fibonacci (projections de cibles)" style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="fibext"?"#F97316":C.border),background:tool==="fibext"?"#F9731622":"transparent",color:tool==="fibext"?"#F97316":C.text2}}>Fib+</button>
+                  <button onClick={()=>setMagnet(function(m){ var n2=!m; saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {magnet:n2})); return n2; })} title="Magnetisme : aimante les points aux hauts / bas / ouvertures / clotures" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(magnet?C.btc:C.border),background:magnet?C.btc+"22":"transparent",color:magnet?C.btc:C.text2}}>🧲</button>
+                  <button onClick={clearDraw} title="Tout effacer (droites + annotations + Fibonacci + zone)" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.red}}>🗑</button>
+                </div>
+                <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
+                  {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
+                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {ma:n2})); return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
+                  );})}
+                </div>
+              </div>
+            );
+            if(full) return ReactDOM.createPortal(
+              <div style={{position:"fixed",inset:0,zIndex:100000,background:C.bg,display:"flex",flexDirection:"column"}}>
+                {toolbar}
+                {tool && <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11,color:C.btc,fontWeight:700,padding:"0 6px 4px",flexShrink:0}}>
+                  <span>{tool==="select"?(selected?(selected.type==="line"?"Droite sélectionnée":selected.type==="anno"?"Annotation sélectionnée":selected.type==="fib"?"Fibonacci sélectionné":"Zone de trade sélectionnée"):"Touchez un objet pour le sélectionner"):tool==="line"?(pendingPt?"Touchez le 2e point de la droite":"Touchez le 1er point de la droite"):tool==="fib"?(pendingPt?"Fibonacci : touchez le 2e point (100 %)":"Fibonacci : touchez le 1er point (0 %)"):tool==="fibext"?(pendingPt?"Extension Fib : touchez le 2e point (100 %)":"Extension Fib : touchez le 1er point (0 %)"):tool==="anno"?"Touchez l'emplacement de l'annotation":(!pendingTrade?"Zone de trade : touchez le niveau d'ENTRÉE":pendingTrade.sl==null?"Touchez le STOP-LOSS":"Touchez le TAKE-PROFIT")}</span>
+                  {tool==="select" && selected && selected.type==="anno" && <button onClick={editSelectedAnno} style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.text}}>Éditer</button>}
+                  {tool==="select" && selected && <button onClick={deleteSelected} style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.red,background:C.red+"22",color:C.red}}>Supprimer</button>}
+                </div>}
+                <div style={{flex:1,minHeight:0,position:"relative",display:"flex",flexDirection:"column",padding:"0 6px 6px"}}>
+                  {chartCore}
+                </div>
+              </div>, document.body);
+            return (
+              <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
+                <button onClick={()=>setFull(true)} title="Plein écran" style={{position:"absolute",bottom:8,right:8,zIndex:4,width:28,height:24,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,color:C.text2,fontSize:13}}>⛶</button>
+                <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
+                  {candleMode
+                ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
+                </button>
+                {chartCore}
+              </div>
+            );
+          })()}
+
+          {data && <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,margin:"2px 0 6px"}}>FONDAMENTAL</div>}
           {/* ── Cases de données fondamentales sous le prix ── */}
           {data && (() => {
             const fmtMC = v => {
@@ -2291,6 +2716,127 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                   </div>
                 ); })()}
                 </div>)}
+              </div>
+            );
+          })()}
+
+          {/* v28.61 — Indicateurs TECHNIQUES — accordéon */}
+          {(function(){
+            var ki = computeKeyIndicators(candlesAll);
+            if(!ki.length) return null;
+            var toneCol = function(t){ return t==="up"?C.green:(t==="down"?C.red:C.text2); };
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setTechOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:techOpen?C.blue+"15":C.bg3,border:`1px solid ${techOpen?C.blue+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:techOpen?6:0}}>
+                  <span style={{fontSize:11,color:techOpen?C.blue:C.text,fontWeight:700,letterSpacing:0.3}}>📈 Technique<span style={{marginLeft:6,fontSize:10,color:techOpen?C.blue:C.text2,fontWeight:500}}>({ki.length})</span></span>
+                  <span style={{fontSize:11,color:techOpen?C.blue:C.text2,display:"inline-block",transform:techOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {techOpen && (<>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                    {ki.map(function(k,i){ return (
+                      <div key={i} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 9px"}}>
+                        <div style={{fontSize:8,color:C.text3,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.label}</div>
+                        <div style={{fontSize:12,fontWeight:800,color:toneCol(k.tone)}}>{k.value}</div>
+                      </div>
+                    ); })}
+                  </div>
+                  <div style={{fontSize:8,color:C.text3,marginTop:5}}>Calculé sur les bougies chargées (période du graphe). RSI 14 · MACD 12/26/9 standards.</div>
+                </>)}
+              </div>
+            );
+          })()}
+
+          {/* v28.62 — Ma position (FIFO depuis mes trades) — accordéon */}
+          {(function(){
+            var tr = gdbTickerTrades(ticker);
+            if(!tr.length) return null;
+            var fifo = gdbFifo(tr);
+            var openQty = fifo.openQty, pru = fifo.pru;
+            var hasPos = openQty>1e-9 && pru!=null;
+            var valNat = (hasPos && price!=null) ? openQty*price : null;
+            var pnlNat = (hasPos && price!=null && pru!=null) ? (price-pru)*openQty : null;
+            var pnlPct = (hasPos && pru!=null && pru>0 && price!=null) ? (price/pru-1) : null;
+            var realized = 0, nSell = 0;
+            fifo.enriched.forEach(function(e){ if(e._side==="SELL" && e._pnl!=null){ realized+=e._pnl; nSell++; } });
+            var pnlCol = (pnlNat==null)?C.text2:(pnlNat>=0?C.green:C.red);
+            var Cell=function(lbl,val,col){ return (
+              <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 9px"}}>
+                <div style={{fontSize:8,color:C.text3,marginBottom:2}}>{lbl}</div>
+                <div style={{fontSize:13,fontWeight:800,color:col||C.text}}>{val}</div>
+              </div>
+            ); };
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setPosOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:posOpen?C.green+"15":C.bg3,border:`1px solid ${posOpen?C.green+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:posOpen?6:0}}>
+                  <span style={{fontSize:11,color:posOpen?C.green:C.text,fontWeight:700,letterSpacing:0.3}}>💼 Ma position{hasPos?(<span style={{marginLeft:6,fontSize:10,color:posOpen?C.green:C.text2,fontWeight:500}}>({fmtQty(openQty)})</span>):(<span style={{marginLeft:6,fontSize:10,color:C.text3,fontWeight:500}}>(soldée)</span>)}</span>
+                  <span style={{fontSize:11,color:posOpen?C.green:C.text2,display:"inline-block",transform:posOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {posOpen && (
+                  <div>
+                    {hasPos ? (
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                        {Cell("Quantité", fmtQty(openQty))}
+                        {Cell("PRU", fmtPriceV(cvPrice(pru)))}
+                        {Cell("Valeur", fmtPriceV(cvPrice(valNat)))}
+                        {Cell("P&L latent", fmtAmt(cvPrice(pnlNat))+(pnlPct!=null?(" ("+fmtPct(pnlPct)+")"):""), pnlCol)}
+                      </div>
+                    ) : (
+                      <div style={{fontSize:11,color:C.text2,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"9px 11px"}}>Aucune position ouverte sur ce ticker (entièrement soldée).</div>
+                    )}
+                    {nSell>0 && (
+                      <div style={{fontSize:10,color:C.text2,marginTop:6}}>P&L réalisé cumulé : <span style={{fontWeight:800,color:realized>=0?C.green:C.red}}>{fmtAmt(cvPrice(realized))}</span> · {nSell} vente{nSell>1?"s":""}</div>
+                    )}
+                    <div style={{fontSize:8,color:C.text3,marginTop:5}}>Reconstruit en FIFO depuis mes transactions. PRU = coût moyen des lots restants.</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* v28.62 — Historique de mes trades — accordéon */}
+          {(function(){
+            var tr = gdbTickerTrades(ticker);
+            if(!tr.length) return null;
+            var fifo = gdbFifo(tr);
+            var rows = fifo.enriched.slice().reverse();
+            var sideCol2=function(s){ return s==="BUY"?C.green:(s==="SELL"?C.red:C.text3); };
+            var sideSym2=function(s){ return s==="BUY"?"▲":(s==="SELL"?"▼":"•"); };
+            var sideLbl=function(s){ return s==="BUY"?"Achat":(s==="SELL"?"Vente":s); };
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setTrdOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:trdOpen?C.orange+"15":C.bg3,border:`1px solid ${trdOpen?C.orange+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:trdOpen?6:0}}>
+                  <span style={{fontSize:11,color:trdOpen?C.orange:C.text,fontWeight:700,letterSpacing:0.3}}>📒 Historique de mes trades<span style={{marginLeft:6,fontSize:10,color:trdOpen?C.orange:C.text2,fontWeight:500}}>({tr.length})</span></span>
+                  <span style={{fontSize:11,color:trdOpen?C.orange:C.text2,display:"inline-block",transform:trdOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                </button>
+                {trdOpen && (
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {rows.map(function(t,i){
+                      var pr = cvPrice(t.price);
+                      return (
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+                            <span style={{fontSize:12,fontWeight:800,color:sideCol2(t._side),flexShrink:0}}>{sideSym2(t._side)}</span>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{sideLbl(t._side)} · {fmtQty(Math.abs(+t.qty||0))}</div>
+                              <div style={{fontSize:9,color:C.text3}}>{t.date}{pr!=null?(" @ "+fmtPriceV(pr)):""}</div>
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            {t._side==="SELL" && t._pnl!=null ? (
+                              <div>
+                                <div style={{fontSize:12,fontWeight:800,color:t._pnl>=0?C.green:C.red}}>{fmtAmt(cvPrice(t._pnl))}</div>
+                                <div style={{fontSize:9,color:C.text3}}>{t._pct!=null?fmtPct(t._pct):""}{t._held!=null?(" · "+t._held+"j"):""}</div>
+                              </div>
+                            ) : (
+                              <div style={{fontSize:10,color:C.text3}}>{t._side==="BUY"?"ouverture":""}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{fontSize:8,color:C.text3,marginTop:2}}>P&L réalisé calculé en FIFO à la vente. ▲ achat · ▼ vente.</div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -2482,276 +3028,6 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                   )}
                 </div>
               </>
-            );
-          })()}
-
-          {/* Timeframes — 2 rangées */}
-          <div style={{marginBottom:12}}>
-            {[TF_ROW1, TF_ROW2].map((row, ri)=>(
-              <div key={ri} style={{display:"flex",gap:4,background:C.bg1,borderRadius:10,padding:3,marginBottom:ri===0?4:0}}>
-                {row.map((t,i)=>{
-                  const idx = ri*5+i;
-                  return (
-                    <button key={idx} onClick={()=>setTf(idx)} style={{
-                      flex:1,padding:"5px 0",borderRadius:7,fontSize:11,fontWeight:700,
-                      border:"none",cursor:"pointer",
-                      background:tf===idx?C.blue:"transparent",
-                      color:tf===idx?"#fff":C.gray,
-                    }}>{t.label}</button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-
-          {/* Chart */}
-          {(()=>{
-            const chartCore = (<>
-            {candleMode && candles.length>0 && (function(){ var cd=crosshair?candles[crosshair.i]:candles[candles.length-1]; if(!cd) return null; var f=function(v){ return v==null?"\u2014":(eur?(v*usdEur):v).toFixed(2); }; return (
-              <div style={{display:"flex",gap:10,fontSize:9,color:C.text2,padding:"0 38px 6px 8px"}}>
-                <span>O <b style={{color:C.text}}>{f(cd.o)}</b></span>
-                <span>H <b style={{color:C.green}}>{f(cd.h)}</b></span>
-                <span>L <b style={{color:C.red}}>{f(cd.l)}</b></span>
-                <span>C <b style={{color:C.text}}>{f(cd.c)}</b></span>
-              </div>
-            ); })()}
-            {loading && (
-              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:12}}>
-                Chargement…
-              </div>
-            )}
-            {err && (
-              <div style={{padding:"12px 16px",background:C.red+"11",borderRadius:8,border:`1px solid ${C.red}44`,marginBottom:4}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:4}}>⚠ Erreur de chargement</div>
-                <div style={{fontSize:10,color:C.red+"cc",wordBreak:"break-all"}}>{err}</div>
-                <div style={{display:"flex",gap:8,marginTop:8}}>
-                  <button onClick={()=>fetchChart(tf)} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer"}}>
-                    Réessayer
-                  </button>
-                  <button onClick={()=>navigator.clipboard.writeText(err).catch(()=>{})} style={{fontSize:10,padding:"4px 12px",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.gray,cursor:"pointer"}}>
-                    📋 Copier
-                  </button>
-                </div>
-                <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.red}33`}}>
-                  <div style={{fontSize:10,color:C.text2,marginBottom:6}}>{hasMap?"Corriger le symbole Yahoo de ":"Aucun symbole Yahoo pour "}<b style={{color:C.text}}>{ticker}</b>{hasMap?" :":" — définis-le pour charger le graphe :"}</div>
-                  <div style={{display:"flex",gap:6}}>
-                    <input value={symDraft} onChange={e=>setSymDraft(e.target.value)} placeholder="ex. GC=F"
-                      style={{flex:1,minWidth:0,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 9px",color:C.text,fontSize:12,fontWeight:700}}/>
-                    <button onClick={()=>{ const v=(symDraft||"").trim(); if(!v) return; YF_MAP[ticker]=v; try{ saveBase('gdb_yfmap', {...YF_MAP}); }catch(_e){} setSymOverride(v); setErr(null); }}
-                      style={{fontSize:11,fontWeight:700,padding:"7px 12px",borderRadius:6,border:"none",background:C.blue,color:"#fff",cursor:"pointer",whiteSpace:"nowrap"}}>Enregistrer &amp; charger</button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {!loading && !err && closes.length > 1 && (()=>{
-              // Crosshair handlers
-              const SVG_W = 320, SVG_H = H + 18;
-              const hitTest = (clientX, svgEl) => {
-                if(!svgEl) return null;
-                const rect = svgEl.getBoundingClientRect();
-                const relX = (clientX - rect.left) / rect.width * SVG_W;
-                const n = closes.length;
-                // Trouver l'index le plus proche
-                let best = 0, bestDist = Infinity;
-                for(let i=0;i<n;i++){
-                  const d = Math.abs(toX(i,n) - relX);
-                  if(d < bestDist){ bestDist=d; best=i; }
-                }
-                return { i:best, x:toX(best,n), y:toY(closes[best]), price:closes[best], ts:candles[best]?.t };
-              };
-              const rawPos = (cx, cy, el) => { if(!el) return null; const rr=el.getBoundingClientRect(); const x=(cx-rr.left)/rr.width*SVG_W; const y=(cy-rr.top)/rr.height*SVG_H; const price=minV+(1-(y-PAD)/((H-PAD*2)||1))*rng; return {x,y,price}; };
-              const onSvgTouchStart = e => { if(beginDrag(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault(); };
-              const onSvgTouchMove = e => {
-                e.preventDefault();
-                if(moveDrag(e.touches[0].clientX, e.touches[0].clientY)) return;
-                if(tool){ const rp=rawPos(e.touches[0].clientX, e.touches[0].clientY, svgRef.current); if(rp) setFreeCursor(rp); return; }
-                const c2 = hitTest(e.touches[0].clientX, svgRef.current);
-                if(c2) setCrosshair(c2);
-              };
-              const onSvgTouchEnd = () => { endDrag(); setCrosshair(null); setFreeCursor(null); };
-              const onSvgMouseDown = e => { beginDrag(e.clientX, e.clientY); };
-              const onMouseMove = e => {
-                if(moveDrag(e.clientX, e.clientY)) return;
-                if(tool){ const rp=rawPos(e.clientX, e.clientY, svgRef.current); if(rp) setFreeCursor(rp); return; }
-                const c2 = hitTest(e.clientX, svgRef.current);
-                if(c2) setCrosshair(c2);
-              };
-              const onSvgMouseUp = () => { endDrag(); };
-              const onMouseLeave = () => { endDrag(); setCrosshair(null); setFreeCursor(null); };
-              const ch = tool ? null : crosshair;
-              const gradId = "tcg_"+ticker.replace(/[^a-z0-9]/gi,"_");
-              return (
-                <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
-                  style={full?{display:"block",overflow:"visible",touchAction:"none",width:"100%",height:"100%",flex:1,minHeight:0}:{display:"block",overflow:"visible",touchAction:"none"}}
-                  onTouchMove={onSvgTouchMove} onTouchEnd={onSvgTouchEnd}
-                  onTouchStart={onSvgTouchStart} onMouseDown={onSvgMouseDown} onMouseUp={onSvgMouseUp} onMouseMove={onMouseMove} onMouseLeave={onMouseLeave} onClick={onSvgClick}>
-                  <defs>
-                    <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
-                      <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
-                    </linearGradient>
-                  </defs>
-                  {candleMode ? (
-                    candles.map(function(cd,i){
-                      if(cd.o==null||cd.c==null) return null;
-                      var x=toX(i,candles.length); var up=cd.c>=cd.o; var col=up?C.green:C.red;
-                      var yO=toY(cd.o), yC=toY(cd.c);
-                      var yH=toY(cd.h!=null?cd.h:Math.max(cd.o,cd.c)), yL=toY(cd.l!=null?cd.l:Math.min(cd.o,cd.c));
-                      var bw=Math.max(1.2,(W-PAD*2)/candles.length*0.62);
-                      var top=Math.min(yO,yC), bh=Math.max(1,Math.abs(yC-yO));
-                      return (<g key={"cd"+i}><line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={0.8}/><rect x={x-bw/2} y={top} width={bw} height={bh} fill={col}/></g>);
-                    })
-                  ) : (<>
-                    <polygon points={pts+" "+toX(closes.length-1,closes.length)+","+(H-PAD)+" "+PAD+","+(H-PAD)} fill={"url(#"+gradId+")"}/>
-                    <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
-                  </>)}
-                  {/* Moyennes mobiles */}
-                  {[20,50,100,200].map(function(p){
-                    if(!maOn[p]||!maSeries[p]) return null;
-                    var pl=maSeries[p].map(function(v,i){ return v==null?null:toX(i,closes.length).toFixed(1)+","+toY(v).toFixed(1); }).filter(Boolean).join(" ");
-                    if(!pl) return null;
-                    return <polyline key={"ma"+p} points={pl} fill="none" stroke={MA_COLORS[p]} strokeWidth={1} opacity={0.9}/>;
-                  })}
-                  {/* Marqueurs achats (vert ▲) / ventes (rouge ▼) */}
-                  {chartMarkers.map(function(m,mi){
-                    var x=toX(m.i,candles.length); var y=toY(candles[m.i].c);
-                    var col=m.side==="BUY"?C.green:C.red; var dir=m.side==="BUY"?1:-1; var yo=y+dir*8;
-                    var tri=m.side==="BUY" ? (x+","+(yo-4)+" "+(x-4)+","+(yo+3)+" "+(x+4)+","+(yo+3)) : (x+","+(yo+4)+" "+(x-4)+","+(yo-3)+" "+(x+4)+","+(yo-3));
-                    return <polygon key={"mk"+mi} points={tri} fill={col} stroke={C.bg1} strokeWidth={0.7}/>;
-                  })}
-                  {/* Droites dessinées */}
-                  {lines.map(function(ln,i){ return <line key={"ln"+i} x1={tToX(ln.a.t)} y1={toY(ln.a.p)} x2={tToX(ln.b.t)} y2={toY(ln.b.p)} stroke={ln.color||"#3B82F6"} strokeWidth={1.3} strokeLinecap="round"/>; })}
-                  {/* Annotations */}
-                  {annos.map(function(an,i){ var x=tToX(an.t), y=toY(an.p); return (<g key={"an"+i}><circle cx={x} cy={y} r={2.6} fill="#FBBF24"/><text x={x+4} y={y-3} fontSize={8} fontWeight="700" fill="#FBBF24">{an.text}</text></g>); })}
-                  {/* Point en attente (1er point de droite) */}
-                  {pendingPt && <circle cx={tToX(pendingPt.t)} cy={toY(pendingPt.p)} r={3.2} fill="#3B82F6" stroke={C.bg0} strokeWidth={1}/>}
-                  {/* Zone de trade (SL / Entrée / TP) */}
-                  {tradeZone && (function(){ var fpx=function(v){ return (eur?(v*usdEur):v).toFixed(2); }; var yE=toY(tradeZone.entry), ySL=toY(tradeZone.sl), yTP=toY(tradeZone.tp); var x0=PAD, x1=W-PAD; var rr=Math.abs(tradeZone.entry-tradeZone.sl)>0?(Math.abs(tradeZone.tp-tradeZone.entry)/Math.abs(tradeZone.entry-tradeZone.sl)):0; return (
-                    <g>
-                      <rect x={x0} y={Math.min(yE,yTP)} width={x1-x0} height={Math.abs(yTP-yE)} fill="#10B98122"/>
-                      <rect x={x0} y={Math.min(yE,ySL)} width={x1-x0} height={Math.abs(ySL-yE)} fill="#EF444422"/>
-                      <line x1={x0} y1={yTP} x2={x1} y2={yTP} stroke="#10B981" strokeWidth={1} strokeDasharray="4 2"/>
-                      <line x1={x0} y1={yE} x2={x1} y2={yE} stroke={C.text2} strokeWidth={1}/>
-                      <line x1={x0} y1={ySL} x2={x1} y2={ySL} stroke="#EF4444" strokeWidth={1} strokeDasharray="4 2"/>
-                      <text x={x1-2} y={yTP-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#10B981">TP {fpx(tradeZone.tp)}</text>
-                      <text x={x1-2} y={yE-2} textAnchor="end" fontSize={7.5} fontWeight="700" fill={C.text2}>Entrée {fpx(tradeZone.entry)}</text>
-                      <text x={x1-2} y={ySL+8} textAnchor="end" fontSize={7.5} fontWeight="700" fill="#EF4444">SL {fpx(tradeZone.sl)}</text>
-                      <text x={x0+2} y={yE-2} fontSize={7.5} fontWeight="800" fill={C.text}>R/R {rr.toFixed(2)}</text>
-                    </g>
-                  ); })()}
-                  {/* Niveaux en cours de saisie de la zone de trade */}
-                  {pendingTrade && [["#9CA3AF",pendingTrade.entry],["#EF4444",pendingTrade.sl]].map(function(it,i){ return it[1]==null?null:<line key={"ptz"+i} x1={PAD} y1={toY(it[1])} x2={W-PAD} y2={toY(it[1])} stroke={it[0]} strokeWidth={1} strokeDasharray="3 3" opacity={0.7}/>; })}
-                  {/* Surbrillance objet sélectionné */}
-                  {tool==="select" && selected && (function(){
-                    if(selected.type==="line" && lines[selected.index]){ var ln=lines[selected.index]; var x1=tToX(ln.a.t),y1=toY(ln.a.p),x2=tToX(ln.b.t),y2=toY(ln.b.p); return (<g><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#FACC15" strokeWidth={2.6} opacity={0.45}/><circle cx={x1} cy={y1} r={3.6} fill="#FACC15"/><circle cx={x2} cy={y2} r={3.6} fill="#FACC15"/></g>); }
-                    if(selected.type==="anno" && annos[selected.index]){ var an=annos[selected.index]; return <circle cx={tToX(an.t)} cy={toY(an.p)} r={6} fill="none" stroke="#FACC15" strokeWidth={1.6}/>; }
-                    if(selected.type==="trade" && tradeZone){ var ya=toY(tradeZone.tp), yb=toY(tradeZone.sl); return <rect x={PAD} y={Math.min(ya,yb)} width={W-PAD*2} height={Math.abs(ya-yb)} fill="none" stroke="#FACC15" strokeWidth={1.6} strokeDasharray="3 2"/>; }
-                    return null;
-                  })()}
-                  {/* Labels X */}
-                  {xIdxs.map((ci,i)=>(
-                    <text key={i} x={toX(ci,closes.length)} y={H+15} textAnchor="middle" fill={C.text3} fontSize={7}>
-                      {fmtTs(candles[ci]?.t)}
-                    </text>
-                  ))}
-                  {/* Point dernier prix */}
-                  {!ch && (()=>{
-                    const lx=toX(closes.length-1,closes.length), ly=toY(closes[closes.length-1]);
-                    return <circle cx={lx} cy={ly} r={3} fill={lineColor}/>;
-                  })()}
-                  {/* Crosshair */}
-                  {ch && (<>
-                    {/* Ligne verticale */}
-                    <line x1={ch.x} y1={PAD} x2={ch.x} y2={H-PAD}
-                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
-                    {/* Ligne horizontale */}
-                    <line x1={PAD} y1={ch.y} x2={SVG_W-PAD} y2={ch.y}
-                      stroke={lineColor} strokeWidth={0.8} strokeDasharray="3,2" opacity={0.7}/>
-                    {/* Point */}
-                    <circle cx={ch.x} cy={ch.y} r={4} fill={lineColor} stroke={C.bg0} strokeWidth={1.5}/>
-                    {/* Label prix — axe Y gauche */}
-                    {(()=>{
-                      const priceDisp2 = eur ? ch.price * usdEur : ch.price;
-                      const pLabel = cur + (priceDisp2 >= 100 ? Math.round(priceDisp2).toLocaleString("fr-FR") : priceDisp2.toFixed(2));
-                      const labelY = Math.max(10, Math.min(ch.y + 4, H-4));
-                      return (<>
-                        <rect x={PAD} y={labelY-8} width={pLabel.length*5.5+4} height={11} rx={3}
-                          fill={lineColor} opacity={0.9}/>
-                        <text x={PAD+3} y={labelY+1} fill="#000" fontSize={7.5} fontWeight="700">{pLabel}</text>
-                      </>);
-                    })()}
-                    {/* Label date — axe X bas */}
-                    {ch.ts && (()=>{
-                      const dLabel = fmtTs(ch.ts);
-                      const lx2 = Math.max(20, Math.min(ch.x, SVG_W-24));
-                      return (<>
-                        <rect x={lx2-dLabel.length*3-2} y={H+5} width={dLabel.length*6+4} height={10} rx={3}
-                          fill={lineColor} opacity={0.9}/>
-                        <text x={lx2} y={H+12} textAnchor="middle" fill="#000" fontSize={7} fontWeight="700">{dLabel}</text>
-                      </>);
-                    })()}
-                  </>)}
-                  {/* Curseur libre (outil actif) */}
-                  {tool && freeCursor && (function(){ var fx=Math.max(PAD,Math.min(freeCursor.x,SVG_W-PAD)); var fy=Math.max(PAD,Math.min(freeCursor.y,H-PAD)); var pd=eur?freeCursor.price*usdEur:freeCursor.price; var lbl=cur+(pd>=100?Math.round(pd).toLocaleString("fr-FR"):pd.toFixed(2)); var ly=Math.max(10,Math.min(fy+4,H-4)); return (<>
-                    <line x1={fx} y1={PAD} x2={fx} y2={H-PAD} stroke={C.text2} strokeWidth={0.7} strokeDasharray="3,2" opacity={0.65}/>
-                    <line x1={PAD} y1={fy} x2={SVG_W-PAD} y2={fy} stroke={C.text2} strokeWidth={0.7} strokeDasharray="3,2" opacity={0.65}/>
-                    <circle cx={fx} cy={fy} r={3} fill="none" stroke={C.text2} strokeWidth={1}/>
-                    <rect x={PAD} y={ly-8} width={lbl.length*5.5+4} height={11} rx={3} fill={C.text2} opacity={0.9}/>
-                    <text x={PAD+3} y={ly+1} fill="#000" fontSize={7.5} fontWeight="700">{lbl}</text>
-                  </>); })()}
-                </svg>
-              );
-            })()}
-            {!loading && !err && closes.length <= 1 && (
-              <div style={{height:H+20,display:"flex",alignItems:"center",justifyContent:"center",color:C.gray,fontSize:11}}>
-                Données insuffisantes
-              </div>
-            )}
-            </>);
-            const toolbar = (
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",padding:"max(6px,env(safe-area-inset-top)) 4px 8px",flexShrink:0}}>
-                <button onClick={()=>setFull(false)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"4px 10px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
-                <span style={{fontWeight:800,fontSize:14,color:C.text,marginRight:4}}>{ticker}</span>
-                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                  {TF_CONFIG.map((t,idx)=>(<button key={idx} onClick={()=>setTf(idx)} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:700,border:"none",cursor:"pointer",background:tf===idx?C.blue:C.bg2,color:tf===idx?"#fff":C.gray}}>{t.label}</button>))}
-                </div>
-                <button onClick={()=>setCandleMode(m=>!m)} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:6,padding:"3px 8px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>{candleMode?"Courbe":"Chandeliers"}</button>
-                <div style={{display:"flex",gap:3}}>
-                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setTool(tool==="select"?null:"select"); }} title="Sélectionner / supprimer un objet" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="select"?"#FACC15":C.border),background:tool==="select"?"#FACC1522":"transparent",color:tool==="select"?"#FACC15":C.text2}}>◎</button>
-                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="line"?null:"line"); }} title="Tracer une droite (touchez 2 points)" style={{padding:"3px 9px",borderRadius:6,fontSize:12,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="line"?C.blue:C.border),background:tool==="line"?C.blue+"22":"transparent",color:tool==="line"?C.blue:C.text2}}>╱</button>
-                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="anno"?null:"anno"); }} title="Annotation (touchez un point)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="anno"?"#FBBF24":C.border),background:tool==="anno"?"#FBBF2422":"transparent",color:tool==="anno"?"#FBBF24":C.text2}}>T</button>
-                  <button onClick={()=>{ setPendingPt(null); setPendingTrade(null); setSelected(null); setTool(tool==="trade"?null:"trade"); }} title="Zone de trade (Entrée → SL → TP)" style={{padding:"3px 9px",borderRadius:6,fontSize:11,fontWeight:800,cursor:"pointer",border:"1.5px solid "+(tool==="trade"?"#10B981":C.border),background:tool==="trade"?"#10B98122":"transparent",color:tool==="trade"?"#10B981":C.text2}}>🎯</button>
-                  <button onClick={clearDraw} title="Tout effacer (droites + annotations + zone)" style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.red}}>🗑</button>
-                </div>
-                <div style={{display:"flex",gap:3,marginLeft:"auto"}}>
-                  {[20,50,100,200].map(function(p){ var on=maOn[p]; var avail=!!maSeries[p]; return (
-                    <button key={p} disabled={!avail} onClick={()=>setMaOn(function(m){ var n2=Object.assign({},m); n2[p]=!m[p]; saveDrawings(ticker, Object.assign({}, getDrawings(ticker), {ma:n2})); return n2; })} title={avail?"":"Pas assez de bougies sur ce TF"} style={{padding:"3px 7px",borderRadius:6,fontSize:10,fontWeight:800,cursor:avail?"pointer":"not-allowed",border:"1.5px solid "+(on&&avail?MA_COLORS[p]:C.border),background:on&&avail?MA_COLORS[p]+"22":"transparent",color:on&&avail?MA_COLORS[p]:C.gray,opacity:avail?1:0.3}}>MM{p}</button>
-                  );})}
-                </div>
-              </div>
-            );
-            if(full) return ReactDOM.createPortal(
-              <div style={{position:"fixed",inset:0,zIndex:100000,background:C.bg,display:"flex",flexDirection:"column"}}>
-                {toolbar}
-                {tool && <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11,color:C.btc,fontWeight:700,padding:"0 6px 4px",flexShrink:0}}>
-                  <span>{tool==="select"?(selected?(selected.type==="line"?"Droite sélectionnée":selected.type==="anno"?"Annotation sélectionnée":"Zone de trade sélectionnée"):"Touchez un objet pour le sélectionner"):tool==="line"?(pendingPt?"Touchez le 2e point de la droite":"Touchez le 1er point de la droite"):tool==="anno"?"Touchez l'emplacement de l'annotation":(!pendingTrade?"Zone de trade : touchez le niveau d'ENTRÉE":pendingTrade.sl==null?"Touchez le STOP-LOSS":"Touchez le TAKE-PROFIT")}</span>
-                  {tool==="select" && selected && selected.type==="anno" && <button onClick={editSelectedAnno} style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.text}}>Éditer</button>}
-                  {tool==="select" && selected && <button onClick={deleteSelected} style={{padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",border:"1px solid "+C.red,background:C.red+"22",color:C.red}}>Supprimer</button>}
-                </div>}
-                <div style={{flex:1,minHeight:0,position:"relative",display:"flex",flexDirection:"column",padding:"0 6px 6px"}}>
-                  {chartCore}
-                </div>
-              </div>, document.body);
-            return (
-              <div style={{background:C.bg1,borderRadius:12,padding:"10px 4px 4px",marginBottom:4,position:"relative"}}>
-                <button onClick={()=>setFull(true)} title="Plein écran" style={{position:"absolute",bottom:8,right:8,zIndex:4,width:28,height:24,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,color:C.text2,fontSize:13}}>⛶</button>
-                <button onClick={()=>setCandleMode(m=>!m)} title={candleMode?"Vue courbe":"Vue chandeliers"} style={{position:"absolute",top:8,right:8,zIndex:3,width:30,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.bg2,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
-                  {candleMode
-                ? <svg width="14" height="14" viewBox="0 0 14 14"><polyline points="1,10 5,5 8,8 13,2" fill="none" stroke={C.text2} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/></svg>
-                : <svg width="14" height="14" viewBox="0 0 14 14"><g stroke={C.text2} strokeWidth="1"><line x1="4" y1="1.5" x2="4" y2="12.5"/><line x1="10" y1="2.5" x2="10" y2="11.5"/></g><rect x="2.4" y="4.2" width="3.2" height="4.8" fill={C.text2}/><rect x="8.4" y="3.2" width="3.2" height="5.8" fill={C.text2}/></svg>}
-                </button>
-                {chartCore}
-              </div>
             );
           })()}
 

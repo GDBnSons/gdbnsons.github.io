@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.63";
+const APP_VERSION = "v28.66";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -857,7 +857,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants","gdb_watchlist",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -1505,7 +1505,7 @@ var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes 
 
 // ── Dessins & moyennes mobiles du modal ticker (persistance local + cloud) ──
 var DRAWINGS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_drawings_v1")||"{}")||{}; }catch(e){ return {}; } })();
-function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], fibs:d.fibs||[], magnet:(d.magnet!=null?d.magnet:false), tradeZone:d.tradeZone||null, ma:d.ma||{}, tf:(d.tf!=null?d.tf:3), candleMode:(d.candleMode!=null?d.candleMode:true) }; }
+function getDrawings(t){ var d=DRAWINGS[t]||{}; return { lines:d.lines||[], annotations:d.annotations||[], fibs:d.fibs||[], magnet:(d.magnet!=null?d.magnet:false), tradeZone:d.tradeZone||null, ma:d.ma||{}, tf:(d.tf!=null?d.tf:4), candleMode:(d.candleMode!=null?d.candleMode:true) }; }
 var _drawSaveTimer=null;
 function saveDrawings(t, obj){
   DRAWINGS[t]=obj;
@@ -1521,22 +1521,25 @@ function mergeDrawingsKV(kvObj){
     try{ localStorage.setItem("gdb_drawings_v1", JSON.stringify(DRAWINGS)); }catch(e){}
   }
 }
+// v28.64 — Le libelle = l'UNITE d'une bougie (5m, 15m, 30m, 1H, D, W, M, 3M).
 const TF_CONFIG = [
-  { label:"1h",  interval:"5m",   range:"1d"   },
-  { label:"4h",  interval:"15m",  range:"5d"   },
-  { label:"1J",  interval:"1h",   range:"5d"   },
-  { label:"1S",  interval:"1d",   range:"1mo"  },
-  { label:"1M",  interval:"1d",   range:"3mo"  },
-  { label:"1A",  interval:"1wk",  range:"1y"   },
-  { label:"5A",  interval:"1mo",  range:"5y"   },
-  { label:"ALL", interval:"3mo",  range:"max"  },
+  { label:"5m",  interval:"5m",   range:"1d"   },
+  { label:"15m", interval:"15m",  range:"3d"   },
+  { label:"30m", interval:"30m",  range:"7d"   },
+  { label:"1H",  interval:"1h",   range:"1mo"  },
+  { label:"D",   interval:"1d",   range:"6mo"  },
+  { label:"W",   interval:"1wk",  range:"2y"   },
+  { label:"M",   interval:"1mo",  range:"5y"   },
+  { label:"3M",  interval:"3mo",  range:"max"  },
 ];
+// Unites intrajournalieres : l'axe X doit alors afficher l'heure.
+const TF_INTRADAY = { "5m":1, "15m":1, "30m":1, "1h":1 };
 
 // Timeframes CoinGecko : days valides = 1,7,14,30,90,180,365,max
 // Mapping TF_CONFIG index → days CoinGecko
-const TF_CG_DAYS = ["1","7","7","14","30","365","1825","max"];
+const TF_CG_DAYS = ["1","3","7","30","180","730","1825","max"];
 // Plages étendues pour le warm-up des moyennes mobiles (≥200 bougies avant la fenêtre affichée)
-const EXT_RANGE = ["5d","1mo","1mo","2y","2y","5y","max","max"];
+const EXT_RANGE = ["5d","1mo","1mo","3mo","2y","10y","max","max"];
 
 // v27.01 — Ratios financiers : seuils indicatifs, jauges et explications neophytes
 var RATIO_DEFS=[
@@ -1908,7 +1911,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   // Chart
   const candlesAll = data?.candles || [];
   // Crop : on n'affiche que la fenêtre du TF (le surplus sert au warm-up des MM)
-  const _D=864e5, _SPANS=[1*_D,5*_D,5*_D,31*_D,93*_D,372*_D,5*372*_D,Infinity];
+  const _D=864e5, _SPANS=[1*_D,3*_D,7*_D,31*_D,186*_D,2*372*_D,5*372*_D,Infinity];
   let _ds=0;
   if(candlesAll.length && isFinite(_SPANS[tf])){
     const _cut = candlesAll[candlesAll.length-1].t - _SPANS[tf];
@@ -1931,13 +1934,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const W=320, PAD=6;
   const _availW = Math.max(240, win.w - 8), _availH = Math.max(180, win.h - 70);
   const H = full ? Math.max(160, Math.round(320*_availH/_availW) - 18) : 175;
-  const minV = Math.min(...closes), maxV = Math.max(...closes);
-  const rng  = maxV - minV || 1;
-  const toY  = v => PAD + (1-(v-minV)/rng)*(H-PAD*2);
   const toX  = (i,n) => PAD + (i/(n-1||1))*(W-PAD*2);
-  const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
-  const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
-  const lineColor = isUp ? C.green : C.red;
   // Moyennes mobiles — calculées sur l'historique étendu (candlesAll) pour démarrer dès le début du graphe affiché
   const MA_COLORS = {20:"#22D3EE",50:"#A78BFA",100:"#F59E0B",200:"#F43F5E"};
   const _closesAll = candlesAll.map(c=>c.c).filter(v=>v!=null);
@@ -1950,6 +1947,21 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
       maSeries[p]=arr.slice(_maOffset);
     } else { maSeries[p]=null; }
   });
+  // v28.64 — Échelle Y : le domaine englobe TOUT ce qui est réellement tracé —
+  // clôtures, mèches hautes/basses des bougies et moyennes mobiles AFFICHÉES.
+  // Avant, il ne tenait compte que des clôtures : mèches et MM débordaient du cadre.
+  let _lo=Infinity, _hi=-Infinity;
+  const _accY = v => { if(v!=null && isFinite(v)){ if(v<_lo) _lo=v; if(v>_hi) _hi=v; } };
+  closes.forEach(_accY);
+  if(candleMode) candles.forEach(function(cd){ _accY(cd.h); _accY(cd.l); });
+  [20,50,100,200].forEach(function(p){ if(maOn[p] && maSeries[p]) maSeries[p].forEach(_accY); });
+  if(!isFinite(_lo) || !isFinite(_hi)){ _lo=0; _hi=1; }
+  const minV = _lo, maxV = _hi;
+  const rng  = maxV - minV || 1;
+  const toY  = v => PAD + (1-(v-minV)/rng)*(H-PAD*2);
+  const pts  = closes.map((v,i)=>toX(i,closes.length)+","+toY(v)).join(" ");
+  const isUp = closes.length >= 2 ? closes[closes.length-1] >= closes[0] : true;
+  const lineColor = isUp ? C.green : C.red;
   // ── Dessins (Phase D) : conversions écran <-> données (timestamp/prix) ──
   const SVG_H2 = H + 18;
   const tToFrac = (t)=>{ const nn=candles.length; if(nn<2) return 0; if(t<=candles[0].t) return 0; if(t>=candles[nn-1].t) return nn-1; for(let i=0;i<nn-1;i++){ if(t>=candles[i].t && t<=candles[i+1].t){ const sp=(candles[i+1].t-candles[i].t)||1; return i+(t-candles[i].t)/sp; } } return nn-1; };
@@ -2023,12 +2035,19 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const moveDrag = (cx,cy)=>{ if(!dragRef.current) return false; const pt0=screenToData(cx,cy); if(pt0){ const pt=snapPt(pt0); const h=dragRef.current; const upd=function(prev){ return prev.map(function(ln,i){ return i===h.index?Object.assign({},ln, h.end==="a"?{a:{t:pt.t,p:pt.p}}:{b:{t:pt.t,p:pt.p}}):ln; }); }; if(h.kind==="fib") setFibs(upd); else setLines(upd); } return true; };
   const endDrag = ()=>{ if(dragRef.current){ const k=dragRef.current.kind; dragRef.current=null; justDragRef.current=true; if(k==="fib") persistFibs(fibsRef.current); else persistDraw(linesRef.current, annos); return true; } return false; };
 
+  // v28.64 — L'axe X affiche l'HEURE dès que l'unité de bougie est intrajournalière
+  // (5m / 15m / 30m / 1H) ; la date s'y ajoute si la fenêtre couvre plus d'une journée.
   const fmtTs = ts => {
     const d = new Date(ts);
-    const lbl = TF_CONFIG[tf].label;
-    if(lbl==="1J") return d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
-    if(lbl==="1S") return d.getDate()+"/"+(d.getMonth()+1)+" "+d.getHours()+"h";
-    if(["1M","6M"].includes(lbl)) return d.getDate()+"/"+(d.getMonth()+1);
+    const iv = TF_CONFIG[tf].interval;
+    const p2 = n => n.toString().padStart(2,"0");
+    const dm = d.getDate()+"/"+(d.getMonth()+1);
+    if(TF_INTRADAY[iv]){
+      const hm = p2(d.getHours())+":"+p2(d.getMinutes());
+      return (_SPANS[tf] <= 1.5*_D) ? hm : (dm+" "+hm);
+    }
+    if(iv==="1d")  return dm;
+    if(iv==="1wk") return dm+"/"+d.getFullYear().toString().slice(2);
     return (d.getMonth()+1)+"/"+d.getFullYear().toString().slice(2);
   };
   const xIdxs = closes.length > 1
@@ -2384,6 +2403,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
               const onMouseLeave = () => { endDrag(); setCrosshair(null); setFreeCursor(null); };
               const ch = tool ? null : crosshair;
               const gradId = "tcg_"+ticker.replace(/[^a-z0-9]/gi,"_");
+              const clipId = "tcc_"+ticker.replace(/[^a-z0-9]/gi,"_");
               return (
                 <svg ref={svgRef} width="100%" viewBox={"0 0 "+SVG_W+" "+SVG_H}
                   style={full?{display:"block",overflow:"visible",touchAction:"none",width:"100%",height:"100%",flex:1,minHeight:0}:{display:"block",overflow:"visible",touchAction:"none"}}
@@ -2394,7 +2414,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                       <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
                       <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
                     </linearGradient>
+                    <clipPath id={clipId}><rect x={0} y={0} width={W} height={H}/></clipPath>
                   </defs>
+                  <g clipPath={"url(#"+clipId+")"}>
                   {candleMode ? (
                     candles.map(function(cd,i){
                       if(cd.o==null||cd.c==null) return null;
@@ -2416,6 +2438,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     if(!pl) return null;
                     return <polyline key={"ma"+p} points={pl} fill="none" stroke={MA_COLORS[p]} strokeWidth={1} opacity={0.9}/>;
                   })}
+                  </g>
                   {/* Marqueurs achats (vert ▲) / ventes (rouge ▼) */}
                   {chartMarkers.map(function(m,mi){
                     var x=toX(m.i,candles.length); var y=toY(candles[m.i].c);
@@ -7203,8 +7226,429 @@ function SnapshotModal({onSave, onClose, EFF}){
 /* ═══════════════════════════════════════════════════════════
    ROOT APP
 ═══════════════════════════════════════════════════════════ */
-const TABS=["Home","Portfolio","Stats","GDB","Data","Legend","Market"];
-const ICONS=["◎","◑","▲","◈","⬡","♛","❖"];
+/* ═══════════════════════════════════════════════════════════
+   PAGE SUIVI (Tracking) — v28.65
+   Liste d'idées de trade suivies : plan (zone d'achat, alertes,
+   objectifs), thèse et risques. Prix live via Yahoo.
+   Base persistante : gdb_watchlist (cloud + local).
+═══════════════════════════════════════════════════════════ */
+const WL_CATS    = ["Action","Crypto","ETF","Autre"];
+const WL_HORIZON = ["Court terme","Moyen terme","Long terme"];
+
+function wlUid(){ return "wl_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function wlNum(v){ if(v===""||v==null) return null; var n=parseFloat(String(v).replace(",",".")); return isFinite(n)?n:null; }
+function wlSym(e){
+  if(e.sym) return e.sym;
+  if(typeof YF_MAP!=="undefined" && YF_MAP[e.ticker]) return YF_MAP[e.ticker];
+  return e.cat==="Crypto" ? e.ticker+"-USD" : e.ticker;
+}
+// Statut de l'idée face à son plan : ce qui doit sauter aux yeux.
+function wlStatus(e, px){
+  if(px==null) return { txt:"Prix indisponible", col:"#6B7280" };
+  if(e.alertSell!=null && px>=e.alertSell) return { txt:"Alerte vente atteinte", col:"#F59E0B" };
+  if(e.alertBuy!=null  && px<=e.alertBuy)  return { txt:"Alerte achat atteinte", col:"#22C55E" };
+  if(e.buyLow!=null && e.buyHigh!=null && px>=e.buyLow && px<=e.buyHigh) return { txt:"Dans la zone d'achat", col:"#22C55E" };
+  if(e.buyHigh!=null && px>e.buyHigh) return { txt:"Au-dessus de la zone", col:"#6B7280" };
+  if(e.buyLow!=null  && px<e.buyLow)  return { txt:"Sous la zone", col:"#3B82F6" };
+  return { txt:"En observation", col:"#6B7280" };
+}
+function wlBlank(){
+  return { id:"", ticker:"", name:"", cat:"Action", domain:"", fav:false, conviction:3,
+           horizon:"Moyen terme", buyLow:"", buyHigh:"", alertBuy:"", alertSell:"",
+           targets:[{price:"",note:""}], thesis:"", risks:"" };
+}
+
+/* ── Partage d'idées entre apps (format ouvert « GDBX1 ») ────────────────────
+   Une idée (ou toute la liste) est encodée en JSON UTF-8 → base64url, préfixée
+   "GDBX1:". Le texte se colle dans n'importe quelle messagerie ; l'app d'en
+   face le décode et fusionne. Aucun serveur commun n'est nécessaire.        */
+function wlEncode(obj){
+  var bytes = new TextEncoder().encode(JSON.stringify(obj));
+  var bin = ""; for(var i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function wlDecode(str){
+  var s = String(str||"").trim();
+  var i = s.indexOf("GDBX1:"); if(i>=0) s = s.slice(i+6);
+  s = s.replace(/\s+/g,"").replace(/-/g,"+").replace(/_/g,"/");
+  while(s.length % 4) s += "=";
+  var bin = atob(s), bytes = new Uint8Array(bin.length);
+  for(var j=0;j<bin.length;j++) bytes[j] = bin.charCodeAt(j);
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
+  const [prices, setPrices]   = useState({});
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal]     = useState(null);   // null | "add" | "edit"
+  const [form, setForm]       = useState(wlBlank());
+  const [openId, setOpenId]   = useState(null);   // fiche dépliée
+  const [mt, setMt]           = useState(null);   // TickerModal
+  const [filter, setFilter]   = useState("ALL");  // ALL | FAV | ALERT
+  // v28.66 — Partage / import d'idées
+  const [share, setShare]     = useState(null);   // {title, code}
+  const [copied, setCopied]   = useState(false);
+  const [imp, setImp]         = useState(false);
+  const [impText, setImpText] = useState("");
+  const [impList, setImpList] = useState(null);
+  const [impErr, setImpErr]   = useState("");
+
+  const items = Array.isArray(list) ? list : [];
+
+  // ── Prix live ────────────────────────────────────────────────────────────
+  const loadPrices = useCallback(function(){
+    if(!items.length){ setPrices({}); return; }
+    setLoading(true);
+    Promise.all(items.map(function(e){
+      return fetchYahoo(wlSym(e)).then(function(p){ return [e.ticker, p]; }).catch(function(){ return [e.ticker, null]; });
+    })).then(function(res){
+      var pm={}; res.forEach(function(r){ if(r[1]!=null) pm[r[0]]=r[1]; });
+      setPrices(pm); setLoading(false);
+    }).catch(function(){ setLoading(false); });
+  }, [items.length, items.map(function(e){return e.ticker;}).join(",")]);
+  useEffect(function(){ loadPrices(); }, [loadPrices]);
+
+  // ── Persistance ──────────────────────────────────────────────────────────
+  function persist(nl){ onSave && onSave(nl); }
+  function removeItem(id){
+    if(!window.confirm("Retirer cette idée du suivi ?")) return;
+    persist(items.filter(function(e){ return e.id!==id; }));
+  }
+  function toggleFav(id){
+    persist(items.map(function(e){ return e.id===id ? Object.assign({},e,{fav:!e.fav}) : e; }));
+  }
+  function openAdd(){ setForm(wlBlank()); setModal("add"); }
+  function openEdit(e){
+    setForm(Object.assign({}, wlBlank(), e, {
+      buyLow:e.buyLow!=null?String(e.buyLow):"", buyHigh:e.buyHigh!=null?String(e.buyHigh):"",
+      alertBuy:e.alertBuy!=null?String(e.alertBuy):"", alertSell:e.alertSell!=null?String(e.alertSell):"",
+      targets:(e.targets&&e.targets.length)?e.targets.map(function(t){ return {price:t.price!=null?String(t.price):"",note:t.note||""}; }):[{price:"",note:""}]
+    }));
+    setModal("edit");
+  }
+  function saveForm(){
+    var tk=(form.ticker||"").toUpperCase().trim();
+    if(!tk){ window.alert("Le ticker est obligatoire."); return; }
+    var entry = {
+      id: form.id || wlUid(),
+      ticker: tk, name:(form.name||"").trim(), cat:form.cat, domain:(form.domain||"").trim(),
+      fav: !!form.fav, conviction: Math.max(1,Math.min(5, parseInt(form.conviction,10)||3)),
+      horizon: form.horizon,
+      buyLow: wlNum(form.buyLow), buyHigh: wlNum(form.buyHigh),
+      alertBuy: wlNum(form.alertBuy), alertSell: wlNum(form.alertSell),
+      targets: (form.targets||[]).map(function(t){ return {price:wlNum(t.price), note:(t.note||"").trim()}; })
+                                 .filter(function(t){ return t.price!=null || t.note; }),
+      thesis:(form.thesis||"").trim(), risks:(form.risks||"").trim(),
+      createdAt: form.createdAt || new Date().toISOString().slice(0,10),
+      updatedAt: new Date().toISOString().slice(0,10),
+      author: form.author || "Florent"
+    };
+    var exists = items.some(function(e){ return e.id===entry.id; });
+    persist(exists ? items.map(function(e){ return e.id===entry.id?entry:e; }) : items.concat([entry]));
+    setModal(null);
+  }
+
+  // ── Partage ──────────────────────────────────────────────────────────────
+  function shareItems(arr, title){
+    var payload = { v:1, from:"Florent", ts:new Date().toISOString().slice(0,10),
+      items: arr.map(function(e){ var c=Object.assign({},e); delete c.id; return c; }) };
+    setCopied(false);
+    setShare({ title:title, code:"GDBX1:"+wlEncode(payload) });
+  }
+  function doCopy(){
+    if(!share) return;
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(share.code).then(function(){ setCopied(true); }).catch(function(){});
+      }
+    }catch(e){}
+  }
+  function doNativeShare(){
+    try{ if(navigator.share) navigator.share({ title:"Idée de trade — GDB & Sons", text:share.code }).catch(function(){}); }catch(e){}
+  }
+  // ── Import ───────────────────────────────────────────────────────────────
+  function analyseImport(){
+    setImpErr("");
+    try{
+      var d = wlDecode(impText);
+      if(!d || !Array.isArray(d.items) || !d.items.length) throw new Error("aucune idée dans ce code");
+      var seen = {}; items.forEach(function(e){ seen[String(e.ticker).toUpperCase()] = true; });
+      setImpList(d.items.map(function(it){
+        var tk = String(it.ticker||"").toUpperCase().trim();
+        return { item: Object.assign({}, it, { ticker:tk, author: it.author || d.from || "Import" }),
+                 dup: !!seen[tk], sel: true };
+      }).filter(function(r){ return !!r.item.ticker; }));
+    }catch(e){ setImpList(null); setImpErr("Code illisible — vérifie qu'il est complet (" + (e.message||e) + ")."); }
+  }
+  function doImport(){
+    if(!impList) return;
+    var next = items.slice(), today = new Date().toISOString().slice(0,10);
+    impList.forEach(function(r){
+      if(!r.sel) return;
+      var e = Object.assign({}, wlBlank(), r.item, { id:wlUid(), updatedAt:today });
+      e.buyLow=wlNum(e.buyLow); e.buyHigh=wlNum(e.buyHigh);
+      e.alertBuy=wlNum(e.alertBuy); e.alertSell=wlNum(e.alertSell);
+      e.conviction = Math.max(1, Math.min(5, parseInt(e.conviction,10)||3));
+      e.targets = (e.targets||[]).map(function(t){ return {price:wlNum(t.price), note:t.note||""}; })
+                                 .filter(function(t){ return t.price!=null || t.note; });
+      if(!e.createdAt) e.createdAt = today;
+      var ix = next.findIndex(function(x){ return String(x.ticker).toUpperCase()===e.ticker; });
+      if(ix>=0){ e.id = next[ix].id; next[ix] = e; } else next.push(e);
+    });
+    persist(next); setImp(false); setImpText(""); setImpList(null); setImpErr("");
+  }
+
+  // ── Tri + filtre ─────────────────────────────────────────────────────────
+  const alerted = function(e){
+    var px=prices[e.ticker]; if(px==null) return false;
+    return (e.alertSell!=null && px>=e.alertSell) || (e.alertBuy!=null && px<=e.alertBuy) ||
+           (e.buyLow!=null && e.buyHigh!=null && px>=e.buyLow && px<=e.buyHigh);
+  };
+  const nAlert = items.filter(alerted).length;
+  const shown = items.filter(function(e){
+    if(filter==="FAV")   return !!e.fav;
+    if(filter==="ALERT") return alerted(e);
+    return true;
+  }).slice().sort(function(a,b){
+    if(!!b.fav !== !!a.fav) return (b.fav?1:0)-(a.fav?1:0);
+    return String(a.ticker).localeCompare(String(b.ticker));
+  });
+
+  const cvp = function(v){ return v==null?null:(eur? v*usdEur : v); };
+  const fmtP = function(v){ var n=cvp(v); if(n==null) return "—";
+    return (eur?"€":"$")+(Math.abs(n)>=1000?Math.round(n).toLocaleString("fr-FR"):n.toFixed(2)); };
+
+  return (
+    <div style={{padding:"0 14px 90px"}}>
+      {/* En-tête */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"6px 0 12px"}}>
+        <div>
+          <div style={{fontSize:19,fontWeight:800,color:C.text,letterSpacing:0.5}}>Suivi</div>
+          <div style={{fontSize:10,color:C.text3,marginTop:2}}>{items.length} idée{items.length>1?"s":""} suivie{items.length>1?"s":""}{nAlert?" · "+nAlert+" en alerte":""}</div>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={loadPrices} title="Rafraîchir les prix" style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 11px",color:C.text2,fontSize:12,cursor:"pointer"}}>{loading?"…":"↻"}</button>
+          <button onClick={openAdd} style={{background:C.btc,border:"none",borderRadius:8,padding:"7px 13px",color:"#000",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Idée</button>
+        </div>
+      </div>
+
+      {/* Filtres */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["ALL","Toutes",items.length],["FAV","Favoris",items.filter(function(e){return e.fav;}).length],["ALERT","En alerte",nAlert]].map(function(f){
+          var on=filter===f[0];
+          return <button key={f[0]} onClick={()=>setFilter(f[0])} style={{flex:1,background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:8,padding:"6px 4px",color:on?C.btc:C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{f[1]} ({f[2]})</button>;
+        })}
+      </div>
+
+      {/* Partage entre apps */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <button onClick={()=>{ if(items.length) shareItems(items, items.length+" idée"+(items.length>1?"s":"")+" à partager"); }}
+          disabled={!items.length}
+          style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 4px",color:items.length?C.text2:C.text3,fontSize:11,fontWeight:700,cursor:items.length?"pointer":"default",opacity:items.length?1:0.5}}>⇧ Partager la liste</button>
+        <button onClick={()=>{ setImp(true); setImpText(""); setImpList(null); setImpErr(""); }}
+          style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 4px",color:C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>⇩ Importer</button>
+      </div>
+
+      {shown.length===0 && (
+        <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"36px 12px",background:C.bg1,borderRadius:12,border:"1px solid "+C.border}}>
+          {items.length===0 ? "Aucune idée suivie pour l'instant. Touchez « + Idée » pour en ajouter une." : "Aucune idée ne correspond à ce filtre."}
+        </div>
+      )}
+
+      {/* Cartes */}
+      {shown.map(function(e){
+        var px=prices[e.ticker], st=wlStatus(e,px), open=openId===e.id;
+        var upside = (px!=null && e.targets && e.targets.length && e.targets[0].price) ? (e.targets[0].price/px-1) : null;
+        return (
+          <div key={e.id} style={{background:C.bg1,border:"1px solid "+(open?C.btc+"66":C.border),borderRadius:12,marginBottom:8,overflow:"hidden"}}>
+            {/* Ligne principale */}
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",cursor:"pointer"}} onClick={()=>setOpenId(open?null:e.id)}>
+              <button onClick={function(ev){ ev.stopPropagation(); toggleFav(e.id); }} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:e.fav?C.gold:C.text3,padding:0,lineHeight:1}}>{e.fav?"★":"☆"}</button>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+                  <span style={{fontSize:14,fontWeight:800,color:C.text}}>{e.ticker}</span>
+                  <span style={{fontSize:10,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.name||e.cat}</span>
+                </div>
+                <div style={{fontSize:9,color:st.col,fontWeight:700,marginTop:2}}>● {st.txt}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.text}}>{fmtP(px)}</div>
+                {upside!=null && <div style={{fontSize:9,color:upside>=0?C.green:C.red,fontWeight:700}}>{(upside>=0?"+":"")+(upside*100).toFixed(1)+"% vs obj. 1"}</div>}
+              </div>
+              <span style={{fontSize:11,color:C.text3,transform:open?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s"}}>▸</span>
+            </div>
+
+            {/* Fiche dépliée */}
+            {open && (
+              <div style={{padding:"0 12px 12px",borderTop:"1px solid "+C.border}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,margin:"10px 0"}}>
+                  <div style={{background:C.bg2,borderRadius:8,padding:"7px 9px"}}>
+                    <div style={{fontSize:8,color:C.text3}}>Zone d'achat</div>
+                    <div style={{fontSize:12,fontWeight:800,color:C.green}}>{e.buyLow!=null||e.buyHigh!=null ? (fmtP(e.buyLow)+" → "+fmtP(e.buyHigh)) : "—"}</div>
+                  </div>
+                  <div style={{background:C.bg2,borderRadius:8,padding:"7px 9px"}}>
+                    <div style={{fontSize:8,color:C.text3}}>Alertes</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text2}}>A {fmtP(e.alertBuy)} · V {fmtP(e.alertSell)}</div>
+                  </div>
+                  <div style={{background:C.bg2,borderRadius:8,padding:"7px 9px"}}>
+                    <div style={{fontSize:8,color:C.text3}}>Conviction</div>
+                    <div style={{fontSize:12,fontWeight:800,color:C.gold}}>{"★".repeat(e.conviction||0)+"☆".repeat(5-(e.conviction||0))}</div>
+                  </div>
+                  <div style={{background:C.bg2,borderRadius:8,padding:"7px 9px"}}>
+                    <div style={{fontSize:8,color:C.text3}}>Horizon</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text2}}>{e.horizon||"—"}{e.domain?" · "+e.domain:""}</div>
+                  </div>
+                </div>
+
+                {e.targets && e.targets.length>0 && (
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:5}}>OBJECTIFS DE VENTE</div>
+                    {e.targets.map(function(t,ti){
+                      var up=(px!=null&&t.price)?(t.price/px-1):null;
+                      return (
+                        <div key={ti} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg2,borderRadius:7,padding:"6px 9px",marginBottom:4}}>
+                          <span style={{fontSize:11,color:C.text2}}>{"Objectif "+(ti+1)}{t.note?" · "+t.note:""}</span>
+                          <span style={{fontSize:11,fontWeight:800,color:C.text}}>{fmtP(t.price)}{up!=null?<span style={{fontSize:9,color:up>=0?C.green:C.red,marginLeft:6}}>{(up>=0?"+":"")+(up*100).toFixed(0)+"%"}</span>:null}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {e.thesis && (<div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>THÈSE</div>
+                  <div style={{fontSize:11,color:C.text2,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{e.thesis}</div>
+                </div>)}
+                {e.risks && (<div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:800,color:C.red,letterSpacing:1,marginBottom:4}}>RISQUES</div>
+                  <div style={{fontSize:11,color:C.text2,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{e.risks}</div>
+                </div>)}
+
+                <div style={{display:"flex",gap:6,marginTop:10}}>
+                  <button onClick={()=>setMt({ticker:e.ticker,cat:e.cat})} style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"8px",color:C.text,fontSize:11,fontWeight:700,cursor:"pointer"}}>📈 Graphe</button>
+                  <button onClick={()=>openEdit(e)} style={{flex:1,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"8px",color:C.text,fontSize:11,fontWeight:700,cursor:"pointer"}}>✎ Modifier</button>
+                  <button onClick={()=>shareItems([e], "Partager "+e.ticker)} title="Partager cette idée" style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:11,fontWeight:700,cursor:"pointer"}}>⇧</button>
+                  <button onClick={()=>removeItem(e.id)} style={{background:"transparent",border:"1px solid "+C.red,borderRadius:8,padding:"8px 12px",color:C.red,fontSize:11,fontWeight:700,cursor:"pointer"}}>🗑</button>
+                </div>
+                <div style={{fontSize:8,color:C.text3,marginTop:7}}>Ajoutée le {e.createdAt||"—"}{e.updatedAt&&e.updatedAt!==e.createdAt?(" · modifiée le "+e.updatedAt):""}{e.author?(" · "+e.author):""}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* ── Modal ajout / édition ── */}
+      {modal && (
+        <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setModal(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:14}}>{modal==="add"?"Nouvelle idée de trade":"Modifier l'idée"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <FI label="Ticker *" value={form.ticker} onChange={v=>setForm(Object.assign({},form,{ticker:v}))} placeholder="PLTR"/>
+              <FI label="Nom" value={form.name} onChange={v=>setForm(Object.assign({},form,{name:v}))} placeholder="Palantir"/>
+              <FS label="Catégorie" value={form.cat} onChange={v=>setForm(Object.assign({},form,{cat:v}))} options={WL_CATS}/>
+              <FI label="Secteur" value={form.domain} onChange={v=>setForm(Object.assign({},form,{domain:v}))} placeholder="Tech"/>
+              <FS label="Horizon" value={form.horizon} onChange={v=>setForm(Object.assign({},form,{horizon:v}))} options={WL_HORIZON}/>
+              <FS label="Conviction" value={String(form.conviction)} onChange={v=>setForm(Object.assign({},form,{conviction:v}))} options={["1","2","3","4","5"]}/>
+              <FI label="Zone d'achat — min" type="number" value={form.buyLow} onChange={v=>setForm(Object.assign({},form,{buyLow:v}))} placeholder="$"/>
+              <FI label="Zone d'achat — max" type="number" value={form.buyHigh} onChange={v=>setForm(Object.assign({},form,{buyHigh:v}))} placeholder="$"/>
+              <FI label="Alerte achat" type="number" value={form.alertBuy} onChange={v=>setForm(Object.assign({},form,{alertBuy:v}))} placeholder="$"/>
+              <FI label="Alerte vente" type="number" value={form.alertSell} onChange={v=>setForm(Object.assign({},form,{alertSell:v}))} placeholder="$"/>
+            </div>
+
+            <div style={{fontSize:11,color:C.text2,fontWeight:600,margin:"4px 0 6px"}}>Objectifs de vente</div>
+            {(form.targets||[]).map(function(t,ti){
+              return (
+                <div key={ti} style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
+                  <input type="number" value={t.price} placeholder="prix" onChange={function(ev){ var a=form.targets.slice(); a[ti]=Object.assign({},a[ti],{price:ev.target.value}); setForm(Object.assign({},form,{targets:a})); }}
+                    style={{width:100,background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"9px 10px",color:C.text,fontSize:15,outline:"none"}}/>
+                  <input value={t.note} placeholder="note (ex : 1/3 de la position)" onChange={function(ev){ var a=form.targets.slice(); a[ti]=Object.assign({},a[ti],{note:ev.target.value}); setForm(Object.assign({},form,{targets:a})); }}
+                    style={{flex:1,background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"9px 10px",color:C.text,fontSize:15,outline:"none"}}/>
+                  <button onClick={function(){ setForm(Object.assign({},form,{targets:form.targets.filter(function(_,j){return j!==ti;})})); }}
+                    style={{background:"none",border:"none",color:C.red,fontSize:14,cursor:"pointer",padding:"0 4px"}}>✕</button>
+                </div>
+              );
+            })}
+            {(form.targets||[]).length<8 && (
+              <button onClick={function(){ setForm(Object.assign({},form,{targets:(form.targets||[]).concat([{price:"",note:""}])})); }}
+                style={{background:"transparent",border:"1px dashed "+C.border,borderRadius:8,padding:"7px 12px",color:C.text2,fontSize:11,cursor:"pointer",marginBottom:14}}>+ Ajouter un objectif</button>
+            )}
+
+            <div style={{fontSize:11,color:C.text2,fontWeight:600,marginBottom:5}}>Thèse</div>
+            <textarea value={form.thesis} onChange={e=>setForm(Object.assign({},form,{thesis:e.target.value}))} rows={4} placeholder="Pourquoi cette idée : catalyseurs, valorisation, momentum…"
+              style={{width:"100%",background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:15,outline:"none",resize:"vertical",marginBottom:13,fontFamily:"inherit"}}/>
+            <div style={{fontSize:11,color:C.text2,fontWeight:600,marginBottom:5}}>Risques</div>
+            <textarea value={form.risks} onChange={e=>setForm(Object.assign({},form,{risks:e.target.value}))} rows={3} placeholder="Ce qui invalide la thèse…"
+              style={{width:"100%",background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:15,outline:"none",resize:"vertical",marginBottom:16,fontFamily:"inherit"}}/>
+
+            <div style={{display:"flex",gap:8}}>
+              <Btn label="Annuler" onClick={()=>setModal(null)} color={C.text3} outline full/>
+              <Btn label={modal==="add"?"Ajouter":"Enregistrer"} onClick={saveForm} full/>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal PARTAGE ── */}
+      {share && (
+        <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setShare(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>{share.title}</div>
+            <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:12}}>Envoie ce code par le canal que tu veux. À la réception : onglet Suivi → « ⇩ Importer ».</div>
+            <textarea readOnly value={share.code} rows={5} onFocus={e=>e.target.select()}
+              style={{width:"100%",background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"10px 12px",color:C.text2,fontSize:10,outline:"none",resize:"vertical",fontFamily:"monospace",wordBreak:"break-all",marginBottom:12}}/>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <Btn label={copied?"Copié ✓":"Copier"} onClick={doCopy} color={copied?C.green:null} full/>
+              {typeof navigator!=="undefined" && navigator.share && <Btn label="Envoyer…" onClick={doNativeShare} outline full/>}
+            </div>
+            <Btn label="Fermer" onClick={()=>setShare(null)} color={C.text3} outline full/>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal IMPORT ── */}
+      {imp && (
+        <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setImp(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>Importer des idées</div>
+            <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:12}}>Colle ici le code reçu (il commence par « GDBX1: »).</div>
+            <textarea value={impText} onChange={e=>{ setImpText(e.target.value); setImpList(null); setImpErr(""); }} rows={4} placeholder="GDBX1:…"
+              style={{width:"100%",background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:12,outline:"none",resize:"vertical",fontFamily:"monospace",marginBottom:10}}/>
+            {impErr && <div style={{fontSize:11,color:C.red,marginBottom:10}}>{impErr}</div>}
+            {!impList && <Btn label="Analyser le code" onClick={analyseImport} full/>}
+
+            {impList && (
+              <div style={{marginTop:4}}>
+                <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:6}}>{impList.length} IDÉE{impList.length>1?"S":""} TROUVÉE{impList.length>1?"S":""}</div>
+                {impList.map(function(r,ri){
+                  return (
+                    <div key={ri} onClick={function(){ setImpList(impList.map(function(x,xi){ return xi===ri?Object.assign({},x,{sel:!x.sel}):x; })); }}
+                      style={{display:"flex",alignItems:"center",gap:10,background:C.bg1,border:"1px solid "+(r.sel?C.btc+"66":C.border),borderRadius:9,padding:"9px 11px",marginBottom:6,cursor:"pointer"}}>
+                      <span style={{fontSize:13,color:r.sel?C.btc:C.text3}}>{r.sel?"☑":"☐"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.text}}>{r.item.ticker}<span style={{fontSize:10,fontWeight:500,color:C.text3,marginLeft:6}}>{r.item.name||r.item.cat||""}</span></div>
+                        <div style={{fontSize:9,color:r.dup?C.orange:C.text3,marginTop:2}}>{r.dup?"Déjà suivie — sera remplacée":"Nouvelle idée"}{r.item.author?(" · de "+r.item.author):""}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <Btn label="Annuler" onClick={()=>setImp(false)} color={C.text3} outline full/>
+                  <Btn label={"Importer ("+impList.filter(function(r){return r.sel;}).length+")"} onClick={doImport} full/>
+                </div>
+              </div>
+            )}
+            {!impList && <div style={{marginTop:8}}><Btn label="Fermer" onClick={()=>setImp(false)} color={C.text3} outline full/></div>}
+          </div>
+        </div>
+      )}
+
+      {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={usdEur} onClose={function(){ setMt(null); }}/>}
+    </div>
+  );
+}
+
+const TABS=["Home","Portfolio","Stats","GDB","Data","Legend","Market","Suivi"];
+const ICONS=["◎","◑","▲","◈","⬡","♛","❖","◉"];
 
 /* ── Global API keys (from Power Query in Excel) ── */
 
@@ -10138,6 +10582,9 @@ function App(){
   const[liveGoldHist,setLiveGoldHist]=useState(function(){ try{ var v=lsv9Get('gdb_gold_hist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
   // v28.54 — base des 4 quadrants (série annuelle, surcharge la constante QUAD_HIST)
   const[liveQuad,setLiveQuad]=useState(function(){ try{ var v=lsv9Get('gdb_quadrants'); return Array.isArray(v)&&v.length?v:[]; }catch(e){ return []; } });
+  // v28.65 — Suivi (watchlist / idees de trade)
+  const[liveWatchlist,setLiveWatchlist]=useState(function(){ try{ var v=lsv9Get('gdb_watchlist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  const saveWatchlist=function(nl){ setLiveWatchlist(nl); saveBase('gdb_watchlist', nl); };
   const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
   // BENCH_IDX enrichi de la colonne Or (7e) depuis l'historique dédié — robuste aux fusions
   const benchWithGold = React.useMemo(function(){
@@ -10454,6 +10901,7 @@ function App(){
       if(Array.isArray(kv.gdb_home_hist)) setLiveHomeHist(kv.gdb_home_hist);
       if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
       if(Array.isArray(kv.gdb_quadrants) && kv.gdb_quadrants.length) setLiveQuad(kv.gdb_quadrants);
+      if(Array.isArray(kv.gdb_watchlist)) setLiveWatchlist(kv.gdb_watchlist);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -10497,6 +10945,7 @@ function App(){
       const lvHH = lsv9Get('gdb_home_hist'); if(Array.isArray(lvHH)){ setLiveHomeHist(lvHH); }
       const lvGH = lsv9Get('gdb_gold_hist'); if(Array.isArray(lvGH)){ setLiveGoldHist(lvGH); }
       const lvQD = lsv9Get('gdb_quadrants'); if(Array.isArray(lvQD)&&lvQD.length){ setLiveQuad(lvQD); }
+      const lvWL = lsv9Get('gdb_watchlist'); if(Array.isArray(lvWL)){ setLiveWatchlist(lvWL); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -11583,6 +12032,7 @@ function App(){
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad}/>}
+        {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

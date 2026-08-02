@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.66";
+const APP_VERSION = "v28.68";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -6331,7 +6331,7 @@ function YahooTickerSearch({onSelect}){
             return(
               <div key={i} onClick={function(){
                 var base=q.symbol.includes(".")?q.symbol.split(".")[0]:q.symbol;
-                onSelect({ticker:base,yahooSym:q.symbol,name:q.shortname,currency:isEU?"EUR":"USD"});
+                onSelect({ticker:base,yahooSym:q.symbol,name:q.shortname,currency:isEU?"EUR":"USD",quoteType:q.quoteType||"",exchange:q.exchange||""});
                 setQuery(q.shortname+" ("+q.symbol+")");
                 setResults([]);
               }} style={{
@@ -7252,10 +7252,124 @@ function wlStatus(e, px){
   if(e.buyLow!=null  && px<e.buyLow)  return { txt:"Sous la zone", col:"#3B82F6" };
   return { txt:"En observation", col:"#6B7280" };
 }
+// Categorie du Suivi deduite du quoteType renvoye par Yahoo.
+function wlCatFromQuoteType(qt){
+  if(qt==="CRYPTOCURRENCY") return "Crypto";
+  if(qt==="ETF" || qt==="MUTUALFUND") return "ETF";
+  if(qt==="EQUITY") return "Action";
+  return "Autre";
+}
+/* ── Catalyseurs (scoring) — adapté du dashboard de John ─────────────────────
+   Une idée porte une liste de conditions. Deux familles :
+   · technique  → validable AUTOMATIQUEMENT depuis les bougies Yahoo
+   · fondamental→ coché à la main (news, résultats, contrats…)
+   Le score = nombre de conditions validées sur le total.                    */
+const COND_TF_UNITS    = [["D","Daily"],["W","Weekly"],["M","Monthly"]];
+const COND_TF_INTERVAL = { D:"1d", W:"1wk", M:"1mo" };
+const COND_TF_RANGE    = { D:"2y", W:"5y", M:"max" };
+const COND_MM_PERIODS  = [9,20,50,200];
+const COND_TECH_TEMPLATES = [
+  { id:"mm",         label:"Moyenne mobile",  param:"mm"    },
+  { id:"rsi",        label:"RSI",             param:"rsi"   },
+  { id:"ath",        label:"ATH / plus haut", param:"unit"  },
+  { id:"support",    label:"Support",         param:"level" },
+  { id:"resistance", label:"Résistance",      param:"level" },
+  { id:"macd",       label:"MACD",            param:"unit"  },
+  { id:"volume",     label:"Volume (spike)",  param:"unit"  },
+];
+const COND_FOND_PRESETS = [
+  "Résultats supérieurs aux attentes","Croissance du chiffre d'affaires","Prévisions relevées",
+  "Achats d'initiés","Nouveau contrat / partenariat","Programme de rachat d'actions",
+  "Objectif de cours relevé","Lancement produit majeur","Catalyseur sectoriel",
+];
+
+function condUid(){ return "c_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function condBlank(cat){
+  if(cat==="technique") return { id:condUid(), cat:"technique", templateId:"mm", params:{period:50,unit:"D",sens:"above"}, text:"", validated:false, auto:true };
+  return { id:condUid(), cat:"fondamental", templateId:null, params:null, text:"", validated:false, auto:false };
+}
+// Libellé lisible d'une condition.
+function condText(c){
+  if(!c) return "";
+  if(c.cat==="technique" && c.templateId){
+    var p=c.params||{}, u=p.unit||"D";
+    if(c.templateId==="mm")         return "MM"+(p.period||50)+" ("+u+") — prix "+(p.sens==="below"?"sous la MM":"au-dessus de la MM");
+    if(c.templateId==="rsi")        return "RSI ("+u+") "+(p.sens==="above"?"> ":"< ")+(p.seuil!=null?p.seuil:(p.sens==="above"?70:30));
+    if(c.templateId==="ath")        return "Proche du plus haut ("+u+")";
+    if(c.templateId==="support")    return "Support "+(p.level!=null&&p.level!==""?"$"+p.level:"?")+" ("+u+")";
+    if(c.templateId==="resistance") return "Cassure résistance "+(p.level!=null&&p.level!==""?"$"+p.level:"?")+" ("+u+")";
+    if(c.templateId==="macd")       return "MACD — croisement haussier ("+u+")";
+    if(c.templateId==="volume")     return "Pic de volume ("+u+")";
+  }
+  return c.text||"";
+}
+// Évalue une condition technique contre des bougies {t,o,h,l,c,v}.
+// Renvoie {ok, detail} ou null si données insuffisantes (on ne touche alors à rien).
+function condEval(c, candles){
+  if(!c || c.cat!=="technique" || !c.templateId) return null;
+  if(!candles || candles.length<5) return null;
+  var p=c.params||{}, u=p.unit||"D";
+  var closes=candles.map(function(k){return k.c;}).filter(function(v){return v!=null;});
+  var last=closes[closes.length-1];
+  if(last==null) return null;
+  var fmt=function(v){ return v==null?"—":(Math.round(v*100)/100).toLocaleString("fr-FR"); };
+  if(c.templateId==="mm"){
+    var period=p.period||50, sma=cgiSMA(closes,period);
+    if(sma==null) return null;
+    var above=last>sma;
+    return { ok:(p.sens==="below")?!above:above, detail:"Prix "+fmt(last)+(above?" > ":" < ")+"MM"+period+" "+fmt(sma)+" ("+u+")" };
+  }
+  if(c.templateId==="rsi"){
+    var rsi=cgiRSI(closes,p.period||14); if(rsi==null) return null;
+    var seuil=(p.seuil!=null&&p.seuil!=="")?parseFloat(p.seuil):(p.sens==="above"?70:30);
+    return { ok:(p.sens==="above")?rsi>seuil:rsi<seuil, detail:"RSI "+fmt(rsi)+(p.sens==="above"?" > ":" < ")+seuil+" ("+u+")" };
+  }
+  if(c.templateId==="ath"){
+    var highs=candles.map(function(k){return k.h!=null?k.h:k.c;}).filter(function(v){return v!=null;});
+    if(!highs.length) return null;
+    var maxH=Math.max.apply(null,highs);
+    return { ok:last>=maxH*0.99, detail:"À "+fmt((maxH-last)/maxH*100)+"% du plus haut "+fmt(maxH)+" ("+u+")" };
+  }
+  if(c.templateId==="support"){
+    if(p.level==null||p.level==="") return null;
+    var lv=parseFloat(p.level); if(!isFinite(lv)) return null;
+    return { ok:last<=lv, detail:"Prix "+fmt(last)+" vs support "+fmt(lv)+" ("+u+")" };
+  }
+  if(c.templateId==="resistance"){
+    if(p.level==null||p.level==="") return null;
+    var lr=parseFloat(p.level); if(!isFinite(lr)) return null;
+    return { ok:last>=lr, detail:"Prix "+fmt(last)+" vs résistance "+fmt(lr)+" ("+u+")" };
+  }
+  if(c.templateId==="macd"){
+    var m=cgiMACD(closes); if(m==null) return null;
+    return { ok:!!m.crossUp, detail:(m.crossUp?"Croisement haussier":"Pas de croisement")+" ("+u+")" };
+  }
+  if(c.templateId==="volume"){
+    var vols=candles.map(function(k){return k.v;}).filter(function(v){return v!=null;});
+    if(vols.length<21) return null;
+    var avg=cgiSMA(vols.slice(0,-1),20); if(!avg) return null;
+    var ratio=vols[vols.length-1]/avg;
+    return { ok:ratio>=1.5, detail:"Volume x"+fmt(ratio)+" vs moyenne 20 ("+u+")" };
+  }
+  return null;
+}
+function condScore(e){
+  var cs=(e&&e.conditions)||[];
+  return { n:cs.filter(function(c){return c.validated;}).length, total:cs.length };
+}
+// Repère visuel du score (0 → tout validé).
+function condScoreMark(n,total){
+  if(!total) return "";
+  if(n===0) return "❄️";
+  if(n===total) return "🚀";
+  if(n>=3) return "🔥🔥";
+  return "🔥";
+}
+
 function wlBlank(){
-  return { id:"", ticker:"", name:"", cat:"Action", domain:"", fav:false, conviction:3,
+  return { id:"", ticker:"", name:"", sym:"", cat:"Action", domain:"", fav:false, conviction:3,
            horizon:"Moyen terme", buyLow:"", buyHigh:"", alertBuy:"", alertSell:"",
-           targets:[{price:"",note:""}], thesis:"", risks:"" };
+           targets:[{price:"",note:""}], conditions:[condBlank("technique"),condBlank("fondamental")], thesis:"", risks:"" };
 }
 
 /* ── Partage d'idées entre apps (format ouvert « GDBX1 ») ────────────────────
@@ -7285,6 +7399,7 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
   const [openId, setOpenId]   = useState(null);   // fiche dépliée
   const [mt, setMt]           = useState(null);   // TickerModal
   const [filter, setFilter]   = useState("ALL");  // ALL | FAV | ALERT
+  const [autoEval, setAutoEval] = useState({});  // {idId: {condId: {ok,detail}}} — évaluation technique
   // v28.66 — Partage / import d'idées
   const [share, setShare]     = useState(null);   // {title, code}
   const [copied, setCopied]   = useState(false);
@@ -7322,7 +7437,8 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
     setForm(Object.assign({}, wlBlank(), e, {
       buyLow:e.buyLow!=null?String(e.buyLow):"", buyHigh:e.buyHigh!=null?String(e.buyHigh):"",
       alertBuy:e.alertBuy!=null?String(e.alertBuy):"", alertSell:e.alertSell!=null?String(e.alertSell):"",
-      targets:(e.targets&&e.targets.length)?e.targets.map(function(t){ return {price:t.price!=null?String(t.price):"",note:t.note||""}; }):[{price:"",note:""}]
+      targets:(e.targets&&e.targets.length)?e.targets.map(function(t){ return {price:t.price!=null?String(t.price):"",note:t.note||""}; }):[{price:"",note:""}],
+      conditions:(e.conditions&&e.conditions.length)?e.conditions.map(function(c){ return Object.assign({},c,{id:c.id||condUid()}); }):[condBlank("technique")]
     }));
     setModal("edit");
   }
@@ -7331,13 +7447,16 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
     if(!tk){ window.alert("Le ticker est obligatoire."); return; }
     var entry = {
       id: form.id || wlUid(),
-      ticker: tk, name:(form.name||"").trim(), cat:form.cat, domain:(form.domain||"").trim(),
+      ticker: tk, name:(form.name||"").trim(), sym:(form.sym||"").trim(), cat:form.cat, domain:(form.domain||"").trim(),
       fav: !!form.fav, conviction: Math.max(1,Math.min(5, parseInt(form.conviction,10)||3)),
       horizon: form.horizon,
       buyLow: wlNum(form.buyLow), buyHigh: wlNum(form.buyHigh),
       alertBuy: wlNum(form.alertBuy), alertSell: wlNum(form.alertSell),
       targets: (form.targets||[]).map(function(t){ return {price:wlNum(t.price), note:(t.note||"").trim()}; })
                                  .filter(function(t){ return t.price!=null || t.note; }),
+      conditions: (form.conditions||[]).map(function(c){
+                     return Object.assign({}, c, {id:c.id||condUid(), text:(c.cat==="technique")?condText(c):(c.text||"").trim(), validated:!!c.validated});
+                   }).filter(function(c){ return c.cat==="technique" ? !!c.templateId : !!c.text; }),
       thesis:(form.thesis||"").trim(), risks:(form.risks||"").trim(),
       createdAt: form.createdAt || new Date().toISOString().slice(0,10),
       updatedAt: new Date().toISOString().slice(0,10),
@@ -7347,6 +7466,57 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
     persist(exists ? items.map(function(e){ return e.id===entry.id?entry:e; }) : items.concat([entry]));
     setModal(null);
   }
+
+  // ── Catalyseurs : bascule manuelle + évaluation technique automatique ─────
+  function toggleCond(entryId, condId){
+    persist(items.map(function(e){
+      if(e.id!==entryId) return e;
+      var cs=(e.conditions||[]).map(function(c){ return c.id===condId?Object.assign({},c,{validated:!c.validated}):c; });
+      return Object.assign({},e,{conditions:cs});
+    }));
+  }
+  // Évalue les catalyseurs techniques depuis les bougies Yahoo, par unité de temps.
+  // Ne coche que ce qui est réellement mesurable : données insuffisantes → on ne touche à rien.
+  const runAutoEval = useCallback(function(){
+    var withTech = items.filter(function(e){ return (e.conditions||[]).some(function(c){ return c.cat==="technique" && c.templateId; }); });
+    if(!withTech.length) return;
+    Promise.all(withTech.map(function(e){
+      var units = {};
+      (e.conditions||[]).forEach(function(c){ if(c.cat==="technique" && c.templateId) units[(c.params&&c.params.unit)||"D"]=1; });
+      var keys = Object.keys(units);
+      return Promise.all(keys.map(function(u){
+        var url = "/yahoo-chart?symbol="+encodeURIComponent(wlSym(e))+"&interval="+COND_TF_INTERVAL[u]+"&range="+COND_TF_RANGE[u];
+        return cfGet(url,{timeout:12000}).then(function(r){ return r.json(); })
+          .then(function(d){ return [u, (d&&d.candles)||[]]; }).catch(function(){ return [u, []]; });
+      })).then(function(res){
+        var byUnit={}; res.forEach(function(r){ byUnit[r[0]]=r[1]; });
+        var out={};
+        (e.conditions||[]).forEach(function(c){
+          if(c.cat!=="technique" || !c.templateId) return;
+          var r=condEval(c, byUnit[(c.params&&c.params.unit)||"D"]);
+          if(r) out[c.id]=r;
+        });
+        return [e.id, out];
+      });
+    })).then(function(all){
+      var map={}; all.forEach(function(a){ map[a[0]]=a[1]; });
+      setAutoEval(map);
+      // Report des résultats mesurés sur les cases (les catalyseurs manuels ne bougent pas)
+      var anyChange=false;
+      var next=items.map(function(e){
+        var res=map[e.id]; if(!res) return e;
+        var local=false;
+        var cs=(e.conditions||[]).map(function(c){
+          var r=res[c.id];
+          if(!r || c.validated===r.ok) return c;
+          local=true; anyChange=true; return Object.assign({},c,{validated:r.ok});
+        });
+        return local?Object.assign({},e,{conditions:cs}):e;
+      });
+      if(anyChange) persist(next);
+    }).catch(function(){});
+  }, [items]);
+  useEffect(function(){ runAutoEval(); }, [items.length]);
 
   // ── Partage ──────────────────────────────────────────────────────────────
   function shareItems(arr, title){
@@ -7467,6 +7637,7 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"baseline",gap:7}}>
                   <span style={{fontSize:14,fontWeight:800,color:C.text}}>{e.ticker}</span>
+                  {condScore(e).total>0 && <span style={{fontSize:9,fontWeight:800,color:C.text3}}>{condScore(e).n+"/"+condScore(e).total+" "+condScoreMark(condScore(e).n,condScore(e).total)}</span>}
                   <span style={{fontSize:10,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.name||e.cat}</span>
                 </div>
                 <div style={{fontSize:9,color:st.col,fontWeight:700,marginTop:2}}>● {st.txt}</div>
@@ -7515,6 +7686,30 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
                   </div>
                 )}
 
+                {/* v28.68 — Catalyseurs : validation manuelle ou automatique */}
+                {e.conditions && e.conditions.length>0 && (
+                  <div style={{marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
+                      <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1}}>CATALYSEURS</div>
+                      <div style={{fontSize:10,fontWeight:800,color:C.text2}}>{condScore(e).n}/{condScore(e).total} {condScoreMark(condScore(e).n, condScore(e).total)}</div>
+                    </div>
+                    {e.conditions.map(function(c){
+                      var ev = autoEval[e.id] && autoEval[e.id][c.id];
+                      return (
+                        <div key={c.id} onClick={function(){ toggleCond(e.id, c.id); }}
+                          style={{display:"flex",alignItems:"flex-start",gap:8,background:C.bg2,borderRadius:7,padding:"7px 9px",marginBottom:4,cursor:"pointer"}}>
+                          <span style={{fontSize:12,color:c.validated?C.green:C.text3,lineHeight:1.3}}>{c.validated?"☑":"☐"}</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,color:c.validated?C.text:C.text2,lineHeight:1.35}}>{condText(c)||"(catalyseur sans libellé)"}</div>
+                            {ev && <div style={{fontSize:9,color:ev.ok?C.green:C.text3,marginTop:2}}>{ev.ok?"✓ ":"· "}{ev.detail}</div>}
+                          </div>
+                          <span style={{fontSize:8,color:C.text3,flexShrink:0,marginTop:2}}>{c.cat==="technique"?"auto":"manuel"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {e.thesis && (<div style={{marginBottom:8}}>
                   <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>THÈSE</div>
                   <div style={{fontSize:11,color:C.text2,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{e.thesis}</div>
@@ -7542,6 +7737,21 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
         <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setModal(null)}>
           <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:14}}>{modal==="add"?"Nouvelle idée de trade":"Modifier l'idée"}</div>
+            {/* v28.67 — Recherche Yahoo : pré-remplit le formulaire */}
+            <div style={{marginBottom:14}}>
+              <YahooTickerSearch onSelect={function(r){
+                setForm(function(p){
+                  return Object.assign({}, p, {
+                    ticker: r.ticker,
+                    name:   r.name || p.name,
+                    sym:    r.yahooSym || r.ticker,
+                    cat:    wlCatFromQuoteType(r.quoteType) || p.cat
+                  });
+                });
+              }}/>
+              <div style={{fontSize:9,color:C.text3,marginTop:4}}>Sélectionne un résultat pour remplir ticker, nom, catégorie et symbole Yahoo — tout reste modifiable ensuite.</div>
+            </div>
+
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <FI label="Ticker *" value={form.ticker} onChange={v=>setForm(Object.assign({},form,{ticker:v}))} placeholder="PLTR"/>
               <FI label="Nom" value={form.name} onChange={v=>setForm(Object.assign({},form,{name:v}))} placeholder="Palantir"/>
@@ -7571,6 +7781,105 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
             {(form.targets||[]).length<8 && (
               <button onClick={function(){ setForm(Object.assign({},form,{targets:(form.targets||[]).concat([{price:"",note:""}])})); }}
                 style={{background:"transparent",border:"1px dashed "+C.border,borderRadius:8,padding:"7px 12px",color:C.text2,fontSize:11,cursor:"pointer",marginBottom:14}}>+ Ajouter un objectif</button>
+            )}
+
+            {/* v28.68 — Catalyseurs (scoring) */}
+            <div style={{fontSize:11,color:C.text2,fontWeight:600,margin:"4px 0 6px"}}>Catalyseurs <span style={{color:C.text3,fontWeight:400}}>— le score suit combien sont validés</span></div>
+            {(form.conditions||[]).map(function(c,ci){
+              var upd=function(patch){
+                var a=(form.conditions||[]).slice();
+                var nc=Object.assign({},a[ci],patch);
+                if(patch.params) nc.params=Object.assign({},a[ci].params||{},patch.params);
+                a[ci]=nc; setForm(Object.assign({},form,{conditions:a}));
+              };
+              var tpl=COND_TECH_TEMPLATES.filter(function(t){return t.id===c.templateId;})[0];
+              var pk=tpl?tpl.param:null;
+              return (
+                <div key={c.id||ci} style={{background:C.bg2,border:"1px solid "+C.border2,borderRadius:9,padding:"9px 10px",marginBottom:7}}>
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:7}}>
+                    <select value={c.cat} onChange={function(ev){
+                        var nv=ev.target.value;
+                        upd(nv==="technique" ? {cat:"technique",templateId:"mm",params:{period:50,unit:"D",sens:"above"},auto:true,text:""}
+                                             : {cat:"fondamental",templateId:null,params:null,auto:false});
+                      }}
+                      style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none"}}>
+                      <option value="technique">Technique</option>
+                      <option value="fondamental">Fondamental</option>
+                    </select>
+                    <div style={{flex:1}}/>
+                    <button onClick={function(){ setForm(Object.assign({},form,{conditions:(form.conditions||[]).filter(function(_,j){return j!==ci;})})); }}
+                      style={{background:"none",border:"none",color:C.red,fontSize:14,cursor:"pointer",padding:"0 2px"}}>✕</button>
+                  </div>
+
+                  {c.cat==="technique" ? (
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <select value={c.templateId||"mm"} onChange={function(ev){
+                          var tid=ev.target.value;
+                          var defs={ mm:{period:50,unit:"D",sens:"above"}, rsi:{unit:"D",seuil:30,sens:"below"},
+                                     ath:{unit:"D"}, support:{unit:"D",level:""}, resistance:{unit:"D",level:""},
+                                     macd:{unit:"D"}, volume:{unit:"D"} };
+                          upd({templateId:tid, params:defs[tid]||{unit:"D"}});
+                        }}
+                        style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",flex:"1 1 130px"}}>
+                        {COND_TECH_TEMPLATES.map(function(t){ return <option key={t.id} value={t.id}>{t.label}</option>; })}
+                      </select>
+
+                      <select value={(c.params&&c.params.unit)||"D"} onChange={function(ev){ upd({params:{unit:ev.target.value}}); }}
+                        style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:104}}>
+                        {COND_TF_UNITS.map(function(u){ return <option key={u[0]} value={u[0]}>{u[1]}</option>; })}
+                      </select>
+
+                      {pk==="mm" && (<>
+                        <select value={(c.params&&c.params.period)||50} onChange={function(ev){ upd({params:{period:parseInt(ev.target.value,10)}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:84}}>
+                          {COND_MM_PERIODS.map(function(p){ return <option key={p} value={p}>{"MM"+p}</option>; })}
+                        </select>
+                        <select value={(c.params&&c.params.sens)||"above"} onChange={function(ev){ upd({params:{sens:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:110}}>
+                          <option value="above">Prix au-dessus</option>
+                          <option value="below">Prix en dessous</option>
+                        </select>
+                      </>)}
+
+                      {pk==="rsi" && (<>
+                        <select value={(c.params&&c.params.sens)||"below"} onChange={function(ev){ upd({params:{sens:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:96}}>
+                          <option value="below">RSI &lt;</option>
+                          <option value="above">RSI &gt;</option>
+                        </select>
+                        <input type="number" value={(c.params&&c.params.seuil)!=null?c.params.seuil:30} onChange={function(ev){ upd({params:{seuil:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",width:72}}/>
+                      </>)}
+
+                      {pk==="level" && (
+                        <input type="number" value={(c.params&&c.params.level)||""} placeholder="niveau $" onChange={function(ev){ upd({params:{level:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",flex:"1 1 100px"}}/>
+                      )}
+
+                      <div style={{flexBasis:"100%",fontSize:9,color:C.text3,marginTop:2}}>↳ {condText(c)} · validé automatiquement</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <input value={c.text||""} placeholder="Ex : nouveau contrat signé…" onChange={function(ev){ upd({text:ev.target.value}); }}
+                        style={{width:"100%",background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"8px 10px",outline:"none",marginBottom:6}}/>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {COND_FOND_PRESETS.map(function(pr){
+                          return <button key={pr} onClick={function(){ upd({text:pr}); }}
+                            style={{background:c.text===pr?C.btc+"22":C.bg3,border:"1px solid "+(c.text===pr?C.btc:C.border),borderRadius:6,color:c.text===pr?C.btc:C.text3,fontSize:9,padding:"3px 7px",cursor:"pointer"}}>{pr}</button>;
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {(form.conditions||[]).length<10 && (
+              <div style={{display:"flex",gap:6,marginBottom:14}}>
+                <button onClick={function(){ setForm(Object.assign({},form,{conditions:(form.conditions||[]).concat([condBlank("technique")])})); }}
+                  style={{flex:1,background:"transparent",border:"1px dashed "+C.border,borderRadius:8,padding:"7px 10px",color:C.text2,fontSize:11,cursor:"pointer"}}>+ Catalyseur technique</button>
+                <button onClick={function(){ setForm(Object.assign({},form,{conditions:(form.conditions||[]).concat([condBlank("fondamental")])})); }}
+                  style={{flex:1,background:"transparent",border:"1px dashed "+C.border,borderRadius:8,padding:"7px 10px",color:C.text2,fontSize:11,cursor:"pointer"}}>+ Catalyseur fondamental</button>
+              </div>
             )}
 
             <div style={{fontSize:11,color:C.text2,fontWeight:600,marginBottom:5}}>Thèse</div>

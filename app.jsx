@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.69";
+const APP_VERSION = "v28.71";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8426,12 +8426,14 @@ function PageLegend(
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
-  function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+t.exitDate; }
+  const [flt,setFlt]=useState("all");   // v28.70 — all | open | closed
+  function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+(t.exitDate||"OPEN"); }
   const _cct = React.useMemo(function(){ return computeClosedTrades(txns||[]); }, [txns]);
   const spotAll = React.useMemo(function(){ return _cct.closed; }, [_cct]);
   const spotOpen = React.useMemo(function(){ return _cct.open||[]; }, [_cct]);
   const exclSet = React.useMemo(function(){ return new Set(spotExcl||[]); }, [spotExcl]);
   const spot = React.useMemo(function(){ return spotAll.filter(function(t){ return !exclSet.has(spotKey(t)); }); }, [spotAll, exclSet]);
+  const spotOpenVis = React.useMemo(function(){ return spotOpen.filter(function(t){ return !exclSet.has(spotKey(t)); }); }, [spotOpen, exclSet]);
   const fut = React.useMemo(function(){
     return (liveFutures||SEED_FUTURES).map(function(t){
       return {ticker:t.ticker, dir:t.dir, entryDate:t.openDate, exitDate:t.closeDate, durationDays:t.durationDays,
@@ -8440,20 +8442,24 @@ function PageLegend(
   }, [liveFutures]);
   // v28.69 — les trades en cours s'affichent dans la liste mais restent hors des
   // statistiques, qui ne portent que sur du P&L reellement realise.
-  const list = board==="spot" ? spot.concat(spotOpen) : fut;
+  const listAll = board==="spot" ? spot.concat(spotOpenVis) : fut;
+  const list = board==="spot"
+    ? (flt==="open" ? spotOpenVis : (flt==="closed" ? spot : listAll))
+    : fut;
   const statList = board==="spot" ? spot : fut;
+  const nOpen = spotOpenVis.length, nClosed = spot.length;
   const sorted = list.slice().sort(function(a,b){
     if(sortK==="pnl") return b.pnlUSD-a.pnlUSD;
     if(sortK==="pct") return (b.pct==null?-1e12:b.pct)-(a.pct==null?-1e12:a.pct);
-    if(sortK==="date") return (b.exitDate||"").localeCompare(a.exitDate||"");
+    if(sortK==="date") return (b.exitDate||b.entryDate||"").localeCompare(a.exitDate||a.entryDate||"");
     return b.durationDays-a.durationDays;
   });
   const tot = statList.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
   const wins = statList.filter(function(t){return t.pnlUSD>0;}).length;
   const best = statList.length?Math.max.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
   const worst = statList.length?Math.min.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
-  const winRate = list.length?Math.round(wins/list.length*100):0;
-  const avgDur = list.length?Math.round(list.reduce(function(a,t){return a+(t.durationDays||0);},0)/list.length):0;
+  const winRate = statList.length?Math.round(wins/statList.length*100):0;
+  const avgDur = statList.length?Math.round(statList.reduce(function(a,t){return a+(t.durationDays||0);},0)/statList.length):0;
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
   const Tab=function(props){ return (
     <button onClick={props.onClick} style={{flex:1,padding:"8px 0",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,
@@ -8466,7 +8472,7 @@ function PageLegend(
   return (
     <div style={{padding:"8px 14px 96px"}}>
       <div style={{fontSize:22,fontWeight:900,color:C.text,marginBottom:2}}>Legend</div>
-      <div style={{fontSize:12,color:C.text3,marginBottom:14}}>Trades cloturés · {board==="spot"?"Spot (crypto + actions)":"Futures"}</div>
+      <div style={{fontSize:12,color:C.text3,marginBottom:14}}>{board==="spot"?"Trades spot (crypto + actions)":"Trades futures"}</div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <Tab label="Spot" active={board==="spot"} onClick={function(){setBoard("spot");}}/>
         <Tab label="Futures" active={board==="futures"} onClick={function(){setBoard("futures");}}/>
@@ -8479,7 +8485,7 @@ function PageLegend(
         </div>
         <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Win rate</div>
-          <div style={{fontSize:19,fontWeight:900,color:C.text}}>{winRate}% <span style={{fontSize:11,color:C.text3,fontWeight:600}}>({wins}/{list.length})</span></div>
+          <div style={{fontSize:19,fontWeight:900,color:C.text}}>{winRate}% <span style={{fontSize:11,color:C.text3,fontWeight:600}}>({wins}/{statList.length})</span></div>
         </div>
         <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Meilleur</div>
@@ -8494,6 +8500,17 @@ function PageLegend(
           <div style={{fontSize:16,fontWeight:800,color:C.text}}>{avgDur} jour{avgDur>1?"s":""}</div>
         </div>
       </div>
+      {/* v28.70 — Filtre ouvert / clôturé */}
+      {board==="spot" && (
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          {[["all","Tous",nClosed+nOpen],["open","Ouverts",nOpen],["closed","Clôturés",nClosed]].map(function(o){
+            var on=flt===o[0];
+            return <button key={o[0]} onClick={function(){ setFlt(o[0]); }}
+              style={{flex:1,background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:8,padding:"6px 4px",
+                color:on?C.btc:C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{o[1]} ({o[2]})</button>;
+          })}
+        </div>
+      )}
       {/* Tri */}
       <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
         <span style={{fontSize:11,color:C.text3}}>Trier :</span>
@@ -8534,14 +8551,14 @@ function PageLegend(
                       <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{(t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%"))+(t.isOpen?" réalisé":"")}</div>
                     </>)}
               </div>
-              {board==="spot" && onExclude && !t.isOpen && (
-                <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Supprimer ce trade spot ?\n"+t.ticker+"  "+t.entryDate+" \u2192 "+t.exitDate+"\n(persistant, restaurable ci-dessus)")) onExclude(spotKey(t)); }}
+              {board==="spot" && onExclude && (
+                <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Supprimer ce trade spot ?\n"+t.ticker+"  "+t.entryDate+" \u2192 "+(t.exitDate||"en cours")+"\n(persistant, restaurable ci-dessus)")) onExclude(spotKey(t)); }}
                   title="Supprimer ce trade" style={{background:"transparent",border:"none",cursor:"pointer",color:C.text3,fontSize:15,padding:"4px 2px 4px 4px",flexShrink:0,lineHeight:1}}>{"\uD83D\uDDD1"}</button>
               )}
             </div>
           );
         })}
-        {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade.</div>}
+        {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>{board==="spot"&&flt==="open"?"Aucun trade en cours.":(board==="spot"&&flt==="closed"?"Aucun trade cl\u00f4tur\u00e9.":"Aucun trade.")}</div>}
       </div>
       {sel && <TradeDetailModal trade={sel.trade} kind={sel.kind} liveIbkrAnnex={liveIbkrAnnex} onClose={function(){setSel(null);}}/>}
     </div>
@@ -10859,6 +10876,14 @@ function PageChangelog(){
     ["v28.3x — Composition des fonds", "Nouvel écran Paramètres : affecter chaque catégorie (ou un actif précis) à GDB.S, GDB.C ou Hors-fonds — pour intégrer un actif (or, don…) au patrimoine sans impacter une valeur liquidative. Défaut identique à l'historique. Répercuté partout : VL, Stats (Actions/Crypto/Total), allocation."],
     ["v28.4x — Or dans les graphes", "Cours de l'or (GC=F) intégré : backfill de l'historique depuis 2020 dans BENCH_IDX (courbe Or de l'onglet GDB) + série quotidienne. Graphe Home refondu : légende sous le graphe, cliquable, échelle adaptative ; courbes Patrimoine ex. Or, Patrimoine total et Or. Bases HOME_HIST / GOLD_HIST consultables."],
     ["v28.5x — Correctifs", "Modal titre : champ « Définir le symbole Yahoo » quand le mapping manque, + enregistrement automatique du mapping à l'achat. Nom de position Or : suppression du libellé « Gold ETF » codé en dur (affiche le vrai ticker). Curseur du baromètre fiabilisé."],
+    ["v28.6x \u2014 Analyse titre enrichie", "Modal titre repens\u00e9 \u00e0 partir du dashboard de John. Graphe remont\u00e9 au-dessus des donn\u00e9es fondamentales et agrandi ; 8 unit\u00e9s de bougie (5m, 15m, 30m, 1H, D, W, M, 3M) avec heures sur l'axe X en intrajournalier. Nouveaux encarts repliables : Technique (perf 1j/1sem/1mois/1an, MM9/20/50/200, RSI 14, MACD, ATH, volume), Ma position (quantit\u00e9, PRU, valeur, P&L latent, P&L r\u00e9alis\u00e9) et Historique de mes trades (achats/ventes, P&L par vente en FIFO, dur\u00e9e de d\u00e9tention). Les indicateurs cl\u00e9s existants deviennent l'encart Fondamental."],
+    ["v28.63 \u2014 Outils de dessin", "Retracement de Fibonacci (0 \u2192 100 %) et extension (jusqu'\u00e0 261,8 %) avec pourcentage et prix affich\u00e9s sur chaque niveau. Magn\u00e9tisme \u{1F9F2} : les points s'aimantent aux hauts, bas, ouvertures et cl\u00f4tures des bougies \u2014 valable aussi pour les droites et zones de trade. Trac\u00e9s s\u00e9lectionnables, d\u00e9pla\u00e7ables par poign\u00e9es, supprimables et m\u00e9moris\u00e9s par ticker."],
+    ["v28.65 \u2014 Onglet Suivi", "Liste d'id\u00e9es de trade : conviction, horizon, zone d'achat, alertes achat/vente, objectifs de vente multiples, th\u00e8se et risques. Prix live et statut face au plan (dans la zone, alerte atteinte, sous la zone\u2026), filtres Toutes/Favoris/En alerte, acc\u00e8s direct au graphe. Base gdb_watchlist (local + cloud, worker v149)."],
+    ["v28.66 \u2014 Partage d'id\u00e9es", "Format ouvert GDBX1 : une id\u00e9e ou la liste enti\u00e8re s'encode en un code texte \u00e0 envoyer par messagerie ; \u00e0 la r\u00e9ception, pr\u00e9visualisation avant import avec d\u00e9tection des doublons et s\u00e9lection ligne par ligne. Aucun serveur commun requis entre les deux apps."],
+    ["v28.67 \u2014 Recherche de ticker", "Le formulaire d'id\u00e9e s'ouvre sur la recherche Yahoo du module d'achat : nom, ticker, cat\u00e9gorie (d\u00e9duite du type Yahoo) et symbole exact pr\u00e9-remplis \u2014 fiabilise les valeurs europ\u00e9ennes et les cryptos."],
+    ["v28.68 \u2014 Catalyseurs (scoring)", "Chaque id\u00e9e porte des catalyseurs, techniques (moyenne mobile, RSI, ATH, support, r\u00e9sistance, MACD, pic de volume \u2014 valid\u00e9s automatiquement depuis les bougies, en unit\u00e9 D/W/M) ou fondamentaux (coch\u00e9s \u00e0 la main, avec raccourcis). Score affich\u00e9 sur la ligne et dans la fiche (\u2744\ufe0f \u2192 \u{1F680}), avec la mesure qui justifie chaque validation. Une condition non mesurable n'est jamais compt\u00e9e comme invalid\u00e9e."],
+    ["v28.69 \u2014 Correctifs de calcul", "P&L r\u00e9alis\u00e9 recalcul\u00e9 en FIFO strict : il ne porte plus que sur la quantit\u00e9 r\u00e9ellement appari\u00e9e \u00e0 des achats connus. Corrige les positions d\u00e9tenues avant le d\u00e9but du journal de transactions, dont le produit de vente exc\u00e9dentaire \u00e9tait compt\u00e9 comme gain (cas de l'Or : +1 491 \u20ac affich\u00e9 au lieu de \u2212643 \u20ac). Encart Ma position align\u00e9 sur le portefeuille (m\u00eames quantit\u00e9, PRU et P&L que l'onglet Portfolio, base USD). Ic\u00f4nes du donut de r\u00e9partition align\u00e9es sur celles du d\u00e9tail des positions (logos compris)."],
+    ["v28.70 \u2014 Legend : trades en cours", "Les positions non cl\u00f4tur\u00e9es apparaissent avec la pastille Ouvert (date d'entr\u00e9e, anciennet\u00e9, quantit\u00e9 restante, PA moyen), supprimables comme les autres et restaurables. Filtre Tous / Ouverts / Cl\u00f4tur\u00e9s. Les statistiques (P&L total, win rate, meilleur/pire, dur\u00e9e moyenne) ne portent que sur le r\u00e9alis\u00e9."],
   ];
   return (
     <div style={{paddingBottom:40}}>

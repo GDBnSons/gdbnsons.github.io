@@ -333,110 +333,270 @@ v23.00   Nouvelle série stable depuis v21.97 :
          ▸ scrollY===0 → scrollY<=2 (tolérance scroll résiduel)
          ▸ Seuil preventDefault : dy>10 → dy>5 (détection plus tôt)
 
-v27      ONGLET MARKET & ANALYSE
-─────────────────────────────────
-v27.x    Nouvel onglet Market : Macro (Fear & Greed, VIX, taux US,
-         indices mondiaux, forex), Secteurs (heatmap SPDR), Top/Flop,
-         Calendrier économique, Initiés (SEC Form 4), Hedge Funds (13F),
-         Congrès (STOCK Act), tableau de bord BTC (20 indicateurs → score
-         agrégé + recommandation, graphe 10 ans prix + score)
-         Ratios financiers dans l'analyse titre (P/E, EV/EBITDA, PEG, ROE…)
-         Édition de cellules dans les bases time-series (KV /write-bases)
-         Menu Paramètres (Thèmes, Bases, Changelog, À propos)
-         Restauration de sauvegardes + pare-feu d'écriture côté worker
-         Pré-chauffage horaire + sauvegarde quotidienne (cron)
 
-v28      SÉRIE STABLE (sanctuarisée)
-─────────────────────────────────
-v28.0x   Stockage fiabilisé : fusion par date des séries temporelles,
-         persistance des positions après un trade, graphes mémoïsés
-v28.20   Refresh des prix au lancement de l'app
-v28.21   Section Newsletter dans Market (aperçu, envoi manuel,
-         préférences on/off, historique des éditions)
-v28.22   Newsletter in-app : 5 dernières news de l'édition envoyée
-         + journal des envois (état e-mail/Telegram, erreurs)
-v28.23   Stats : périmètre Actions aligné entre mois courant et mois
-         révolus (Cash Matelas inclus, comme GDB.S)
-v28.24   Refresh de lancement différé : attend le chargement complet
-         (ready + choix de source) — corrige le refresh à vide
-v28.25   Trades spot supprimables durablement (Legend : corbeille par
-         ligne + barre Restaurer ; base gdb_spot_excl KV+local,
-         immunisée contre la ré-injection du SEED)
-v28.26   Stats : valeur de fin de mois Actions corrigée pour les mois
-         reconstruits (nombre de parts réel à la date via gdb_inv,
-         au lieu du nombre de parts figé)
-v28.27   Market → Macro s'ouvre sur le baromètre risk-on/off ;
-         carte cross-asset dans Secteurs
-v28.28   Baromètre : +MA9/18 daily (12 critères), tuiles synthétiques,
-         info-bulle détaillée au clic sur chaque critère
-v28.29   Curseur du baromètre recalculé depuis le score (robuste)
-v28.30   Baromètre repliable (verdict + compteur + barre par défaut)
-v28.31   Libellés des tuiles du baromètre en blanc
-v28.32   Cross-asset : +Robotique (ROBO) + Spatial (SPCX·JEDI.L) ;
-         tuile composée non cliquable
-v28.33   Changelog + À propos mis à jour
+DISCUSSION 6 — Onglet Market & analyse titre (v27.xx)
+──────────────────────────────────────────────────────────────────────────
+v27.00   Nouvel onglet MARKET
+         ▸ Pouls : Fear & Greed, VIX
+         ▸ Macro : taux, indices mondiaux, forex
+         ▸ Secteurs (heatmap), Top/Flop, calendrier économique (Nasdaq)
 
-v29      NEWSLETTER QUOTIDIENNE (worker v102 → v134)
-─────────────────────────────────
-Envoi    Chaque matin 6h00 NC (cron 19h00 UTC) : e-mail (Resend)
-         + résumé Telegram avec lien web tokenisé (30 jours)
-Contenu  Baromètre risk-on/off (12 critères, remplace l'Humeur du jour),
-         pouls (Fear & Greed crypto/tradi, VIX, signal BTC),
-         indices & macro overnight, secteurs top/flop, funding
-         (BTC/ETH APR + basis NQ), agenda éco USA (hier/aujourd'hui/
-         demain, impact fort), portefeuille (Crypto/Actions/Or/Cash,
-         Δ24h/Δ7j, meilleur/pire), 5 news sélectionnées, résumées
-         et notées (sens) par IA (Claude Haiku) avec lien source
-News     Yahoo Finance (primaire) + Finnhub + RSS CoinDesk/
-         Cointelegraph/Decrypt, dédup + cache 6h
-Fraîcheur Portefeuille re-pricé via Yahoo juste avant l'envoi
-         (mêmes symboles et conversion EUR→USD que l'app)
-Architecture Option B (limite 50 sous-requêtes/invocation du plan
-         gratuit) : 1 gros build par heure UTC (14 calendrier, 15
-         cross-asset, 16 BTC, 17 funding, 18 overview), snapshots
-         nl_snap_* (26h), fiche read-only à 19h
-Fiabilité 3 tentatives par canal (backoff), alerte Telegram en cas
-         d'échec, journal gdb_nl_log (50 entrées), idempotence
-         quotidienne, préférences on/off (gdb_nl_prefs)
-Routes   /newsletter/view · /day (public tokenisé) · /send-now ·
-         /history · /prefs · /log · /warm · /cron-status (diagnostic)
-         /market/cross · /market/risk · /market/warm
-Baromètre 12 critères à poids égal (signal +1/0/-1) : DXY 1j, SPY vs
-         open hebdo, MA9/18 hebdo, MA9/18 daily, régime 50MA, VIX
-         (<20 et en baisse), Fear & Greed moyen, ampleur sectorielle,
-         HYG 1 semaine, XLY vs XLP, CPER vs GLD, Or (inversé)
-Cross-asset Or, Argent, Mines (XME), Cuivre (CPER), Obligations
-         (TLT/HYG/LQD), Semi (SMH), Serv. pétroliers (OIH), Brent,
-         Robotique (ROBO), Spatial (SPCX+JEDI.L, moyenne),
-         market cap crypto totale + dominance BTC (CoinGecko)
+v27.05   Ratios financiers dans l'analyse titre
+         ▸ P/E, P/B, P/S, EV/EBITDA, PEG, FCF/EV, ROE, marges,
+           dette nette, liquidité, croissance
+         ▸ Jauges colorées + explications pour néophytes
+
+v27.10   Initiés & Hedge Funds
+         ▸ Transactions d'initiés (SEC EDGAR Form 4)
+         ▸ Sous-onglet Hedge Funds (11 fonds 13F)
+         ▸ Section « Détenu par » dans le modal ticker
+
+v27.12   Congrès
+         ▸ Trades STOCK Act via House Stock Watcher
+         ▸ Portefeuille estimé par élu, section « Tradé par le Congrès »
+         ▸ Sénat indisponible (eFD / Capitol Trades bloqués)
+
+v27.14   Édition des bases time-series (DD, GDBS, GC, GS_B100, BENCH_IDX)
+         → réécriture KV via /write-bases
+
+v27.17   Menu Paramètres (engrenage) : Thèmes, Bases de données,
+         Changelog, À propos. Onglet Data retiré de la barre du bas.
+
+v27.18   Pull-to-refresh désactivé (déclenchements involontaires)
+         Fusion Pouls + Macro en un seul écran Macro
+         Bases locales/cloud alignées
+         Variations GDB.S / GDB.C corrigées (même formule que Home)
+
+v27.2x   Tableau de bord BTC
+         ▸ 20 indicateurs (cycle/valorisation, tendance/momentum,
+           on-chain, sentiment) → score pondéré + recommandation
+         ▸ Graphe double-axe : prix BTC (log) + score sur 10 ans
+
+v27.3x   Sauvegarde & sécurité
+         ▸ Restauration des sauvegardes (cloud daté ou fichier)
+         ▸ Pare-feu d'écriture par origine côté worker
+         ▸ Pré-chauffage horaire + sauvegarde quotidienne dédupliquée (cron)
+
+v27.4x   Refactor & performance
+         ▸ Helper d'appels worker unifié (URL / clé centralisées)
+         ▸ Mémoïsation des 4 graphes
+         ▸ Persistance YF_MAP fiabilisée à l'ajout d'un ticker
+
+
+DISCUSSION 7 — Version sanctuarisée & newsletter (v28.0x – v28.5x)
+──────────────────────────────────────────────────────────────────────────
+v28.00   Base de référence stable : stockage fiabilisé (fusion par date
+         des séries, persistance des positions après un trade), graphes
+         optimisés, onglet Market complet.
+
+v29*     Newsletter quotidienne (module séparé, worker)
+         ▸ Fiche marché envoyée chaque matin à 6h (e-mail + Telegram)
+         ▸ Baromètre, pouls, indices overnight, secteurs, funding,
+           agenda éco USA, portefeuille, 5 news résumées par IA (Claude)
+         ▸ 3 tentatives par canal, alerte Telegram en cas d'échec
+         ▸ Section Newsletter dans Market (aperçu, envoi manuel, historique)
+
+v28.2x   Baromètre risk-on / risk-off
+         ▸ Verdict RISK-ON / NEUTRE / RISK-OFF + curseur
+         ▸ 12 critères à poids égal (DXY, SPY vs open hebdo, MA9/18,
+           régime 50MA, VIX, Fear & Greed, ampleur sectorielle,
+           High Yield, cycliques/défensives, cuivre/or, or refuge)
+
+v28.2x   Carte cross-asset (Market → Secteurs)
+         ▸ Or, Argent, Mines, Cuivre, Obligations, Semi-conducteurs,
+           Services pétroliers, Brent, Robotique, Spatial
+         ▸ Market cap crypto totale + dominance BTC
+
+v28.2x   Trades spot supprimables durablement (Legend : corbeille +
+         restauration, base dédiée immunisée contre la ré-injection)
+
+v28.3x   Récap hebdo & historique baromètre
+         ▸ Édition newsletter du dimanche (perf 7j par poche, trades)
+         ▸ Historique du baromètre enregistré et affiché en graphe
+         ▸ Correctif : envoi automatique de 6h (limite de sous-requêtes)
+           → invocation cron dédiée
+
+v28.3x   Cibles d'allocation multiples (plusieurs cibles nommées,
+         bascule d'un tap, 6 poches, total 100 % requis)
+
+v28.3x   Composition des fonds : affecter chaque catégorie (ou un actif)
+         à GDB.S, GDB.C ou Hors-fonds. Répercuté sur VL, Stats, allocation.
+
+v28.4x   Or dans les graphes
+         ▸ Cours de l'or (GC=F) : backfill depuis 2020 dans BENCH_IDX
+         ▸ Graphe Home refondu (légende cliquable, échelle adaptative)
+         ▸ Bases HOME_HIST / GOLD_HIST consultables
+
+v28.5x   Correctifs : champ « Définir le symbole Yahoo » quand le mapping
+         manque, enregistrement automatique du mapping à l'achat,
+         libellé « Gold ETF » codé en dur supprimé, curseur du baromètre
+         fiabilisé.
+
+
+DISCUSSION 8 — Portage du dashboard de John (v28.60 – v28.70)
+──────────────────────────────────────────────────────────────────────────
+Source   github.com/SatoshiNakajojo/dashboard (app d'un ami)
+Méthode  Adaptation, pas copie : le dashboard de John repose sur la
+         bibliothèque TradingView Lightweight Charts, l'app conserve son
+         propre moteur SVG. Seules les fonctionnalités manquantes ont été
+         greffées, par petits incréments testables.
+
+v28.60   Encart TECHNIQUE dans l'analyse titre
+         ▸ Perf 1j / 1sem / 1mois / 1an, MM9/20/50/200 (↑/↓ vs prix),
+           RSI 14, MACD 12/26/9, ATH sur la fenêtre, volume / moyenne 20
+         ▸ Les indicateurs clés existants deviennent l'encart FONDAMENTAL
+
+v28.61   Graphe & mise en page
+         ▸ Graphe remonté au-dessus du bloc Fondamental et agrandi
+           (hauteur 110 → 175 hors plein écran)
+         ▸ 8 unités de temps, encart Technique repliable
+
+v28.62   Ma position & Historique de mes trades (encarts repliables)
+         ▸ Position reconstruite en FIFO : quantité, PRU, valeur,
+           P&L latent, P&L réalisé cumulé
+         ▸ Historique : achats/ventes, P&L par vente, durée de détention
+         ▸ Source : GLOBAL_TXNS (déjà alimenté pour les marqueurs du graphe,
+           aucun nouveau prop nécessaire)
+
+v28.63   Outils de dessin
+         ▸ Fibonacci retracement (0 → 100 %) et extension (→ 261,8 %),
+           pourcentage et prix sur chaque niveau
+         ▸ Magnétisme : aimantation aux hauts/bas/ouvertures/clôtures
+           (seuil ~12 px), actif aussi pour droites et zones de trade
+         ▸ Tracés sélectionnables, déplaçables, supprimables, persistés
+         ⚠ Persistance localStorage (gdb_drawings_v1) : pas de synchro
+           multi-appareils, contrairement à la base cloud de John
+
+v28.64   Correctifs graphe
+         ▸ Échelle Y : le domaine englobe désormais les mèches des bougies
+           et les moyennes mobiles affichées (avant : clôtures seules,
+           d'où les dépassements du cadre)
+         ▸ Masque de découpe sur la zone de tracé (le SVG était en
+           overflow:visible, rien n'était rogné)
+         ▸ Unités de temps renommées selon l'unité de bougie :
+           5m · 15m · 30m · 1H · D · W · M · 3M
+         ▸ Axe X : heures affichées dès que l'unité est intrajournalière
+           (formatage basé sur l'intervalle, plus sur le libellé)
+
+v28.65   ONGLET SUIVI (watchlist)
+         ▸ Idées de trade : ticker, nom, catégorie, secteur, conviction
+           (1–5), horizon, zone d'achat, alertes achat/vente, objectifs
+           de vente multiples avec note, thèse, risques
+         ▸ Prix live + statut face au plan (dans la zone, alerte atteinte,
+           sous la zone…), écart vers le 1er objectif
+         ▸ Filtres Toutes / Favoris / En alerte, favoris en tête
+         ▸ Accès direct au graphe (réutilise le modal titre)
+         ▸ Base gdb_watchlist (local + cloud) — worker v149
+
+v28.66   PARTAGE D'IDÉES — format ouvert « GDBX1 »
+         ▸ GDBX1:<base64url(JSON UTF-8)> — une idée ou la liste entière
+         ▸ Transport libre (messagerie, mail, SMS) : aucun serveur commun
+           entre les deux apps
+         ▸ Import : prévisualisation, détection des doublons par ticker,
+           sélection ligne par ligne, l'identifiant local est conservé
+         ▸ Codec tolérant au texte et aux sauts de ligne ajoutés par une
+           messagerie ; TextEncoder obligatoire (btoa seul casse les accents)
+         ▸ Spécification transmise à John : FORMAT_PARTAGE_GDBX1.md
+
+v28.67   Recherche de ticker dans le formulaire d'idée
+         ▸ Réutilise YahooTickerSearch du module d'achat (pas de doublon)
+         ▸ Pré-remplit ticker, nom, catégorie (déduite du quoteType Yahoo)
+           et symbole Yahoo exact (champ sym) → fiabilise EU et cryptos
+         ▸ quoteType ajouté au retour de onSelect (additif, module d'achat
+           inchangé)
+
+v28.68   CATALYSEURS (scoring)
+         ▸ Techniques, validés automatiquement depuis les bougies :
+           moyenne mobile, RSI, ATH, support, résistance, MACD, volume
+           — réglables en unité D / W / M
+         ▸ Fondamentaux, cochés à la main, avec raccourcis
+         ▸ Score sur la ligne et dans la fiche : ❄️ / 🔥 / 🔥🔥 / 🚀
+         ▸ La mesure justifiant chaque validation est affichée
+         ▸ Données insuffisantes → aucune évaluation, la case n'est jamais
+           décochée à tort
+         ▸ Réutilise cgiSMA / cgiRSI / cgiMACD de la v28.60
+
+v28.69   CORRECTIFS DE CALCUL
+         ▸ P&L réalisé en FIFO strict : ne porte plus que sur la quantité
+           réellement appariée à des achats connus.
+           Cause du bug de l'Or : 115 unités vendues pour 100 achetées
+           (titres détenus avant le début du journal de transactions) ;
+           le produit des 15 unités excédentaires, sans prix de revient,
+           était compté comme gain → +1 491 € au lieu de −643 €.
+         ▸ Encart Ma position aligné sur le portefeuille (mêmes quantité,
+           PRU et P&L que l'onglet Portfolio). Même cause racine, plus un
+           écart de devise : les positions sont en base USD, le modal
+           raisonne en devise native.
+         ▸ Icônes du donut de répartition : même résolution que le détail
+           des positions (getBestIcon → emoji perso, logo FMP, emoji base).
+         ▸ Trades en cours retournés par computeClosedTrades (ils étaient
+           purement écartés).
+
+v28.70   Legend : trades en cours
+         ▸ Pastille « Ouvert » : date d'entrée, ancienneté, quantité
+           restante, PA moyen
+         ▸ Suppression et restauration comme pour les trades clôturés
+           (clé d'exclusion : exitDate → « OPEN », clés existantes intactes)
+         ▸ Filtre Tous / Ouverts / Clôturés
+         ▸ Statistiques (P&L total, win rate, meilleur/pire, durée moyenne)
+           restreintes au réalisé
 
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
-Stack      React 18 + JSX précompilé (esbuild) — GitHub Pages (noindex)
+Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)
 Storage    localStorage (offline) + Cloudflare KV (cloud)
-APIs       Yahoo Finance (cours, news, fondamentaux), FMP (logos stocks),
+APIs       Yahoo Finance (cours, news, recherche), FMP (logos stocks),
            CoinGecko (crypto : cours, métriques, logos, dominance),
-           Finnhub + RSS (news), SEC EDGAR, Nasdaq, House Stock Watcher
-Newsletter Resend (e-mail) + Telegram Bot + Claude Haiku (résumé news IA)
-Worker     Cloudflare Worker v134 (proxy API, KV store, newsletter,
-           cron horaire 0 * * * *, builds marché snapshotés)
+           SEC EDGAR (Form 4), House Stock Watcher (Congrès),
+           Resend + Telegram (newsletter), Claude (résumés de news)
+Worker     Cloudflare Worker v149 (proxy API, KV store, no CORS, cron)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
-BASES KV (16 clés)
-  gdb_snapshots   Snapshots journaliers objets {d, ao, ao_usd, eur, gdbs, gdbc}
-  gdb_txns        Transactions [{id, date, side, ticker, qty, price, cat}]
-  gdb_dd          DD séries temporelles [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
-  gdb_gdbs        GDBS [[date, gdbS, gdbC]]
-  gdb_gc          GC_FULL [[date, gdbC]]
-  gdb_gsb         GS_B100_EXT [[date, gsb]]
-  gdb_cm          CRYPTO_MONTHLY {année: {m[], bom[], eom[], pnl[], pct[], inv[]}}
-  gdb_sm          STOCKS_MONTHLY (même format)
-  gdb_tm          TOTAL_MONTHLY (même format)
-  gdb_bench       BENCH_IDX [[date, btc$, eth$, sp500, nasdaq, msci]]
-  gdb_portfolio   Portfolio {date, totalUSD, totalEUR, crypto:{items[]}, stocks:{items[]}}
-  gdb_crypto      Crypto {total, items:[{t, qty, pa, live, val, pnl, pct}]}
-  gdb_stocks      Stocks (même format)
-  gdb_bank        Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
-  gdb_yfmap       YF_MAP {ticker: yahooSymbol}
-  gdb_icons       ICON_DB {ticker: {user, fmp}}
+Validation avant chaque livraison :
+  esbuild → node --check → parse Babel → bump du cache-buster index.html
+
+BASES KV (27 clés)
+  gdb_snapshots      Snapshots journaliers {d, ao, ao_usd, eur, gdbs, gdbc}
+  gdb_txns           Transactions [{id, date, side, ticker, qty, price, cat}]
+  gdb_dd             DD [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
+  gdb_gdbs           GDBS [[date, gdbS, gdbC]]
+  gdb_gc             GC_FULL [[date, gdbC]]
+  gdb_gsb            GS_B100_EXT [[date, gsb]]
+  gdb_cm             CRYPTO_MONTHLY {année: {m[], bom[], eom[], pnl[], …}}
+  gdb_sm             STOCKS_MONTHLY (même format)
+  gdb_tm             TOTAL_MONTHLY (même format)
+  gdb_bench          BENCH_IDX [[date, btc$, eth$, sp500, nasdaq, msci, or]]
+  gdb_portfolio      Portfolio {date, totalUSD, totalEUR, crypto, stocks}
+  gdb_crypto         Crypto {total, items:[{t, qty, pa, live, val, pnl, pct}]}
+  gdb_stocks         Stocks (même format)
+  gdb_bank           Banque {totalEUR, breakdown:{BCI, Bourso, DeBlock}}
+  gdb_yfmap          YF_MAP {ticker: yahooSymbol}
+  gdb_icons          ICON_DB {ticker: {user, fmp}}
+  gdb_inv            Investisseurs / parts
+  gdb_futures        Trades futures clôturés
+  gdb_ibkr_annex     Annexe IBKR (dividendes, frais)
+  gdb_spot_excl      Trades spot masqués (clés d'exclusion)
+  gdb_alloc_targets  Cibles d'allocation nommées
+  gdb_hf_read        Fonds 13F déjà consultés (pastille NEW)
+  gdb_fund_comp      Composition des fonds (GDB.S / GDB.C / hors-fonds)
+  gdb_home_hist      Historique patrimoine (graphe Home)
+  gdb_gold_hist      Historique du cours de l'or
+  gdb_quadrants      Quadrants macro
+  gdb_watchlist      Suivi — idées de trade (v28.65)
+
+Non synchronisées en KV :
+  gdb_drawings_v1    Tracés du graphe (localStorage uniquement)
+  BENCH_IDX / CUSTOM_ICONS  ne sont pas repris automatiquement lors des
+                     snapshots : mise à jour manuelle du code de base
+
+FORMAT D'ÉCHANGE GDBX1 (v28.66)
+  Enveloppe   GDBX1:<base64url(JSON UTF-8)>
+  Charge      {v:1, from, ts, items:[…]}
+  Une idée    ticker (obligatoire), name, sym, cat, domain, fav,
+              conviction 1–5, horizon, buyLow/buyHigh, alertBuy/alertSell,
+              targets[{price, note}], conditions[…], thesis, risks,
+              createdAt, author
+  Règles      rapprochement par ticker, prévisualisation obligatoire,
+              champs inconnus ignorés, prix en USD non convertis
+  Détail complet : FORMAT_PARTAGE_GDBX1.md

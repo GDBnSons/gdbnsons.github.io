@@ -758,7 +758,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.68";
+const APP_VERSION = "v28.69";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1502,6 +1502,7 @@ const Btn=({label,onClick,color,full,outline})=>(
    TICKER MODAL — chart courbe + infos live via Cloudflare proxy
 ═══════════════════════════════════════════════════════════ */
 var GLOBAL_TXNS = []; // alimenté par App — pour les marqueurs achats/ventes du modal ticker
+var GLOBAL_POS  = {}; // v28.69 — positions reelles (qty/pa/live/val/pnl, base USD) alimentees par App
 
 // ── Dessins & moyennes mobiles du modal ticker (persistance local + cloud) ──
 var DRAWINGS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_drawings_v1")||"{}")||{}; }catch(e){ return {}; } })();
@@ -2772,16 +2773,35 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
           {/* v28.62 — Ma position (FIFO depuis mes trades) — accordéon */}
           {(function(){
             var tr = gdbTickerTrades(ticker);
-            if(!tr.length) return null;
+            var _refChk = GLOBAL_POS[String(ticker||"").toUpperCase().trim()];
+            if(!tr.length && !(_refChk && Math.abs(_refChk.qty)>1e-9)) return null;
             var fifo = gdbFifo(tr);
-            var openQty = fifo.openQty, pru = fifo.pru;
-            var hasPos = openQty>1e-9 && pru!=null;
-            var valNat = (hasPos && price!=null) ? openQty*price : null;
-            var pnlNat = (hasPos && price!=null && pru!=null) ? (price-pru)*openQty : null;
-            var pnlPct = (hasPos && pru!=null && pru>0 && price!=null) ? (price/pru-1) : null;
+            // v28.69 — La position du portefeuille fait foi (elle inclut les titres detenus
+            // avant le debut de l'historique des transactions, que le FIFO ne peut pas voir).
+            // Ses montants sont en base USD : on les convertit comme l'onglet Portfolio.
+            var ref = GLOBAL_POS[String(ticker||"").toUpperCase().trim()];
+            var fromRef = !!(ref && Math.abs(ref.qty)>1e-9);
+            var cvBase = function(v){ return v==null?null:(eur? v*usdEur : v); };
+            var openQty, pru, valDisp, pnlDisp, pnlPct;
+            if(fromRef){
+              openQty = ref.qty;
+              pru     = ref.pa;
+              var valUSD = (ref.val!=null) ? ref.val : ((ref.live!=null)? ref.qty*ref.live : null);
+              var pnlUSD = (ref.pnl!=null) ? ref.pnl : ((ref.live!=null)? (ref.live-ref.pa)*ref.qty : null);
+              valDisp = cvBase(valUSD);
+              pnlDisp = cvBase(pnlUSD);
+              pnlPct  = (ref.pa>0 && ref.live!=null) ? (ref.live/ref.pa-1) : null;
+            } else {
+              openQty = fifo.openQty; pru = fifo.pru;
+              valDisp = (openQty>1e-9 && price!=null) ? cvPrice(openQty*price) : null;
+              pnlDisp = (openQty>1e-9 && price!=null && pru!=null) ? cvPrice((price-pru)*openQty) : null;
+              pnlPct  = (openQty>1e-9 && pru>0 && price!=null) ? (price/pru-1) : null;
+            }
+            var hasPos = Math.abs(openQty)>1e-9 && pru!=null;
+            var pruDisp = fromRef ? cvBase(pru) : cvPrice(pru);
             var realized = 0, nSell = 0;
             fifo.enriched.forEach(function(e){ if(e._side==="SELL" && e._pnl!=null){ realized+=e._pnl; nSell++; } });
-            var pnlCol = (pnlNat==null)?C.text2:(pnlNat>=0?C.green:C.red);
+            var pnlCol = (pnlDisp==null)?C.text2:(pnlDisp>=0?C.green:C.red);
             var Cell=function(lbl,val,col){ return (
               <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"7px 9px"}}>
                 <div style={{fontSize:8,color:C.text3,marginBottom:2}}>{lbl}</div>
@@ -2799,9 +2819,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     {hasPos ? (
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
                         {Cell("Quantité", fmtQty(openQty))}
-                        {Cell("PRU", fmtPriceV(cvPrice(pru)))}
-                        {Cell("Valeur", fmtPriceV(cvPrice(valNat)))}
-                        {Cell("P&L latent", fmtAmt(cvPrice(pnlNat))+(pnlPct!=null?(" ("+fmtPct(pnlPct)+")"):""), pnlCol)}
+                        {Cell("PRU", fmtPriceV(pruDisp))}
+                        {Cell("Valeur", fmtPriceV(valDisp))}
+                        {Cell("P&L latent", fmtAmt(pnlDisp)+(pnlPct!=null?(" ("+fmtPct(pnlPct)+")"):""), pnlCol)}
                       </div>
                     ) : (
                       <div style={{fontSize:11,color:C.text2,background:C.bg1,border:"1px solid "+C.border,borderRadius:8,padding:"9px 11px"}}>Aucune position ouverte sur ce ticker (entièrement soldée).</div>
@@ -2809,7 +2829,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     {nSell>0 && (
                       <div style={{fontSize:10,color:C.text2,marginTop:6}}>P&L réalisé cumulé : <span style={{fontWeight:800,color:realized>=0?C.green:C.red}}>{fmtAmt(cvPrice(realized))}</span> · {nSell} vente{nSell>1?"s":""}</div>
                     )}
-                    <div style={{fontSize:8,color:C.text3,marginTop:5}}>Reconstruit en FIFO depuis mes transactions. PRU = coût moyen des lots restants.</div>
+                    <div style={{fontSize:8,color:C.text3,marginTop:5}}>{fromRef?"Position et PRU repris du portefeuille (identiques à l'onglet Portfolio).":"Reconstruit en FIFO depuis mes transactions. PRU = coût moyen des lots restants."}</div>
                   </div>
                 )}
               </div>
@@ -4790,14 +4810,17 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                       </div>
                       {selSec.items.slice(0,7).map((item,i)=>{
                         const name  = item.t||item.ticker||item.label||"—";
-                        const icon  = TICKER_ICONS[item.t||item.ticker]||item.icon||"•";
+                        // v28.69 — meme source d'icone que le detail des positions ci-dessous
+                        const best  = getBestIcon(item.t||item.ticker);
                         const valUSD= item.val||item.valUSD||0;
                         const pnl   = item.pnl||0;
                         const pct   = selSec.totalUSD>0?(valUSD/selSec.totalUSD)*100:0;
                         return(
                           <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                             <div style={{display:"flex",alignItems:"center",gap:5}}>
-                              <span style={{fontSize:12}}>{icon}</span>
+                              {best && best.type==="img"
+                                ? <img src={best.value} alt="" style={{width:14,height:14,borderRadius:3,objectFit:"contain",flexShrink:0}}/>
+                                : <span style={{fontSize:12}}>{(best&&best.value)||item.icon||"•"}</span>}
                               <span style={{fontSize:10,color:C.text,fontWeight:600}}>{name}</span>
                             </div>
                             <div style={{textAlign:"right"}}>
@@ -8176,7 +8199,7 @@ function computeClosedTrades(txns){
     if(t.assetCat==="CASH"||/^[A-Z]{3}\.[A-Z]{3}$/.test(t.ticker)) return; // exclure Forex (EUR.USD)
     (byT[t.ticker]=byT[t.ticker]||[]).push(t);
   });
-  var closed=[];
+  var closed=[], open=[];
   Object.keys(byT).forEach(function(tk){
     var rows=byT[tk].slice().sort(function(a,b){
       if(a.date!==b.date) return a.date<b.date?-1:1;
@@ -8188,29 +8211,49 @@ function computeClosedTrades(txns){
       // est en base EUR -> faussait PA/PV moyen des tickers USD). On suit le ccy du cycle.
       var q=+t.qty||0, pNat=+t.price||0, v=Math.abs(pNat*q), fee=(+t.fee||0)+(+t.commission||0);
       if(t.side==="BUY"){
-        if(pos<=EPS){ cyc={ticker:tk,src:t.src,ccy:(t.ccy||"USD"),entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[],ids:[]}; }
+        if(pos<=EPS){ cyc={ticker:tk,src:t.src,ccy:(t.ccy||"USD"),entryDate:t.date,buyQty:0,buyVal:0,sellQty:0,sellVal:0,lastSell:null,nBuy:0,nSell:0,fills:[],ids:[],realized:0,matchedQty:0}; }
         pos+=q; cost+=v; cyc.buyQty+=q; cyc.buyVal+=v; cyc.nBuy++; cyc.fills.push({date:t.date,side:"BUY",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee}); if(t.id)cyc.ids.push(t.id);
       } else {
         if(!cyc) return;
         cyc.sellQty+=q; cyc.sellVal+=v; cyc.lastSell=t.date; cyc.nSell++; cyc.fills.push({date:t.date,side:"SELL",qty:q,price:pNat,valueNat:v,ccy:(t.ccy||cyc.ccy),fee:fee}); if(t.id)cyc.ids.push(t.id);
-        if(pos>EPS){ var avg=cost/pos; cost-=avg*Math.min(q,pos); }
+        // v28.69 — P&L realise sur la quantite REELLEMENT appariee a des achats connus.
+        // Si l'on vend plus qu'on a achete dans le cycle (titres detenus avant le debut de
+        // l'historique), l'excedent n'a pas de prix de revient : on ne peut pas le compter.
+        var qm=Math.max(0, Math.min(q, pos));
+        if(qm>EPS && pos>EPS){ var avg=cost/pos; cyc.realized+=(pNat-avg)*qm; cyc.matchedQty+=qm; cost-=avg*qm; }
         pos-=q;
         if(pos<=EPS*Math.max(1,cyc.buyQty)){
-          var pnl=cyc.sellVal-cyc.buyVal, inv=cyc.buyVal;
+          var matched=(cyc.matchedQty>EPS)?cyc.matchedQty:cyc.buyQty;
+          var pnl=cyc.realized;
+          var inv=(cyc.buyQty>EPS)?(cyc.buyVal/cyc.buyQty)*matched:0;
           var dur=Math.round((new Date(cyc.lastSell)-new Date(cyc.entryDate))/864e5);
           var _rate=usdEurAt(cyc.lastSell)||0.92;       // USD->EUR
           var _toUSD=(cyc.ccy==="EUR")?(1/_rate):1;       // natif -> USD (liste)
           closed.push({ticker:tk,src:cyc.src,ccy:cyc.ccy,entryDate:cyc.entryDate,exitDate:cyc.lastSell,
             durationDays:dur, qty:cyc.buyQty,
             entryPrice:cyc.buyQty?cyc.buyVal/cyc.buyQty:0, exitPrice:cyc.sellQty?cyc.sellVal/cyc.sellQty:0,
+            qtySold:cyc.sellQty, qtyMatched:matched,
             investedNat:inv, pnlNat:pnl, investedUSD:inv*_toUSD, pnlUSD:pnl*_toUSD, txnIds:cyc.ids,
             pct:(inv?pnl/inv*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills});
           pos=0; cost=0; cyc=null;
         }
       }
     });
+    // v28.69 — Cycle encore ouvert en fin d'historique -> trade "en cours".
+    if(cyc && pos>EPS){
+      var _r2=usdEurAt(cyc.entryDate)||0.92;
+      var _toUSD2=(cyc.ccy==="EUR")?(1/_r2):1;
+      var avgOpen=(pos>EPS)?cost/pos:0;
+      var invOpen=avgOpen*pos;
+      open.push({ticker:tk,src:cyc.src,ccy:cyc.ccy,entryDate:cyc.entryDate,exitDate:null,isOpen:true,
+        durationDays:Math.round((Date.now()-new Date(cyc.entryDate))/864e5),
+        qty:pos, qtyBought:cyc.buyQty, qtySold:cyc.sellQty,
+        entryPrice:avgOpen, exitPrice:null,
+        investedNat:invOpen, pnlNat:cyc.realized, investedUSD:invOpen*_toUSD2, pnlUSD:cyc.realized*_toUSD2,
+        pct:(invOpen?cyc.realized/invOpen*100:null), nBuy:cyc.nBuy, nSell:cyc.nSell, fills:cyc.fills, txnIds:cyc.ids});
+    }
   });
-  return {closed:closed};
+  return {closed:closed, open:open};
 }
 
 var INDEX_ETF={SPY:1,QQQ:1,DIA:1,IWM:1,VOO:1,VTI:1,GDX:1,GDXJ:1,XLE:1,XLF:1,XLK:1,XLV:1,XLI:1,OIH:1,PALL:1,PPLT:1,GLD:1,GLDM:1,SLV:1,USO:1,TLT:1,HYG:1,SOXX:1,SMH:1,ARKK:1,EEM:1,KWEB:1,XBI:1,IBB:1,PFF:1,SPXL:1,TQQQ:1,SQQQ:1,VXX:1,UVXY:1};
@@ -8384,7 +8427,9 @@ function PageLegend(
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
   function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+t.exitDate; }
-  const spotAll = React.useMemo(function(){ return computeClosedTrades(txns||[]).closed; }, [txns]);
+  const _cct = React.useMemo(function(){ return computeClosedTrades(txns||[]); }, [txns]);
+  const spotAll = React.useMemo(function(){ return _cct.closed; }, [_cct]);
+  const spotOpen = React.useMemo(function(){ return _cct.open||[]; }, [_cct]);
   const exclSet = React.useMemo(function(){ return new Set(spotExcl||[]); }, [spotExcl]);
   const spot = React.useMemo(function(){ return spotAll.filter(function(t){ return !exclSet.has(spotKey(t)); }); }, [spotAll, exclSet]);
   const fut = React.useMemo(function(){
@@ -8393,17 +8438,20 @@ function PageLegend(
         pnlUSD:t.realizedPnlUSD, pct:t.pctOnMargin, lev:t.leverage, marginUSD:t.marginUSD, notionalUSD:t.entryNotionalUSD, raw:t};
     });
   }, [liveFutures]);
-  const list = board==="spot" ? spot : fut;
+  // v28.69 — les trades en cours s'affichent dans la liste mais restent hors des
+  // statistiques, qui ne portent que sur du P&L reellement realise.
+  const list = board==="spot" ? spot.concat(spotOpen) : fut;
+  const statList = board==="spot" ? spot : fut;
   const sorted = list.slice().sort(function(a,b){
     if(sortK==="pnl") return b.pnlUSD-a.pnlUSD;
     if(sortK==="pct") return (b.pct==null?-1e12:b.pct)-(a.pct==null?-1e12:a.pct);
     if(sortK==="date") return (b.exitDate||"").localeCompare(a.exitDate||"");
     return b.durationDays-a.durationDays;
   });
-  const tot = list.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
-  const wins = list.filter(function(t){return t.pnlUSD>0;}).length;
-  const best = list.length?Math.max.apply(null,list.map(function(t){return t.pnlUSD;})):0;
-  const worst = list.length?Math.min.apply(null,list.map(function(t){return t.pnlUSD;})):0;
+  const tot = statList.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
+  const wins = statList.filter(function(t){return t.pnlUSD>0;}).length;
+  const best = statList.length?Math.max.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
+  const worst = statList.length?Math.min.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
   const winRate = list.length?Math.round(wins/list.length*100):0;
   const avgDur = list.length?Math.round(list.reduce(function(a,t){return a+(t.durationDays||0);},0)/list.length):0;
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
@@ -8472,21 +8520,28 @@ function PageLegend(
                   <span>{t.ticker}</span>
                   <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:cls.color+"22",color:cls.color}}>{cls.label}</span>
                   {board==="futures" && <span style={{fontSize:10,fontWeight:700,color:t.dir==="LONG"?C.green:C.red}}>{t.dir} x{t.lev}</span>}
+                  {t.isOpen && <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:C.gold+"22",color:C.gold}}>Ouvert</span>}
                 </div>
-                <div style={{fontSize:10,color:C.text3,marginTop:2}}>{t.entryDate} → {t.exitDate} · {t.durationDays}j</div>
+                <div style={{fontSize:10,color:C.text3,marginTop:2}}>{t.isOpen
+                  ? (t.entryDate+" \u2192 en cours \u00b7 "+t.durationDays+"j \u00b7 "+Number(t.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})+" @ "+(t.entryPrice||0).toFixed((t.entryPrice||0)<10?4:2))
+                  : (t.entryDate+" \u2192 "+t.exitDate+" \u00b7 "+t.durationDays+"j")}</div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
-                <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%")}</div>
+                {t.isOpen && !(t.nSell>0)
+                  ? <div style={{fontSize:12,fontWeight:700,color:C.text3}}>Position en cours</div>
+                  : (<>
+                      <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
+                      <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{(t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%"))+(t.isOpen?" réalisé":"")}</div>
+                    </>)}
               </div>
-              {board==="spot" && onExclude && (
+              {board==="spot" && onExclude && !t.isOpen && (
                 <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Supprimer ce trade spot ?\n"+t.ticker+"  "+t.entryDate+" \u2192 "+t.exitDate+"\n(persistant, restaurable ci-dessus)")) onExclude(spotKey(t)); }}
                   title="Supprimer ce trade" style={{background:"transparent",border:"none",cursor:"pointer",color:C.text3,fontSize:15,padding:"4px 2px 4px 4px",flexShrink:0,lineHeight:1}}>{"\uD83D\uDDD1"}</button>
               )}
             </div>
           );
         })}
-        {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade clôturé.</div>}
+        {sorted.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:13,padding:30}}>Aucun trade.</div>}
       </div>
       {sel && <TradeDetailModal trade={sel.trade} kind={sel.kind} liveIbkrAnnex={liveIbkrAnnex} onClose={function(){setSel(null);}}/>}
     </div>
@@ -11117,6 +11172,20 @@ function App(){
   // Merge live prices into effective CURRENT data
   // EFF = live est la source unique de vérité
   const EFF = live || CURRENT;
+  // v28.69 — Positions reelles pour le modal ticker : PRU/P&L identiques a l'onglet Portfolio.
+  GLOBAL_POS = (function(){
+    var m={}, src=EFF||CURRENT; if(!src) return m;
+    var lists=[(src.portfolio&&src.portfolio.items)||[], (src.crypto&&src.crypto.items)||[], (src.stocks&&src.stocks.items)||[]];
+    lists.forEach(function(arr){
+      (arr||[]).forEach(function(it){
+        var k=String(it.t||it.ticker||"").toUpperCase().trim();
+        if(!k || m[k]) return;
+        if(it.qty==null || it.pa==null) return;
+        m[k]={qty:+it.qty||0, pa:+it.pa||0, live:(it.live!=null?+it.live:null), val:(it.val!=null?+it.val:null), pnl:(it.pnl!=null?+it.pnl:null), cat:it.cat||""};
+      });
+    });
+    return m;
+  })();
 
   const liveProps = {eur, setEur, hidden, setHidden, EFF, refreshing, handleRefresh, refreshedAt, refreshErr, fromSnapshot: live?._fromSnapshot||null, gistSync, liveDD, liveGDBS, liveGC, liveGSB, liveCM};
 

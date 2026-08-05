@@ -350,6 +350,10 @@ function pickRange(fromDate){
   if(days<=360) return "1y"; if(days<=720) return "2y"; if(days<=1800) return "5y"; return "max";
 }
 async function fetchYahooHist(symbol, fromDate, toDate){
+  // v28.73 — Trade encore ouvert : pas de date de sortie. Sans ce repli sur
+  // aujourd'hui, new Date(null) donne 1970 et la fenetre de filtrage plus bas
+  // devient vide -> le graphe restait introuvable pour toute position ouverte.
+  if(!toDate) toDate = new Date().toISOString().slice(0,10);
   var range=pickRange(fromDate);
   var out=[];
   try{
@@ -622,6 +626,25 @@ async function fetchAllPrices(){
   // v27.25 — Phase 1 : batch des cours en UN seul appel worker (/yahoo-quotes).
   // Fallback par-ticker (anciens proxies) uniquement pour les symboles manquants.
   const entries = Object.entries(YF_MAP).filter(([key])=> key!=="EURUSD");
+  // v28.75 — Positions detenues absentes de YF_MAP : on les interroge quand meme
+  // (symbole = ticker, comme le fait deja le modal). Sans cela leur prix n'etait
+  // jamais rafraichi et restait fige sur la derniere valeur enregistree.
+  const _known = new Set(entries.map(function(e){ return e[0]; }));
+  const _NOPRICE = ["EURO","USD","KUCOIN","CASH","EUR"];
+  const _added = [];
+  Object.keys(GLOBAL_POS||{}).forEach(function(t){
+    var k=String(t||"").toUpperCase().trim();
+    if(!k || _known.has(t) || _known.has(k)) return;
+    if(_NOPRICE.indexOf(k)>=0) return;
+    entries.push([t, t]); _known.add(t); _added.push(t);
+  });
+  if(_added.length){
+    // On memorise le mapping par defaut pour qu'il devienne visible et corrigeable
+    // dans l'editeur YF_MAP (meme convention que l'achat et l'import IBKR).
+    _added.forEach(function(t){ if(!YF_MAP[t]) YF_MAP[t]=t; });
+    try{ saveBase('gdb_yfmap', Object.assign({},YF_MAP)); }catch(_e){}
+    console.info("Tickers detenus ajoutes a YF_MAP : "+_added.join(", "));
+  }
   const symbols = Array.from(new Set(entries.map(([,sym])=> sym).concat(["GC=F"]))); // +Or (future) pour BENCH_IDX & historique Home
   const sym2keys = {};
   entries.forEach(([key,sym])=>{ (sym2keys[sym] = sym2keys[sym] || []).push(key); });
@@ -728,7 +751,7 @@ function applyPrices(prices, usdEur, effSrc){
     portfolioItems = src.portfolio.items.map(item=>{
       const newLive = cryptoItems.find(c=>c.t===item.t)?.live
                    || stocksItems.find(s=>s.t===item.t)?.live
-                   || (item.cat==="Cash Matelas" ? newEurUsd : item.live);
+                   || (item.cat==="Cash Matelas" ? newEurUsd : (prices[item.t] || item.live));
       const newVal = item.cat==="Cash Matelas"
         ? Math.round(item.qty * newEurUsd)
         : Math.round((item.qty||1) * newLive);
@@ -758,7 +781,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.71";
+const APP_VERSION = "v28.76";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -857,7 +880,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants","gdb_watchlist",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants","gdb_watchlist","gdb_btc_reco",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -8278,11 +8301,13 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const dir = isFut ? trade.dir : null;
   const entryDate = isFut ? trade.entryDate : trade.entryDate;
   const exitDate  = isFut ? trade.exitDate  : trade.exitDate;
+  const isOpenT   = !exitDate;                                   // v28.73 — position encore ouverte
+  const exitOrNow = exitDate || new Date().toISOString().slice(0,10);
   const ccyT = isFut ? "USD" : (trade.ccy||"USD");
   const isEurT = ccyT==="EUR";
   const curT = isEurT ? "€" : "$";
   const curOther = isEurT ? "$" : "€";
-  const eurRate = usdEurAt(exitDate);                       // USD->EUR
+  const eurRate = usdEurAt(exitOrNow);                     // USD->EUR (trade ouvert : taux du jour)
   const pnlNat = (trade.pnlNat!=null) ? trade.pnlNat : trade.pnlUSD;
   const invNat = (trade.investedNat!=null) ? trade.investedNat : trade.investedUSD;
   const up = pnlNat>=0;
@@ -8291,15 +8316,18 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const money = function(v,c){ var sgn=v<0?"-":""; var n=Math.abs(Math.round(v)).toLocaleString("fr-FR"); return c==="€" ? (sgn+n+" €") : (sgn+"$"+n); };
   const [hist,setHist]=useState(null); // null=loading, []=erreur/vide
   const [err,setErr]=useState(false);
-  const ySym = ySymFor(ticker, src);
+  // v28.73 — mapping Yahoo depuis ce modal ; par defaut on propose le ticker lui-meme
+  const [mapDraft,setMapDraft]=useState(ticker);
+  const [mapSaved,setMapSaved]=useState(null);
+  const ySym = mapSaved || ySymFor(ticker, src);
   useEffect(function(){
     let alive=true; setHist(null); setErr(false);
-    fetchYahooHist(ySym, entryDate, exitDate).then(function(pts){
+    fetchYahooHist(ySym, entryDate, exitOrNow).then(function(pts){
       if(!alive) return;
       if(!pts||!pts.length){ setErr(true); setHist([]); } else setHist(pts);
     }).catch(function(){ if(alive){ setErr(true); setHist([]); } });
     return function(){ alive=false; };
-  }, [ySym, entryDate, exitDate]);
+  }, [ySym, entryDate, exitOrNow]);
 
   // fills -> markers
   const fills = isFut
@@ -8414,7 +8442,33 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
           </div>
           {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}…</div>}
           {hist!==null && hist.length>0 && <LineChart series={chartSeries} dates={chartDates} h={180} unit={""} hideTF={true} defaultTF="ALL" markers={markers}/>}
-          {hist!==null && hist.length===0 && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:30}}>Cours indisponible pour {ySym}{err?" (a mapper)":""}.</div>}
+          {hist!==null && hist.length===0 && (
+            <div style={{padding:"16px 12px"}}>
+              <div style={{textAlign:"center",color:C.text3,fontSize:12,marginBottom:12}}>Cours indisponible pour <b style={{color:C.text2}}>{ySym}</b>.</div>
+              {/* v28.73 — Mapping Yahoo depuis l'écran de détail (proposition par défaut : le ticker) */}
+              <div style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"11px 12px"}}>
+                <div style={{fontSize:10,color:C.text2,marginBottom:7,lineHeight:1.5}}>
+                  Définis le symbole Yahoo de <b style={{color:C.text}}>{ticker}</b> pour charger le graphe.
+                  <span style={{color:C.text3}}> Ex. : <b>AIR.PA</b> (Euronext), <b>BTC-USD</b> (crypto), <b>GC=F</b> (or).</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <input value={mapDraft} onChange={function(e){ setMapDraft(e.target.value); }} placeholder={ticker}
+                    style={{flex:1,minWidth:0,background:C.bg3,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:13,fontWeight:700,outline:"none"}}/>
+                  <button onClick={function(){
+                      var v=(mapDraft||"").trim().toUpperCase(); if(!v) return;
+                      YF_MAP[ticker]=v;
+                      try{ saveBase('gdb_yfmap', Object.assign({},YF_MAP)); }catch(_e){}
+                      setMapSaved(v); setHist(null); setErr(false);
+                      fetchYahooHist(v, entryDate, exitOrNow).then(function(pts){
+                        if(!pts||!pts.length){ setErr(true); setHist([]); } else setHist(pts);
+                      }).catch(function(){ setErr(true); setHist([]); });
+                    }}
+                    style={{fontSize:11,fontWeight:700,padding:"8px 12px",borderRadius:7,border:"none",background:C.blue,color:"#fff",cursor:"pointer",whiteSpace:"nowrap"}}>Enregistrer</button>
+                </div>
+                {mapSaved && <div style={{fontSize:9,color:C.text3,marginTop:6}}>Enregistré : {ticker} → {mapSaved}. Ce mapping vaut pour toute l'app.</div>}
+              </div>
+            </div>
+          )}
         </div>
         <div style={{marginTop:14}}><Btn label="Fermer" onClick={onClose} color={C.gray} outline full/></div>
       </div>
@@ -8585,6 +8639,7 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
   const [phase,setPhase]=React.useState("loading");
   const [err,setErr]=React.useState("");
   const [data,setData]=React.useState(null);
+  const [symMap,setSymMap]=React.useState({});   // v28.73 — ticker -> symbole Yahoo saisi avant integration
   const [showList,setShowList]=React.useState(false);
   const [busy,setBusy]=React.useState(false);
   const [doneMsg,setDoneMsg]=React.useState("");
@@ -8637,7 +8692,14 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
     try{
       if(data.newTrades.length){ var nt=unionTxnsById(data.newTrades,txns||[]); setTxns(nt); save(SK.txns,nt); saveBase('gdb_txns',nt); }
       if(data.newAnnex.length){ var na=unionTxnsById(data.newAnnex,annex||[]); setAnnex(na); saveBase('gdb_ibkr_annex',na); }
-      if(data.newTickers.length){ data.newTickers.forEach(function(tk){ if(!YF_MAP[tk]) YF_MAP[tk]=tk; }); saveBase('gdb_yfmap',Object.assign({},YF_MAP)); }
+      if(data.newTickers.length){
+        // v28.73 — on enregistre le symbole saisi (a defaut le ticker lui-meme)
+        data.newTickers.forEach(function(tk){
+          var v=((symMap[tk]!==undefined?symMap[tk]:tk)||"").trim().toUpperCase();
+          YF_MAP[tk]= v || tk;
+        });
+        saveBase('gdb_yfmap',Object.assign({},YF_MAP));
+      }
       setDoneMsg(data.newTrades.length+" trade(s) · "+data.newAnnex.length+" annexe"+(data.newTickers.length?" · "+data.newTickers.length+" ticker(s)":""));
       setPhase("done");
     }catch(e){ setErr((e&&e.message)||"Échec de l'intégration"); setPhase("error"); }
@@ -8707,7 +8769,28 @@ function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onC
                     {Object.keys(data.byTicker).map(function(tk){ var q=data.byTicker[tk]; return <span key={tk} style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:6,background:C.bg,color:q>=0?C.green:C.red}}>{tk+" "+(q>=0?"+":"")+nf(q)}</span>; })}
                   </div>
                 </div>}
-                {data.newTickers.length>0 && <div style={{marginBottom:10,fontSize:11,color:C.btc,fontWeight:700}}>{"⊕ Nouveaux tickers → YF_MAP : "+data.newTickers.join(", ")}</div>}
+                {/* v28.73 — Mapping Yahoo des nouveaux tickers, éditable AVANT l'intégration.
+                    Par défaut le symbole proposé est le ticker lui-même : correct pour les
+                    valeurs US, à corriger pour l'Europe (ex. AIR → AIR.PA) et les cryptos. */}
+                {data.newTickers.length>0 && (
+                  <div style={{marginBottom:10,background:C.bg,border:"1px solid "+C.btc+"55",borderRadius:9,padding:"10px 11px"}}>
+                    <div style={{fontSize:11,color:C.btc,fontWeight:700,marginBottom:3}}>{"⊕ "+data.newTickers.length+" nouveau"+(data.newTickers.length>1?"x":"")+" ticker"+(data.newTickers.length>1?"s":"")+" → symbole Yahoo"}</div>
+                    <div style={{fontSize:9,color:C.gray,marginBottom:8,lineHeight:1.5}}>Le symbole sert à charger les cours. Corrige-le si la valeur n'est pas américaine (ex. <b>AIR.PA</b>, <b>SHEL.L</b>, <b>BTC-USD</b>).</div>
+                    {data.newTickers.map(function(tk){
+                      var v = (symMap[tk]!==undefined) ? symMap[tk] : tk;
+                      var dirty = v.trim().toUpperCase() !== tk.toUpperCase();
+                      return (
+                        <div key={tk} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.text,width:74,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tk}</span>
+                          <span style={{fontSize:11,color:C.gray,flexShrink:0}}>→</span>
+                          <input value={v} placeholder={tk}
+                            onChange={function(e){ var nv=e.target.value; setSymMap(function(p){ var n=Object.assign({},p); n[tk]=nv; return n; }); }}
+                            style={{flex:1,minWidth:0,background:C.bg2,border:"1px solid "+(dirty?C.btc:C.border),borderRadius:6,padding:"6px 9px",color:C.text,fontSize:12,fontWeight:700,outline:"none"}}/>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div onClick={function(){setShowList(!showList);}} style={{cursor:"pointer",fontSize:11,color:C.gray,marginBottom:6}}>{(showList?"▼":"▶")+" Détail des trades"}</div>
                 {showList && <div style={{maxHeight:160,overflowY:"auto",marginBottom:10}}>
                   {data.newTrades.map(function(t,i){ return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11,padding:"3px 0",borderBottom:"1px solid "+C.border}}>
@@ -9434,6 +9517,128 @@ function recomputeGcFromDB(gcArr, ddArr, invArr){
   });
 }
 
+// v28.72 — Fenêtres temporelles de l'onglet Flux (rotation des capitaux)
+const FLOW_HZ = [["w1","1 sem"],["m1","1 mois"],["m3","3 mois"],["m6","6 mois"],["y1","1 an"],["y2","2 ans"]];
+/* ── Consignes BTC parametrables (v28.76) ────────────────────────────────────
+   Le worker fournit le score de surchauffe brut (aggHeat 0-100). La consigne
+   qui en decoule est definie ICI, dans une base editable par l'utilisateur.
+   Chaque regle vaut "jusqu'a max exclu" ; la derniere regle couvre le reste.  */
+const BTC_RECO_DEFAULT = [
+  { max:25,  label:"Acheter",   color:"#10B981" },
+  { max:40,  label:"Accumuler", color:"#34D399" },
+  { max:60,  label:"Conserver", color:"#FBBF24" },
+  { max:80,  label:"Alléger",   color:"#F59E0B" },
+  { max:100, label:"Vendre",    color:"#EF4444" },
+];
+const BTC_RECO_COLORS = ["#10B981","#34D399","#FBBF24","#F59E0B","#EF4444","#3B82F6","#A855F7","#EC4899"];
+// Normalise : bornes valides, tri croissant, derniere regle etendue a 100.
+function btcRecoNorm(rules){
+  var r = (Array.isArray(rules)?rules:[]).filter(function(x){ return x && x.label; })
+    .map(function(x){ var m=parseFloat(x.max); return { max:isFinite(m)?Math.max(1,Math.min(100,m)):100, label:String(x.label).trim(), color:x.color||"#6B7280" }; })
+    .sort(function(a,b){ return a.max-b.max; });
+  if(!r.length) r = BTC_RECO_DEFAULT.map(function(x){ return Object.assign({},x); });
+  r[r.length-1].max = 100;
+  return r;
+}
+// Consigne applicable a un score.
+function btcRecoFor(heat, rules){
+  if(heat==null) return { label:"—", color:"#6B7280" };
+  var r=btcRecoNorm(rules);
+  for(var i=0;i<r.length;i++){ if(heat < r[i].max) return r[i]; }
+  return r[r.length-1];
+}
+// Seuils internes (bornes qui font changer de consigne) — pour les barres du graphe.
+function btcRecoThresholds(rules){
+  var r=btcRecoNorm(rules), out=[];
+  for(var i=0;i<r.length-1;i++) out.push({ v:r[i].max, from:r[i].label, to:r[i+1].label, color:r[i+1].color });
+  return out;
+}
+
+/* Éditeur des consignes BTC — seuils de score → recommandation */
+function BtcRecoModal({ rules, onSave, onClose }){
+  const [rows,setRows] = useState(function(){
+    return btcRecoNorm(rules).map(function(r){ return { max:String(r.max), label:r.label, color:r.color }; });
+  });
+  function upd(i,patch){ setRows(function(p){ var n=p.slice(); n[i]=Object.assign({},n[i],patch); return n; }); }
+  function del(i){ if(rows.length<=2) return; setRows(function(p){ return p.filter(function(_,j){ return j!==i; }); }); }
+  function add(){
+    if(rows.length>=8) return;
+    setRows(function(p){
+      var prev = p.length>1 ? parseFloat(p[p.length-2].max)||0 : 0;
+      var mid  = Math.min(99, Math.round((prev+100)/2));
+      var n=p.slice();
+      n.splice(n.length-1, 0, { max:String(mid), label:"Nouvelle consigne", color:BTC_RECO_COLORS[n.length%BTC_RECO_COLORS.length] });
+      return n;
+    });
+  }
+  // Aperçu trié : c'est ce qui sera réellement appliqué
+  var preview = btcRecoNorm(rows.map(function(r){ return { max:parseFloat(r.max), label:r.label, color:r.color }; }));
+  var lo = 0;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:3}}>Consignes d'achat</div>
+        <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:14}}>
+          Chaque consigne s'applique tant que le score de surchauffe reste <b>sous</b> sa borne. Ex. : « Acheter » avec une borne à 25 vaut pour tout score de 0 à 24,9.
+        </div>
+
+        {rows.map(function(r,i){
+          var last = i===rows.length-1;
+          return (
+            <div key={i} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:10,padding:"10px 11px",marginBottom:7}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+                <input value={r.label} onChange={function(e){ upd(i,{label:e.target.value}); }} placeholder="Nom de la consigne"
+                  style={{flex:1,minWidth:0,background:C.bg3,border:"1px solid "+C.border,borderRadius:7,padding:"7px 9px",color:C.text,fontSize:13,fontWeight:700,outline:"none"}}/>
+                <button onClick={function(){ del(i); }} disabled={rows.length<=2}
+                  style={{background:"none",border:"none",color:rows.length<=2?C.text3:C.red,fontSize:14,cursor:rows.length<=2?"default":"pointer",padding:"0 2px",opacity:rows.length<=2?0.4:1}}>✕</button>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,color:C.text3,flexShrink:0}}>{last?"jusqu'à 100 (reste)":"score <"}</span>
+                {!last && (
+                  <input type="number" min="1" max="99" value={r.max} onChange={function(e){ upd(i,{max:e.target.value}); }}
+                    style={{width:70,background:C.bg3,border:"1px solid "+C.border,borderRadius:7,padding:"6px 8px",color:C.text,fontSize:14,fontWeight:700,outline:"none"}}/>
+                )}
+                <div style={{flex:1}}/>
+                <div style={{display:"flex",gap:4}}>
+                  {BTC_RECO_COLORS.map(function(c){
+                    return <button key={c} onClick={function(){ upd(i,{color:c}); }}
+                      style={{width:16,height:16,borderRadius:4,background:c,border:r.color===c?"2px solid "+C.text:"1px solid "+C.border,cursor:"pointer",padding:0}}/>;
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {rows.length<8 && (
+          <button onClick={add} style={{width:"100%",background:"transparent",border:"1px dashed "+C.border,borderRadius:8,padding:"8px",color:C.text2,fontSize:11,cursor:"pointer",marginBottom:14}}>+ Ajouter une consigne</button>
+        )}
+
+        <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:6}}>APERÇU</div>
+        <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:16}}>
+          {preview.map(function(r,i){
+            var from=lo; lo=r.max;
+            return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg1,borderRadius:7,padding:"6px 10px"}}>
+                <span style={{fontSize:11,fontWeight:700,color:r.color}}>{r.label}</span>
+                <span style={{fontSize:10,color:C.text3}}>{from} → {r.max===100?"100":(r.max+" (exclu)")}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{display:"flex",gap:8}}>
+          <Btn label="Annuler" onClick={onClose} color={C.text3} outline full/>
+          <Btn label="Enregistrer" onClick={function(){ onSave(preview); }} full/>
+        </div>
+        <div style={{marginTop:8}}>
+          <Btn label="Rétablir les valeurs par défaut" onClick={function(){ setRows(BTC_RECO_DEFAULT.map(function(x){ return {max:String(x.max),label:x.label,color:x.color}; })); }} color={C.text3} outline full/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── v27.02 — Onglet Market : Pouls / Macro / Secteurs (worker /market/overview) ──
 function PageNewsletter(){
   const [prefs,setPrefs]=useState(null);
@@ -9919,7 +10124,7 @@ function PageEtf({flows, px}){
   );
 }
 
-function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
+function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveBtcReco }){
   const [mkt,setMkt]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(null);
@@ -9932,6 +10137,12 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const [histR,setHistR]=useState(null),[histL,setHistL]=useState(false),[histE,setHistE]=useState(null);
   const [histOpen,setHistOpen]=useState(false);
   const [cross,setCross]=useState(null),[crossL,setCrossL]=useState(false),[crossE,setCrossE]=useState(null);
+  // v28.72 — Flux : rotation des capitaux
+  const [flux,setFlux]=useState(null),[fluxL,setFluxL]=useState(false),[fluxE,setFluxE]=useState(null);
+  const [fhz,setFhz]=useState("m1"), [fsel,setFsel]=useState(null);
+  // v28.76 — consignes BTC : edition + series masquables du graphe
+  const [recoOpen,setRecoOpen]=useState(false);
+  const [btcHidden,setBtcHidden]=useState({});
 
   function load(noCache){
     setLoading(true); setErr(null);
@@ -10072,6 +10283,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
     if(sub==="macro"    && risk===null && !riskL) loadSec("/market/risk",setRisk,setRiskL,setRiskE,false);
     if(sub==="etf"      && etf===null  && !etfL)  loadSec("/market/etf-flows",setEtf,setEtfL,setEtfE,false);
     if(sub==="secteurs" && cross===null && !crossL) loadSec("/market/cross",setCross,setCrossL,setCrossE,false);
+    if(sub==="flux"     && flux===null  && !fluxL) loadSec("/market/flows",setFlux,setFluxL,setFluxE,false);
     if(sub==="btc"      && btcSig===null && !btcSigL) loadBtc(false);
   },[sub]);
   function refresh(){
@@ -10081,6 +10293,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
     else if(sub==="congress") loadSec("/market/congress",setCong,setCongL,setCongE,true);
     else if(sub==="btc") loadBtc(true);
     else if(sub==="secteurs") { load(true); loadSec("/market/cross",setCross,setCrossL,setCrossE,true); }
+    else if(sub==="flux") loadSec("/market/flows",setFlux,setFluxL,setFluxE,true);
     else { load(true); if(sub==="macro"){ loadSec("/funding",setFund,setFundL,setFundE,true); loadSec("/market/risk",setRisk,setRiskL,setRiskE,true); if(histOpen) loadSec("/market/risk-history",setHistR,setHistL,setHistE,true); } }
   }
 
@@ -10091,7 +10304,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
   const bigMcap=function(n){ if(n==null)return "\u2014"; if(n>=1e12)return "$"+(n/1e12).toFixed(2)+" T"; if(n>=1e9)return "$"+(n/1e9).toFixed(1)+" Md"; if(n>=1e6)return "$"+(n/1e6).toFixed(0)+" M"; return "$"+num(n,0); };
   const heatA=function(p){ if(p==null)return "14"; var a=Math.abs(p); return a<0.3?"1f":(a<0.8?"33":(a<1.5?"4d":"66")); };
 
-  const SUBS=[["macro","Macro"],["quad","4 quadrants"],["etf","ETF"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
+  const SUBS=[["macro","Macro"],["quad","4 quadrants"],["etf","ETF"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["flux","Flux"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
 
   function Gauge(props){
     var v=props.value;
@@ -10145,7 +10358,100 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
       {loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && sub!=="newsletter" && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"30px 0"}}>Chargement…</div>}
       {err && !loading && sub!=="movers" && sub!=="calendar" && sub!=="btc" && sub!=="newsletter" && <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {err}<button onClick={function(){load(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>}
 
+      {/* v28.72 — Flux : rotation des capitaux par momentum (adapté du dashboard de John) */}
+      {sub==="flux" && (function(){
+        if(fluxL && !flux) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Chargement…</div>;
+        if(fluxE && !flux) return (
+          <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>
+            Erreur : {fluxE}
+            <button onClick={function(){ loadSec("/market/flows",setFlux,setFluxL,setFluxE,true); }} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button>
+          </div>
+        );
+        if(!flux) return null;
+        var items=(flux.classes||[]).filter(function(c){ return c.perf && c.perf[fhz]!=null; }).slice();
+        items.sort(function(a,b){ return (b.perf[fhz]||0)-(a.perf[fhz]||0); });
+        if(!items.length) return <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"24px 0"}}>Aucune donnée sur cette période.</div>;
+        var pCol=function(p){ return p==null?C.text3:(p>=0?C.green:C.red); };
+        var pFmt=function(p){ return p==null?"—":((p>=0?"+":"")+p.toFixed(1)+"%"); };
+        var maxAbs=Math.max.apply(null,items.map(function(c){return Math.abs(c.perf[fhz]||0);}).concat([1]));
+        var inflow=items.slice(0,3).map(function(c){return c.name;});
+        var outflow=items.slice(-3).map(function(c){return c.name;}).reverse();
+        var selC=fsel?items.filter(function(c){return c.symbol===fsel;})[0]:null;
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {/* Synthèse */}
+            <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px 14px"}}>
+              <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Où va l'argent ({(FLOW_HZ.filter(function(h){return h[0]===fhz;})[0]||["",""])[1]})</div>
+              <div style={{fontSize:13,color:C.text,lineHeight:1.6}}>
+                Entrées vers <span style={{color:C.green,fontWeight:700}}>{inflow.join(", ")}</span> — sorties de <span style={{color:C.red,fontWeight:700}}>{outflow.join(", ")}</span>.
+              </div>
+            </div>
+
+            {/* Fenêtres temporelles */}
+            <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+              {FLOW_HZ.map(function(h){
+                var on=fhz===h[0];
+                return <button key={h[0]} onClick={function(){ setFhz(h[0]); }}
+                  style={{flex:"1 0 auto",whiteSpace:"nowrap",background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:8,padding:"7px 10px",color:on?C.btc:C.text2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{h[1]}</button>;
+              })}
+            </div>
+
+            {/* Classement */}
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {items.map(function(c){
+                var v=c.perf[fhz], w=Math.min(48,Math.abs(v||0)/maxAbs*48);
+                var isSel=fsel===c.symbol;
+                return (
+                  <div key={c.symbol}>
+                    <button onClick={function(){ setFsel(function(p){ return p===c.symbol?null:c.symbol; }); }}
+                      style={{display:"flex",alignItems:"center",gap:8,width:"100%",background:isSel?C.gold+"14":"transparent",border:"none",borderRadius:8,padding:"3px 4px",cursor:"pointer"}}>
+                      <span style={{fontSize:13,width:26,textAlign:"center",flexShrink:0}}>{c.emoji||"•"}</span>
+                      <span style={{fontSize:12,color:C.text,width:96,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"left"}}>{c.name}</span>
+                      <div style={{flex:1,height:16,position:"relative",background:C.bg1,borderRadius:4,overflow:"hidden"}}>
+                        <div style={{position:"absolute",top:0,bottom:0,left:"50%",width:(v>=0?w:0)+"%",background:C.green+"aa"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,right:"50%",width:(v<0?w:0)+"%",background:C.red+"aa"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,left:"50%",width:1,background:C.border}}/>
+                      </div>
+                      <span style={{fontSize:12,fontWeight:700,color:pCol(v),width:56,textAlign:"right",flexShrink:0}}>{pFmt(v)}</span>
+                    </button>
+
+                    {/* Détail : comparatif des 6 fenêtres */}
+                    {isSel && selC && (
+                      <div style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",margin:"6px 0 2px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.text}}>{(selC.emoji?selC.emoji+" ":"")+selC.name}</span>
+                          <button onClick={function(ev){ ev.stopPropagation(); setMt({ticker:selC.symbol,cat:""}); }}
+                            style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,padding:"4px 9px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>📈 {selC.symbol}</button>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                          {FLOW_HZ.map(function(h){
+                            var pv=selC.perf&&selC.perf[h[0]];
+                            return (
+                              <div key={h[0]} style={{textAlign:"center"}}>
+                                <div style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:0.3}}>{h[1]}</div>
+                                <div style={{fontSize:13,fontWeight:700,color:pCol(pv),marginTop:2}}>{pFmt(pv)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{fontSize:9,color:C.text3,lineHeight:1.5}}>Momentum relatif des proxies de classes d'actifs (actions, secteurs, obligations, crédit, devises, matières premières, bitcoin) — ce ne sont pas des flux de capitaux mesurés. Indicatif.</div>
+            <div style={{fontSize:8,color:C.text3,textAlign:"right"}}>Yahoo · maj {flux.ts?new Date(flux.ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—"}</div>
+          </div>
+        );
+      })()}
+
       {sub==="newsletter" && <PageNewsletter/>}
+
+      {/* v28.76 — Editeur des consignes BTC */}
+      {recoOpen && <BtcRecoModal rules={btcReco} onClose={function(){ setRecoOpen(false); }}
+        onSave={function(r){ onSaveBtcReco && onSaveBtcReco(r); setRecoOpen(false); }}/>}
 
       {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
         <div>
@@ -10425,8 +10731,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
         ); }
         return (
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <Block title="Crypto — 24 h" gainers={cr.gainers} losers={cr.losers} cat="Crypto"/>
-            <Block title="Actions US — jour" gainers={st.gainers} losers={st.losers} cat=""/>
+            <Block title="Crypto — 24 h · top 100 CoinGecko" gainers={cr.gainers} losers={cr.losers} cat="Crypto"/>
+            <Block title="Actions — jour · S&P 500" gainers={st.gainers} losers={st.losers} cat=""/>
+            <div style={{fontSize:8,color:C.text3}}>Univers : {(mov.universe&&mov.universe.stocks)||"S&P 500"} pour les actions, {(mov.universe&&mov.universe.crypto)||"top 100 CoinGecko"} pour les cryptos.</div>
           </div>
         );
       })()}
@@ -10641,6 +10948,10 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
         if(btcSigE && !btcSig) return <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:10,padding:12,color:C.red,fontSize:12}}>Erreur : {btcSigE}<button onClick={function(){loadBtc(true);}} style={{marginLeft:8,background:"none",border:"1px solid "+C.red+"66",borderRadius:6,color:C.red,fontSize:11,padding:"2px 8px",cursor:"pointer"}}>Réessayer</button></div>;
         if(!btcSig) return null;
         var d=btcSig;
+        // v28.76 — Le worker fournit le score brut ; la consigne vient des regles de l'utilisateur.
+        var _rules = btcRecoNorm(btcReco);
+        var _reco  = btcRecoFor(d.aggHeat, _rules);
+        d = Object.assign({}, d, { reco:_reco.label, recoColor:_reco.color });
         var grad="linear-gradient(90deg,"+C.green+" 0%,"+C.green+" 28%,"+C.gold+" 50%,"+C.orange+" 72%,"+C.red+" 100%)";
         var byKey={}; (d.indicators||[]).forEach(function(o){ byKey[o.key]=o; });
         var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","sthmvrv","rhodl","reserverisk","asopr","vdd"]],["Sentiment",["feargreed"]]];
@@ -10662,8 +10973,15 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
               <div style={{position:"relative",height:8,borderRadius:5,marginTop:12,background:grad}}>
                 {d.aggHeat!=null && <div style={{position:"absolute",top:-3,left:"calc("+Math.max(0,Math.min(100,d.aggHeat))+"% - 7px)",width:14,height:14,borderRadius:"50%",background:"#fff",border:"2px solid "+C.bg,boxShadow:"0 0 0 1px "+C.border}}/>}
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>Acheter</span><span>Conserver</span><span>Vendre</span></div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span><span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>{_rules[0].label}</span><span>{_rules.length>2?_rules[Math.floor(_rules.length/2)].label:""}</span><span>{_rules[_rules.length-1].label}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+                <span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={function(ev){ ev.stopPropagation(); setRecoOpen(true); }} title="Paramétrer les consignes"
+                    style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"3px 9px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>⚙ Consignes</button>
+                  <span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span>
+                </div>
+              </div>
               {btcChartOpen && btcChartMemo && (function(){
                 var m=btcChartMemo;
                 var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
@@ -10676,9 +10994,19 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
                     <div style={{display:"flex",gap:4,marginBottom:8}}>
                       {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?d.recoColor:C.border),background:on?d.recoColor+"22":"transparent",color:on?d.recoColor:C.text3,cursor:"pointer"}}>{tf}</button>; })}
                     </div>
-                    <div style={{display:"flex",gap:14,marginBottom:4,fontSize:10,fontWeight:700}}>
-                      <span style={{color:C.text}}>━ Prix BTC (log)</span>
-                      <span style={{color:C.green}}>━ Score de l'indicateur</span>
+                    {/* v28.76 — Legende cliquable : afficher / masquer chaque courbe */}
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 8px"}}>
+                      {[["price","Prix BTC (log)",C.text],["score","Score de l'indicateur",C.green],["seuils","Seuils de consigne",C.text3]].map(function(sx){
+                        var on=!btcHidden[sx[0]];
+                        return (
+                          <button key={sx[0]} onClick={function(ev){ ev.stopPropagation(); setBtcHidden(function(h){ var n2=Object.assign({},h); n2[sx[0]]=!h[sx[0]]; return n2; }); }}
+                            style={{display:"flex",alignItems:"center",gap:5,background:on?sx[2]+"22":"transparent",border:"1.5px solid "+(on?sx[2]:C.border),
+                              borderRadius:8,padding:"4px 9px",cursor:"pointer",color:on?sx[2]:C.gray,fontSize:10,fontWeight:700,opacity:on?1:0.55}}>
+                            <span style={{width:8,height:8,borderRadius:2,background:on?sx[2]:C.border,display:"inline-block"}}/>
+                            {sx[1]}
+                          </button>
+                        );
+                      })}
                     </div>
                     <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
                       <defs>
@@ -10687,9 +11015,18 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows }){
                         </linearGradient>
                       </defs>
                       {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.22}/>; })}
-                      <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>
-                      <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>
-                      {pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
+                      {/* v28.76 — Seuils : chaque score qui fait changer de consigne */}
+                      {!btcHidden.seuils && btcRecoThresholds(_rules).map(function(th,ti){
+                        return (
+                          <g key={"th"+ti}>
+                            <line x1={padL} y1={YS(th.v)} x2={W-padR} y2={YS(th.v)} stroke={th.color} strokeWidth="0.9" strokeDasharray="5 3" opacity="0.85"/>
+                            <text x={padL+2} y={YS(th.v)-2.5} fontSize="7" fontWeight="700" fill={th.color}>{th.to+" \u2265 "+th.v}</text>
+                          </g>
+                        );
+                      })}
+                      {!btcHidden.score && <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>}
+                      {!btcHidden.price && <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>}
+                      {!btcHidden.price && pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
                       {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.green}>{sv}</text>; })}
                       {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
                     </svg>
@@ -10973,6 +11310,9 @@ function App(){
   const[liveQuad,setLiveQuad]=useState(function(){ try{ var v=lsv9Get('gdb_quadrants'); return Array.isArray(v)&&v.length?v:[]; }catch(e){ return []; } });
   // v28.65 — Suivi (watchlist / idees de trade)
   const[liveWatchlist,setLiveWatchlist]=useState(function(){ try{ var v=lsv9Get('gdb_watchlist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
+  // v28.76 — consignes d'achat BTC (seuils de score) parametrables
+  const[liveBtcReco,setLiveBtcReco]=useState(function(){ try{ var v=lsv9Get('gdb_btc_reco'); return Array.isArray(v)&&v.length?v:null; }catch(e){ return null; } });
+  const saveBtcReco=function(r){ setLiveBtcReco(r); saveBase('gdb_btc_reco', r); };
   const saveWatchlist=function(nl){ setLiveWatchlist(nl); saveBase('gdb_watchlist', nl); };
   const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
   // BENCH_IDX enrichi de la colonne Or (7e) depuis l'historique dédié — robuste aux fusions
@@ -11305,6 +11645,7 @@ function App(){
       if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
       if(Array.isArray(kv.gdb_quadrants) && kv.gdb_quadrants.length) setLiveQuad(kv.gdb_quadrants);
       if(Array.isArray(kv.gdb_watchlist)) setLiveWatchlist(kv.gdb_watchlist);
+      if(Array.isArray(kv.gdb_btc_reco) && kv.gdb_btc_reco.length) setLiveBtcReco(kv.gdb_btc_reco);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -11349,6 +11690,7 @@ function App(){
       const lvGH = lsv9Get('gdb_gold_hist'); if(Array.isArray(lvGH)){ setLiveGoldHist(lvGH); }
       const lvQD = lsv9Get('gdb_quadrants'); if(Array.isArray(lvQD)&&lvQD.length){ setLiveQuad(lvQD); }
       const lvWL = lsv9Get('gdb_watchlist'); if(Array.isArray(lvWL)){ setLiveWatchlist(lvWL); }
+      const lvBR = lsv9Get('gdb_btc_reco'); if(Array.isArray(lvBR)&&lvBR.length){ setLiveBtcReco(lvBR); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));
@@ -12434,7 +12776,7 @@ function App(){
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
         {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
-        {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad}/>}
+        {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad} btcReco={liveBtcReco} onSaveBtcReco={saveBtcReco}/>}
         {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>

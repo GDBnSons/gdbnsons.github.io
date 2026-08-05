@@ -620,6 +620,22 @@ function applyTrade(trade, currentEFF){
   };
 }
 
+// v28.77 — Lignes de tresorerie : leurs "tickers" sont des noms de comptes
+// (BCI, Bourso, DeBlock, KUCOIN...) et n'ont aucun cours a interroger.
+//
+// Attention : la categorie "Cash" est MIXTE. Elle contient des poches de
+// liquidites (EURO, USD, KUCOIN) mais aussi de vrais titres assimiles a du
+// quasi-cash (ex. STRC, cote ~99 $). On ne peut donc pas exclure la categorie
+// "Cash" en bloc sans geler le prix de ces titres.
+const BANK_CATS  = ["cash matelas","cash dip","banque","bank"];        // jamais des tickers
+const CASH_NAMES = ["EURO","EUR","USD","USDT","USDC","CASH","KUCOIN"]; // libelles de liquidites
+function isBankCat(cat){ return BANK_CATS.indexOf(String(cat||"").trim().toLowerCase()) >= 0; }
+function isCashLine(ticker, cat){
+  if(isBankCat(cat)) return true;
+  var c=String(cat||"").trim().toLowerCase();
+  if(c==="cash" && CASH_NAMES.indexOf(String(ticker||"").toUpperCase().trim())>=0) return true;
+  return false;
+}
 async function fetchAllPrices(){
   const results = {errors: []};
 
@@ -630,20 +646,31 @@ async function fetchAllPrices(){
   // (symbole = ticker, comme le fait deja le modal). Sans cela leur prix n'etait
   // jamais rafraichi et restait fige sur la derniere valeur enregistree.
   const _known = new Set(entries.map(function(e){ return e[0]; }));
-  const _NOPRICE = ["EURO","USD","KUCOIN","CASH","EUR"];
-  const _added = [];
+  const _added = [], _purged = [];
   Object.keys(GLOBAL_POS||{}).forEach(function(t){
-    var k=String(t||"").toUpperCase().trim();
-    if(!k || _known.has(t) || _known.has(k)) return;
-    if(_NOPRICE.indexOf(k)>=0) return;
+    var p = GLOBAL_POS[t] || {};
+    if(!String(t||"").trim()) return;
+    // v28.77 — Les lignes de tresorerie ne sont PAS des tickers : comptes bancaires
+    // (Cash Matelas : BCI, Bourso, DeBlock) et poches de liquidites (Cash / Cash Dip :
+    // EURO, USD, KUCOIN). On filtre sur la CATEGORIE, pas sur le nom : ces libelles
+    // sont libres et un filtre par nom laissait passer les banques.
+    if(isCashLine(t, p.cat)){
+      // Nettoyage : la v28.75 filtrait par nom et a pu inscrire les comptes
+      // bancaires dans YF_MAP. On ne purge que les categories bancaires, jamais
+      // un ticker que l'utilisateur aurait mappe volontairement.
+      if(isBankCat(p.cat) && YF_MAP[t]){ delete YF_MAP[t]; _purged.push(t); }
+      return;
+    }
+    if(_known.has(t)) return;
     entries.push([t, t]); _known.add(t); _added.push(t);
   });
-  if(_added.length){
+  if(_added.length || _purged.length){
     // On memorise le mapping par defaut pour qu'il devienne visible et corrigeable
     // dans l'editeur YF_MAP (meme convention que l'achat et l'import IBKR).
     _added.forEach(function(t){ if(!YF_MAP[t]) YF_MAP[t]=t; });
     try{ saveBase('gdb_yfmap', Object.assign({},YF_MAP)); }catch(_e){}
-    console.info("Tickers detenus ajoutes a YF_MAP : "+_added.join(", "));
+    if(_added.length)  console.info("Tickers detenus ajoutes a YF_MAP : "+_added.join(", "));
+    if(_purged.length) console.info("Lignes de tresorerie retirees de YF_MAP : "+_purged.join(", "));
   }
   const symbols = Array.from(new Set(entries.map(([,sym])=> sym).concat(["GC=F"]))); // +Or (future) pour BENCH_IDX & historique Home
   const sym2keys = {};
@@ -781,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.76";
+const APP_VERSION = "v28.78";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10143,6 +10170,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   // v28.76 — consignes BTC : edition + series masquables du graphe
   const [recoOpen,setRecoOpen]=useState(false);
   const [btcHidden,setBtcHidden]=useState({});
+  const [btcFull,setBtcFull]=useState(false);   // v28.78 — plein ecran du graphe BTC
 
   function load(noCache){
     setLoading(true); setErr(null);
@@ -10178,7 +10206,12 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
     var S=full.filter(function(p){ return p.t>=cutoff; });
     if(S.length<2) S=full.slice(-2);
-    var W=320, HH=215, padL=26, padR=20, padT=12, padB=20;
+    // v28.78 — En plein ecran, le graphe occupe la hauteur de l'ecran (viewBox
+    // recalcule d'apres le ratio de la fenetre, comme le modal ticker).
+    var _aW=(typeof window!=="undefined"&&window.innerWidth)||390;
+    var _aH=(typeof window!=="undefined"&&window.innerHeight)||780;
+    var W=320, HH=btcFull?Math.max(260,Math.min(620,Math.round(320*(_aH-150)/_aW))):215;
+    var padL=26, padR=20, padT=12, padB=20;
     var t0=S[0].t, t1=S[S.length-1].t;
     var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
     var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
@@ -10191,7 +10224,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     var spanDays=(t1-t0)/864e5;
     var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
     return {W:W,HH:HH,padL:padL,padR:padR,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt};
-  }, [btcSig && btcSig._series, btcTF]);
+  }, [btcSig && btcSig._series, btcTF, btcFull]);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
@@ -10308,7 +10341,69 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
 
   function Gauge(props){
     var v=props.value;
-    return (
+    // v28.78 — Rendu du graphe BTC, partage entre la vue normale et le plein ecran.
+  // Defini au niveau de la page pour rester accessible depuis l'overlay.
+  var renderBtcChart = function(isFull){
+                var _rules = btcRecoNorm(btcReco);
+                var _rc = btcRecoFor(btcSig && btcSig.aggHeat, _rules);
+                var m=btcChartMemo;
+                var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
+                var X=m.X, YP=m.YP, YS=m.YS, pricePath=m.pricePath, scorePath=m.scorePath, pTicks=m.pTicks, spanDays=m.spanDays, xt=m.xt;
+                var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
+                var fmtX=function(t){ var dt=new Date(t); var dd=("0"+dt.getUTCDate()).slice(-2),mm=("0"+(dt.getUTCMonth()+1)).slice(-2); if(spanDays<=60) return dd+"/"+mm; if(spanDays<=800) return mm+"/"+String(dt.getUTCFullYear()).slice(2); return String(dt.getUTCFullYear()); };
+                var TFB=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
+                return (
+                  <div style={{marginTop:isFull?0:12,marginLeft:isFull?0:-12,marginRight:isFull?0:-12,position:"relative"}} onClick={function(ev){ev.stopPropagation();}}>
+                    {!isFull && (
+                      <button onClick={function(ev){ ev.stopPropagation(); setBtcFull(true); }} title="Plein écran"
+                        style={{position:"absolute",bottom:22,right:6,zIndex:10,background:C.bg2,border:"1px solid "+C.border,borderRadius:6,width:22,height:22,
+                          display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:11,color:C.gray,lineHeight:1,padding:0}}>⛶</button>
+                    )}
+                    <div style={{display:isFull?"none":"flex",gap:4,marginBottom:8}}>
+                      {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?_rc.color:C.border),background:on?_rc.color+"22":"transparent",color:on?_rc.color:C.text3,cursor:"pointer"}}>{tf}</button>; })}
+                    </div>
+                    {/* v28.76 — Legende cliquable : afficher / masquer chaque courbe */}
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 8px"}}>
+                      {[["price","Prix BTC (log)",C.text],["score","Score de l'indicateur",C.green],["seuils","Seuils de consigne",C.text3]].map(function(sx){
+                        var on=!btcHidden[sx[0]];
+                        return (
+                          <button key={sx[0]} onClick={function(ev){ ev.stopPropagation(); setBtcHidden(function(h){ var n2=Object.assign({},h); n2[sx[0]]=!h[sx[0]]; return n2; }); }}
+                            style={{display:"flex",alignItems:"center",gap:5,background:on?sx[2]+"22":"transparent",border:"1.5px solid "+(on?sx[2]:C.border),
+                              borderRadius:8,padding:"4px 9px",cursor:"pointer",color:on?sx[2]:C.gray,fontSize:10,fontWeight:700,opacity:on?1:0.55}}>
+                            <span style={{width:8,height:8,borderRadius:2,background:on?sx[2]:C.border,display:"inline-block"}}/>
+                            {sx[1]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
+                      <defs>
+                        <linearGradient id="btcScoreStroke" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stopColor={C.red}/><stop offset="28%" stopColor={C.orange}/><stop offset="50%" stopColor={C.gold}/><stop offset="72%" stopColor={C.green}/><stop offset="100%" stopColor={C.green}/>
+                        </linearGradient>
+                      </defs>
+                      {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.22}/>; })}
+                      {/* v28.76 — Seuils : chaque score qui fait changer de consigne */}
+                      {!btcHidden.seuils && btcRecoThresholds(_rules).map(function(th,ti){
+                        return (
+                          <g key={"th"+ti}>
+                            <line x1={padL} y1={YS(th.v)} x2={W-padR} y2={YS(th.v)} stroke={th.color} strokeWidth="0.9" strokeDasharray="5 3" opacity="0.85"/>
+                            <text x={padL+2} y={YS(th.v)-2.5} fontSize="7" fontWeight="700" fill={th.color}>{th.to+" \u2265 "+th.v}</text>
+                          </g>
+                        );
+                      })}
+                      {!btcHidden.score && <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>}
+                      {!btcHidden.price && <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>}
+                      {!btcHidden.price && pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
+                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.green}>{sv}</text>; })}
+                      {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
+                    </svg>
+                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>
+                  </div>
+          );
+  };
+
+  return (
       <div style={{flex:1,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px"}}>
         <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>{props.title}</div>
         <div style={{display:"flex",alignItems:"baseline",gap:8}}>
@@ -10448,6 +10543,35 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
       })()}
 
       {sub==="newsletter" && <PageNewsletter/>}
+
+      {/* v28.78 — Plein écran du graphe BTC (même logique que Home et GDB) */}
+      {btcFull && btcSig && btcChartMemo && (function(){
+        var _r2 = btcRecoNorm(btcReco), _rc2 = btcRecoFor(btcSig.aggHeat, _r2);
+        var TFB2=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
+        return (
+          <div style={{position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"max(8px,env(safe-area-inset-top)) 12px 4px",flexShrink:0}}>
+              <div style={{flex:1,minWidth:0,display:"flex",gap:4,overflowX:"auto"}}>
+                {TFB2.map(function(tf){ var on=btcTF===tf; return (
+                  <button key={tf} onClick={function(){ setBtcTF(tf); }}
+                    style={{flex:"1 0 auto",padding:"5px 10px",fontSize:10,fontWeight:700,borderRadius:6,border:"1px solid "+(on?_rc2.color:C.border),
+                      background:on?_rc2.color+"22":"transparent",color:on?_rc2.color:C.text3,cursor:"pointer",whiteSpace:"nowrap"}}>{tf}</button>
+                ); })}
+              </div>
+              <button onClick={function(){ setBtcFull(false); }} title="Fermer"
+                style={{flexShrink:0,background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"5px 11px",color:C.text,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",gap:10,padding:"0 12px 4px",flexShrink:0}}>
+              <span style={{fontSize:15,fontWeight:800,color:_rc2.color}}>{_rc2.label}</span>
+              <span style={{fontSize:11,color:C.text2}}>{btcSig.aggHeat!=null?Math.round(btcSig.aggHeat)+"/100":"—"}</span>
+              <span style={{fontSize:11,color:C.text3}}>BTC ${num(btcSig.price,0)}</span>
+            </div>
+            <div style={{flex:1,minHeight:0,overflowY:"auto",padding:"0 12px 12px"}}>
+              {renderBtcChart(true)}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* v28.76 — Editeur des consignes BTC */}
       {recoOpen && <BtcRecoModal rules={btcReco} onClose={function(){ setRecoOpen(false); }}
@@ -10957,6 +11081,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
         var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","sthmvrv","rhodl","reserverisk","asopr","vdd"]],["Sentiment",["feargreed"]]];
         var tog=function(k){ setBtcOpen(function(p){ var n=Object.assign({},p); n[k]=!p[k]; return n; }); };
         var maj=d.ts?new Date(d.ts).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+
         return (
           <div>
             <div onClick={function(){setBtcChartOpen(function(v){return !v;});}} style={{background:d.recoColor+"18",border:"1px solid "+d.recoColor+"55",borderRadius:14,padding:"14px 16px",marginBottom:16,cursor:"pointer"}}>
@@ -10982,58 +11107,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                   <span style={{fontSize:10,color:C.text3,fontWeight:600}}>{btcChartOpen?"Graphique ▾":"Indicateurs ▸"}</span>
                 </div>
               </div>
-              {btcChartOpen && btcChartMemo && (function(){
-                var m=btcChartMemo;
-                var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
-                var X=m.X, YP=m.YP, YS=m.YS, pricePath=m.pricePath, scorePath=m.scorePath, pTicks=m.pTicks, spanDays=m.spanDays, xt=m.xt;
-                var fmtP=function(v){ return v>=1000?("$"+Math.round(v/1000)+"k"):("$"+Math.round(v)); };
-                var fmtX=function(t){ var dt=new Date(t); var dd=("0"+dt.getUTCDate()).slice(-2),mm=("0"+(dt.getUTCMonth()+1)).slice(-2); if(spanDays<=60) return dd+"/"+mm; if(spanDays<=800) return mm+"/"+String(dt.getUTCFullYear()).slice(2); return String(dt.getUTCFullYear()); };
-                var TFB=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
-                return (
-                  <div style={{marginTop:12,marginLeft:-12,marginRight:-12}} onClick={function(ev){ev.stopPropagation();}}>
-                    <div style={{display:"flex",gap:4,marginBottom:8}}>
-                      {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?d.recoColor:C.border),background:on?d.recoColor+"22":"transparent",color:on?d.recoColor:C.text3,cursor:"pointer"}}>{tf}</button>; })}
-                    </div>
-                    {/* v28.76 — Legende cliquable : afficher / masquer chaque courbe */}
-                    <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 8px"}}>
-                      {[["price","Prix BTC (log)",C.text],["score","Score de l'indicateur",C.green],["seuils","Seuils de consigne",C.text3]].map(function(sx){
-                        var on=!btcHidden[sx[0]];
-                        return (
-                          <button key={sx[0]} onClick={function(ev){ ev.stopPropagation(); setBtcHidden(function(h){ var n2=Object.assign({},h); n2[sx[0]]=!h[sx[0]]; return n2; }); }}
-                            style={{display:"flex",alignItems:"center",gap:5,background:on?sx[2]+"22":"transparent",border:"1.5px solid "+(on?sx[2]:C.border),
-                              borderRadius:8,padding:"4px 9px",cursor:"pointer",color:on?sx[2]:C.gray,fontSize:10,fontWeight:700,opacity:on?1:0.55}}>
-                            <span style={{width:8,height:8,borderRadius:2,background:on?sx[2]:C.border,display:"inline-block"}}/>
-                            {sx[1]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <svg viewBox={"0 0 "+W+" "+HH} style={{width:"100%",height:"auto",display:"block",overflow:"visible"}}>
-                      <defs>
-                        <linearGradient id="btcScoreStroke" x1="0" y1={YS(100)} x2="0" y2={YS(0)} gradientUnits="userSpaceOnUse">
-                          <stop offset="0%" stopColor={C.red}/><stop offset="28%" stopColor={C.orange}/><stop offset="50%" stopColor={C.gold}/><stop offset="72%" stopColor={C.green}/><stop offset="100%" stopColor={C.green}/>
-                        </linearGradient>
-                      </defs>
-                      {[0,50,100].map(function(gv){ return <line key={gv} x1={padL} y1={YS(gv)} x2={W-padR} y2={YS(gv)} stroke={C.border} strokeWidth="0.6" strokeDasharray={gv===50?"3 3":"0"} opacity={gv===50?0.7:0.22}/>; })}
-                      {/* v28.76 — Seuils : chaque score qui fait changer de consigne */}
-                      {!btcHidden.seuils && btcRecoThresholds(_rules).map(function(th,ti){
-                        return (
-                          <g key={"th"+ti}>
-                            <line x1={padL} y1={YS(th.v)} x2={W-padR} y2={YS(th.v)} stroke={th.color} strokeWidth="0.9" strokeDasharray="5 3" opacity="0.85"/>
-                            <text x={padL+2} y={YS(th.v)-2.5} fontSize="7" fontWeight="700" fill={th.color}>{th.to+" \u2265 "+th.v}</text>
-                          </g>
-                        );
-                      })}
-                      {!btcHidden.score && <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>}
-                      {!btcHidden.price && <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>}
-                      {!btcHidden.price && pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
-                      {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.green}>{sv}</text>; })}
-                      {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
-                    </svg>
-                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>
-                  </div>
-                );
-              })()}
+              {btcChartOpen && btcChartMemo && renderBtcChart(false)}
             </div>
 
             {groups.map(function(g,gi){

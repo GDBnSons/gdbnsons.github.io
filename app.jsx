@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.79";
+const APP_VERSION = "v28.81";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10171,6 +10171,20 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   const [recoOpen,setRecoOpen]=useState(false);
   const [btcHidden,setBtcHidden]=useState({});
   const [btcFull,setBtcFull]=useState(false);   // v28.78 — plein ecran du graphe BTC
+  const [btcCov,setBtcCov]=useState(null);      // v28.81 — periode de couverture depliee
+  // v28.80 — La hauteur du graphe plein ecran depend des dimensions de la fenetre :
+  // on les suit pour qu'une rotation d'ecran recalcule le viewBox.
+  const [vp,setVp]=useState(function(){
+    return { w:(typeof window!=="undefined"&&window.innerWidth)||390,
+             h:(typeof window!=="undefined"&&window.innerHeight)||780 };
+  });
+  useEffect(function(){
+    if(typeof window==="undefined") return;
+    var onR=function(){ setVp({w:window.innerWidth,h:window.innerHeight}); };
+    window.addEventListener("resize",onR);
+    window.addEventListener("orientationchange",onR);
+    return function(){ window.removeEventListener("resize",onR); window.removeEventListener("orientationchange",onR); };
+  }, []);
 
   function load(noCache){
     setLoading(true); setErr(null);
@@ -10206,25 +10220,38 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     else { var dmap={"1W":7,"1M":30,"1Y":365,"2Y":730,"5Y":1825}; cutoff=nowT-(dmap[btcTF]||0)*864e5; }
     var S=full.filter(function(p){ return p.t>=cutoff; });
     if(S.length<2) S=full.slice(-2);
-    // v28.78 — En plein ecran, le graphe occupe la hauteur de l'ecran (viewBox
-    // recalcule d'apres le ratio de la fenetre, comme le modal ticker).
-    var _aW=(typeof window!=="undefined"&&window.innerWidth)||390;
-    var _aH=(typeof window!=="undefined"&&window.innerHeight)||780;
-    var W=320, HH=btcFull?Math.max(260,Math.min(620,Math.round(320*(_aH-150)/_aW))):215;
+    // v28.78/80 — En plein ecran le graphe occupe la hauteur disponible ; le viewBox
+    // est recalcule a chaque changement de taille ou d'orientation de la fenetre.
+    // La hauteur RENDUE vaut (largeur du conteneur) x HH/320 : on dimensionne le
+    // viewBox pour qu'elle tienne dans l'ecran, y compris en paysage (ou la borne
+    // basse doit rester faible, sinon le graphe deborde).
+    var _aW=Math.max(200,(vp.w||390)-24), _aH=vp.h||780;
+    var W=320, HH=btcFull?Math.max(100,Math.min(700,Math.round(320*(_aH-150)/_aW))):215;
     var padL=26, padR=20, padT=12, padB=20;
     var t0=S[0].t, t1=S[S.length-1].t;
-    var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;});
+    var lp=S.map(function(p){return Math.log(p.price)/Math.LN10;}).filter(function(v){ return isFinite(v); });
     var pMin=Math.min.apply(null,lp), pMax=Math.max.apply(null,lp);
     var X=function(t){ return padL+(t-t0)/((t1-t0)||1)*(W-padL-padR); };
     var YP=function(pr){ var v=Math.log(pr)/Math.LN10; return padT+(pMax-v)/((pMax-pMin)||1)*(HH-padT-padB); };
     var YS=function(sc){ return padT+(100-sc)/100*(HH-padT-padB); };
     var pricePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YP(p.price).toFixed(1); }).join(" ");
-    var scorePath=S.map(function(p,i){ return (i?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1); }).join(" ");
+    // v28.80 — Le score n'existe pas sur les toutes premieres annees (pas assez
+    // d'historique pour les moyennes longues) : on interrompt la courbe au lieu
+    // de tracer des points invalides, le prix restant continu.
+    var scorePath=(function(){
+      var out=[], pen=false;
+      S.forEach(function(p){
+        if(p.score==null || !isFinite(p.score)){ pen=false; return; }
+        out.push((pen?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1));
+        pen=true;
+      });
+      return out.join(" ");
+    })();
     var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
     var spanDays=(t1-t0)/864e5;
     var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
     return {W:W,HH:HH,padL:padL,padR:padR,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt};
-  }, [btcSig && btcSig._series, btcTF, btcFull]);
+  }, [btcSig && btcSig._series, btcTF, btcFull, vp.w, vp.h]);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
@@ -10296,7 +10323,8 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
           var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z]}); }
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series}));
+          var _cov=(hf&&hf.coverage)||[], _covAll=(hf&&hf.allNames)||[];
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll}));
           setBtcSigL(false);
           if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
@@ -10398,6 +10426,62 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                       {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
                     </svg>
                     <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>
+                    {/* v28.81 — Couverture des indicateurs du score reconstitue */}
+                    {(function(){
+                      var cov = (btcSig && btcSig._coverage) || [];
+                      if(!cov.length) return null;
+                      var fD=function(ts){ var d=new Date(ts*1000); return ("0"+(d.getUTCMonth()+1)).slice(-2)+"/"+d.getUTCFullYear(); };
+                      var t0=cov[0].from, t1=cov[cov.length-1].to, span=(t1-t0)||1;
+                      var colFor=function(n,tot){ var r=n/(tot||6); return r>=1?C.green:(r>=0.75?C.gold:(r>=0.5?C.orange:C.red)); };
+                      return (
+                        <div style={{marginTop:8}}>
+                          <div style={{fontSize:9,color:C.text3,marginBottom:5,lineHeight:1.45}}>
+                            Indicateurs alimentant la courbe de score — touchez une période pour voir lesquels.
+                          </div>
+                          <div style={{display:"flex",height:16,borderRadius:5,overflow:"hidden",border:"1px solid "+C.border}}>
+                            {cov.map(function(c,ci){
+                              var w=Math.max(4,(c.to-c.from)/span*100);
+                              var on=btcCov===ci, col=colFor(c.n,c.total);
+                              return (
+                                <button key={ci} onClick={function(ev){ ev.stopPropagation(); setBtcCov(on?null:ci); }}
+                                  title={fD(c.from)+" → "+fD(c.to)+" · "+c.n+"/"+c.total}
+                                  style={{width:w+"%",flexShrink:0,background:on?col+"cc":col+"55",border:"none",borderRight:ci<cov.length-1?"1px solid "+C.bg:"none",
+                                    cursor:"pointer",padding:0,color:C.text,fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                  {w>9?(c.n+"/"+c.total):""}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:C.text3,marginTop:2}}>
+                            <span>{fD(t0)}</span><span>{fD(t1)}</span>
+                          </div>
+                          {btcCov!=null && cov[btcCov] && (function(){
+                            var c=cov[btcCov];
+                            var absent=((btcSig&&btcSig._covAll)||[]).filter(function(nm){ return c.names.indexOf(nm)<0; });
+                            return (
+                              <div style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:9,padding:"9px 11px",marginTop:6}}>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                                  <span style={{fontSize:11,fontWeight:800,color:C.text}}>{fD(c.from)} → {fD(c.to)}</span>
+                                  <span style={{fontSize:11,fontWeight:800,color:colFor(c.n,c.total)}}>{c.n}/{c.total} · poids {c.weight}/{c.weightTotal}</span>
+                                </div>
+                                {c.names.map(function(nm,ni){ return (
+                                  <div key={ni} style={{fontSize:10,color:C.text2,padding:"2px 0"}}>✓ {nm}</div>
+                                ); })}
+                                {absent.map(function(nm,ni){ return (
+                                  <div key={"a"+ni} style={{fontSize:10,color:C.text3,padding:"2px 0",opacity:0.75}}>· {nm} <span style={{fontSize:8}}>(historique insuffisant)</span></div>
+                                ); })}
+                                <div style={{fontSize:8,color:C.text3,marginTop:6,lineHeight:1.45}}>
+                                  Une moyenne longue n'existe qu'une fois assez de séances accumulées : le score des premières années repose sur moins d'indicateurs, il reste indicatif.
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          <div style={{fontSize:8,color:C.text3,marginTop:6,lineHeight:1.45}}>
+                            Le score du graphe est reconstitué à partir de {(btcSig&&btcSig._covAll||[]).length||6} indicateurs de prix. Le score du jour ({(btcSig&&btcSig.nIndicators)||0}/{((btcSig&&btcSig.indicators)||[]).length}) en agrège davantage, dont des données on-chain non historisables.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
           );
   };

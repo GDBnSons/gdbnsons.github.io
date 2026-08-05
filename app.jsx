@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.78";
+const APP_VERSION = "v28.79";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10339,10 +10339,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
 
   const SUBS=[["macro","Macro"],["quad","4 quadrants"],["etf","ETF"],["btc","BTC"],["movers","Top/Flop"],["secteurs","Secteurs"],["flux","Flux"],["calendar","Calendrier"],["hedge","Hedge Funds"],["congress","Congrès"],["newsletter","Newsletter"]];
 
-  function Gauge(props){
-    var v=props.value;
-    // v28.78 — Rendu du graphe BTC, partage entre la vue normale et le plein ecran.
-  // Defini au niveau de la page pour rester accessible depuis l'overlay.
+  // v28.78 — Rendu du graphe BTC, partage entre la vue normale et le plein ecran.
+  // Defini au niveau de PageMarket (et non dans un composant imbrique) pour rester
+  // accessible a la fois par la carte BTC et par l'overlay plein ecran.
   var renderBtcChart = function(isFull){
                 var _rules = btcRecoNorm(btcReco);
                 var _rc = btcRecoFor(btcSig && btcSig.aggHeat, _rules);
@@ -10402,6 +10401,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                   </div>
           );
   };
+
+  function Gauge(props){
+    var v=props.value;
 
   return (
       <div style={{flex:1,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px"}}>

@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.81";
+const APP_VERSION = "v28.82";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10324,13 +10324,20 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
           var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z]}); }
           var _cov=(hf&&hf.coverage)||[], _covAll=(hf&&hf.allNames)||[];
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll}));
+          var _histErr=(hf&&hf._err)||((!hf||!hf.t||!hf.t.length)?"reponse vide":null);
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null}));
           setBtcSigL(false);
           if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
         Promise.all([
           fetchOnchainBtc(noCache).catch(function(){ return {}; }),
-          cfGet("/btc-history-full").then(function(r){return r.ok?r.json():null;}).catch(function(){ return null; })
+          // v28.82 — On conserve la raison de l'echec : un graphe vide sans message
+          // ne permettait pas de diagnostiquer.
+          cfGet("/btc-history-full",{timeout:25000})
+            .then(function(r){ return r.json().then(function(j){
+                 return r.ok ? j : {_err:"HTTP "+r.status+(j&&j.error?" \u2014 "+j.error:"")};
+               }).catch(function(){ return {_err:"HTTP "+r.status}; }); })
+            .catch(function(e){ return {_err:(e&&e.name==="TimeoutError")?"delai depasse (25 s)":((e&&e.message)||"reseau")}; })
         ]).then(function(arr){ finish(arr[0]||{}, arr[1]); }).catch(function(){ finish({}, null); });
       })
       .catch(function(e){ setBtcSigE((e&&e.message)||"Erreur réseau"); setBtcSigL(false); });
@@ -11194,6 +11201,15 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                 </div>
               </div>
               {btcChartOpen && btcChartMemo && renderBtcChart(false)}
+              {btcChartOpen && !btcChartMemo && (
+                <div onClick={function(ev){ev.stopPropagation();}} style={{marginTop:12,background:C.bg2,border:"1px solid "+C.border,borderRadius:9,padding:"12px 13px"}}>
+                  <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:8}}>
+                    Historique du graphe indisponible{d._histErr?(" \u2014 "+d._histErr):""}.
+                  </div>
+                  <button onClick={function(ev){ ev.stopPropagation(); loadBtc(true); }}
+                    style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,padding:"6px 12px",color:C.text,fontSize:11,fontWeight:700,cursor:"pointer"}}>Recharger</button>
+                </div>
+              )}
             </div>
 
             {groups.map(function(g,gi){

@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.82";
+const APP_VERSION = "v28.83";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10172,6 +10172,12 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   const [btcHidden,setBtcHidden]=useState({});
   const [btcFull,setBtcFull]=useState(false);   // v28.78 — plein ecran du graphe BTC
   const [btcCov,setBtcCov]=useState(null);      // v28.81 — periode de couverture depliee
+  // v28.83 — Echelle du score : "abs" = bornes historiques figees, "rel" = position
+  // dans l'amplitude des 4 dernieres annees (corrige la compression des cycles).
+  const [btcScale,setBtcScale]=useState(function(){
+    try{ return localStorage.getItem("gdb_btc_scale")||"abs"; }catch(e){ return "abs"; }
+  });
+  const setScale=function(v){ setBtcScale(v); try{ localStorage.setItem("gdb_btc_scale",v); }catch(e){} };
   // v28.80 — La hauteur du graphe plein ecran depend des dimensions de la fenetre :
   // on les suit pour qu'une rotation d'ecran recalcule le viewBox.
   const [vp,setVp]=useState(function(){
@@ -10241,8 +10247,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     var scorePath=(function(){
       var out=[], pen=false;
       S.forEach(function(p){
-        if(p.score==null || !isFinite(p.score)){ pen=false; return; }
-        out.push((pen?"L":"M")+X(p.t).toFixed(1)+" "+YS(p.score).toFixed(1));
+        var sv = (btcScale==="rel" && p.scoreRel!=null) ? p.scoreRel : p.score;
+        if(sv==null || !isFinite(sv)){ pen=false; return; }
+        out.push((pen?"L":"M")+X(p.t).toFixed(1)+" "+YS(sv).toFixed(1));
         pen=true;
       });
       return out.join(" ");
@@ -10251,7 +10258,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     var spanDays=(t1-t0)/864e5;
     var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
     return {W:W,HH:HH,padL:padL,padR:padR,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt};
-  }, [btcSig && btcSig._series, btcTF, btcFull, vp.w, vp.h]);
+  }, [btcSig && btcSig._series, btcTF, btcFull, vp.w, vp.h, btcScale]);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
@@ -10322,10 +10329,10 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
-          var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z]}); }
+          var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ var _sr=(hf&&hf.scoreRel)||[]; for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z], scoreRel:(_sr[z]!=null?_sr[z]:null)}); }
           var _cov=(hf&&hf.coverage)||[], _covAll=(hf&&hf.allNames)||[];
           var _histErr=(hf&&hf._err)||((!hf||!hf.t||!hf.t.length)?"reponse vide":null);
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null}));
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null,_relWin:(hf&&hf.relWin)||1460,_hasRel:!!(hf&&hf.scoreRel&&hf.scoreRel.length)}));
           setBtcSigL(false);
           if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
@@ -10396,6 +10403,25 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                     <div style={{display:isFull?"none":"flex",gap:4,marginBottom:8}}>
                       {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?_rc.color:C.border),background:on?_rc.color+"22":"transparent",color:on?_rc.color:C.text3,cursor:"pointer"}}>{tf}</button>; })}
                     </div>
+                    {/* v28.83 — Echelle du score */}
+                    {btcSig && btcSig._hasRel && (
+                      <div style={{display:"flex",alignItems:"center",gap:6,margin:"2px 0 6px"}}>
+                        <span style={{fontSize:9,color:C.text3,flexShrink:0}}>Échelle</span>
+                        {[["abs","Historique"],["rel","Adaptative"]].map(function(o){
+                          var on=btcScale===o[0];
+                          return <button key={o[0]} onClick={function(ev){ ev.stopPropagation(); setScale(o[0]); }}
+                            style={{flex:1,background:on?C.green+"22":C.bg2,border:"1px solid "+(on?C.green:C.border),borderRadius:7,
+                              padding:"4px 6px",color:on?C.green:C.text3,fontSize:10,fontWeight:700,cursor:"pointer"}}>{o[1]}</button>;
+                        })}
+                      </div>
+                    )}
+                    {btcSig && btcSig._hasRel && (
+                      <div style={{fontSize:8,color:C.text3,marginBottom:6,lineHeight:1.45}}>
+                        {btcScale==="rel"
+                          ? "Adaptative : chaque indicateur est repositionné dans son amplitude des 4 dernières années. Compense la compression des cycles (rendements décroissants), au prix d'une comparabilité réduite entre cycles."
+                          : "Historique : bornes fixes calibrées sur les cycles 2013-2017. Comparable dans le temps, mais les sommets récents plafonnent bas car l'amplitude des cycles diminue."}
+                      </div>
+                    )}
                     {/* v28.76 — Legende cliquable : afficher / masquer chaque courbe */}
                     <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 8px"}}>
                       {[["price","Prix BTC (log)",C.text],["score","Score de l'indicateur",C.green],["seuils","Seuils de consigne",C.text3]].map(function(sx){

@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.83";
+const APP_VERSION = "v28.84";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10332,7 +10332,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
           var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ var _sr=(hf&&hf.scoreRel)||[]; for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z], scoreRel:(_sr[z]!=null?_sr[z]:null)}); }
           var _cov=(hf&&hf.coverage)||[], _covAll=(hf&&hf.allNames)||[];
           var _histErr=(hf&&hf._err)||((!hf||!hf.t||!hf.t.length)?"reponse vide":null);
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null,_relWin:(hf&&hf.relWin)||1460,_hasRel:!!(hf&&hf.scoreRel&&hf.scoreRel.length)}));
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null,_relAnchor:(hf&&hf.relAnchor)||null,_hasRel:!!(hf&&hf.scoreRel&&hf.scoreRel.length)}));
           setBtcSigL(false);
           if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
@@ -10418,7 +10418,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                     {btcSig && btcSig._hasRel && (
                       <div style={{fontSize:8,color:C.text3,marginBottom:6,lineHeight:1.45}}>
                         {btcScale==="rel"
-                          ? "Adaptative : chaque indicateur est repositionné dans son amplitude des 4 dernières années. Compense la compression des cycles (rendements décroissants), au prix d'une comparabilité réduite entre cycles."
+                          ? ("Adaptative : chaque indicateur est repositionné entre le creux du cycle"
+                             + (btcSig._relAnchor ? (" (" + new Date(btcSig._relAnchor*1000).toLocaleDateString("fr-FR") + ")") : "")
+                             + " et aujourd'hui. Compense la compression des cycles, mais 100 signifie « plus haut depuis ce creux » : un nouveau sommet s'y colle par construction, et la référence se réinitialise au prochain plus bas.")
                           : "Historique : bornes fixes calibrées sur les cycles 2013-2017. Comparable dans le temps, mais les sommets récents plafonnent bas car l'amplitude des cycles diminue."}
                       </div>
                     )}

@@ -542,6 +542,24 @@ v28.70   Legend : trades en cours
            restreintes au réalisé
 
 
+DISCUSSION 9 — Correctifs (v28.85)
+──────────────────────────────────────────────────────────────────────────
+v28.85   Modal titre : fermetures involontaires pendant le défilement
+         ▸ Cause : le swipe-to-close se déclenchait dès que le geste
+           dépassait 60 px vers le bas, où qu'on soit dans la feuille, et
+           l'état « en haut du scroll » était réévalué à chaque touchmove —
+           un défilement qui atteignait le haut basculait donc en fermeture
+           au milieu du geste.
+         ▸ La nature du geste est désormais verrouillée dès les 8 premiers
+           pixels : fermeture seulement s'il démarre tout en haut du scroll,
+           franchement vers le bas et plus vertical qu'horizontal.
+         ▸ Les zones qui gèrent leur propre geste (graphe en touchAction:none,
+           tables scrollables) ne déclenchent plus la fermeture.
+         ▸ Pincement à deux doigts et onTouchCancel neutralisent le drag.
+         ▸ Seuil de fermeture inchangé (50 px résistants), geste légitime
+           depuis la poignée du haut inchangé.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

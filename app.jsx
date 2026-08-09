@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.84";
+const APP_VERSION = "v28.85";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1732,6 +1732,22 @@ function gdbFifo(trades){
   return { enriched:enriched, openQty:openQty, pru:(openQty>1e-9?openCost/openQty:null) };
 }
 
+// Zone qui gère elle-même le geste tactile (graphe, table scrollable…) :
+// remonte du point touché jusqu'à la feuille, s'arrête au premier élément
+// avec touchAction:none ou capable de défiler → pas de swipe-to-close dessus.
+function isSelfHandledZone(target, sheet) {
+  let n = target;
+  while (n && n !== sheet && n.nodeType === 1) {
+    const st = window.getComputedStyle(n);
+    if (st.touchAction === "none") return true;
+    if ((st.overflowY === "auto" || st.overflowY === "scroll") && n.scrollHeight > n.clientHeight + 1) return true;
+    if ((st.overflowX === "auto" || st.overflowX === "scroll") && n.scrollWidth  > n.clientWidth  + 1) return true;
+    n = n.parentNode;
+  }
+  return false;
+}
+const SHEET_LOCK = 8; // px avant de trancher entre défilement et fermeture
+
 function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const isCrypto = cat === "Crypto" || !!(CG_MAP[ticker]);
   const cgId     = CG_MAP[ticker] || ticker.toLowerCase();
@@ -1760,6 +1776,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [showCity, setShowCity] = useState(false);
   const [dragY, setDragY]   = useState(0);
   const touchStartY = useRef(null);
+  const touchStartX = useRef(null);
+  const sheetMode   = useRef(null);  // null = indécis | "drag" | "scroll"
+  const sheetFromTop= useRef(false); // le geste a-t-il démarré tout en haut ?
   const sheetRef    = useRef(null);
   const [crosshair, setCrosshair] = useState(null); // {i, x, y, price, ts}
   const [freeCursor, setFreeCursor] = useState(null); // curseur libre quand un outil est actif
@@ -2126,28 +2145,45 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
 
   const sortedNews = scoreNews(data?.news);
 
-  // ── Swipe-to-close : en haut du scroll OU geste suffisant n'importe où ──────
+  // ── Swipe-to-close : uniquement si le geste DÉMARRE tout en haut du scroll ──
+  // La nature du geste est verrouillée dès les premiers pixels : un défilement
+  // ne peut plus se muer en fermeture en cours de route (cause des fermetures
+  // involontaires — l'ancien code rouvrait le drag dès que scrollTop atteignait
+  // 0, et acceptait tout geste vers le bas > 60px n'importe où dans la feuille).
   const onSheetTouchStart = e => {
-    touchStartY.current = e.touches[0].clientY;
+    const sheet = sheetRef.current;
+    const t = e.touches[0];
+    touchStartY.current = t.clientY;
+    touchStartX.current = t.clientX;
+    sheetFromTop.current = !!sheet && sheet.scrollTop <= 0
+      && !isSelfHandledZone(t.target, sheet);
+    sheetMode.current = null;
     setDragY(0);
   };
   const onSheetTouchMove = e => {
-    const sheet = sheetRef.current;
+    // Pinch/zoom : jamais de fermeture
+    if(e.touches.length > 1) { sheetMode.current = "scroll"; setDragY(0); return; }
     const dy = e.touches[0].clientY - (touchStartY.current || 0);
-    const atTop = sheet && sheet.scrollTop <= 2;
-    // Swipe-to-close si on est tout en haut, ou si geste > 60px n'importe où
-    if(dy > 0 && (atTop || dy > 60)) {
-      e.preventDefault();
-      // Résistance légère : quasi 1:1 pour un geste naturel
-      const resistance = dy * 0.75;
-      setDragY(resistance);
+    const dx = e.touches[0].clientX - (touchStartX.current || 0);
+    if(sheetMode.current === null) {
+      // Geste encore trop court pour être lu → on ne décide rien
+      if(Math.abs(dy) < SHEET_LOCK && Math.abs(dx) < SHEET_LOCK) return;
+      // Verrouillage : vers le bas, franchement vertical, et parti du haut
+      sheetMode.current = (dy > 0 && Math.abs(dy) > Math.abs(dx) && sheetFromTop.current)
+        ? "drag" : "scroll";
     }
+    if(sheetMode.current !== "drag") return;
+    e.preventDefault();
+    // Résistance légère : quasi 1:1 pour un geste naturel
+    setDragY(Math.max(0, dy * 0.75));
   };
   const onSheetTouchEnd = () => {
-    // Seuil abaissé à 50px résistants (~67px de geste réel)
-    if(dragY > 50) { onClose(); }
+    // Seuil à 50px résistants (~67px de geste réel)
+    if(sheetMode.current === "drag" && dragY > 50) { onClose(); }
     else { setDragY(0); }
     touchStartY.current = null;
+    touchStartX.current = null;
+    sheetMode.current = null;
   };
 
   return (
@@ -2162,6 +2198,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
         onTouchStart={onSheetTouchStart}
         onTouchMove={onSheetTouchMove}
         onTouchEnd={onSheetTouchEnd}
+        onTouchCancel={onSheetTouchEnd}
         style={{
           width:"100%", background:C.bg0, borderRadius:"20px 20px 0 0",
           paddingBottom:36, maxHeight:"88vh", overflowY:"auto",

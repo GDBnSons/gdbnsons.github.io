@@ -559,6 +559,41 @@ v28.85   Modal titre : fermetures involontaires pendant le défilement
          ▸ Seuil de fermeture inchangé (50 px résistants), geste légitime
            depuis la poignée du haut inchangé.
 
+         OUTILLAGE
+         ▸ Node.js + esbuild + wrangler installés sur le poste.
+           Commande de build confirmée (ne minifie pas les identifiants) :
+             esbuild app.jsx --loader:.jsx=jsx --minify-whitespace
+                    --minify-syntax --target=es2017 --outfile=app.js
+         ▸ Dépôt GitHub relié : GDBnSons/gdbnsons.github.io (branche main).
+           .gitignore ajouté — le worker et wrangler.toml n'y entrent pas.
+         ▸ FORMAT_PARTAGE_GDBX1.md versionné.
+
+WORKER v159 — déploiement par wrangler
+         ▸ wrangler.toml créé à partir de la configuration réellement en
+           ligne : KV (GDB_KV + l'alias inutilisé gdb-sons-kv), AUTH_KEY,
+           cron unique "0 * * * *", compatibility_date 2026-05-10.
+           Les secrets ne figurent pas dans le fichier : Cloudflare les
+           conserve d'un déploiement à l'autre.
+         ▸ Clé FMP retirée du code (2 emplacements) et posée en secret
+           Cloudflare. Le worker échoue désormais explicitement si le
+           secret manque, au lieu de porter une clé en dur.
+         ▸ Déployé et vérifié : /ping OK, 12 bindings intacts, cron intact.
+
+         ⚠ CONSTAT — FMP répond 401 aux appels du worker
+           La même clé renvoie 200 depuis un poste local mais 401 depuis
+           Cloudflare, pour tous les tickers. Antérieur à cette version :
+           la clé envoyée est identique à celle qui était en dur, donc le
+           comportement est inchangé. Piste la plus probable : FMP bloque
+           les IP de datacenter, ou quota journalier (250/j) épuisé par le
+           cron horaire. Conséquence limitée : les logos sont mis en cache
+           dans ICON_DB côté app, et l'UI gère déjà l'absence de données FMP.
+
+         ⚠ SÉCURITÉ — AUTH_KEY est une variable en clair, présente dans
+           app.jsx sur un dépôt public. Les endpoints authentifiés du
+           worker, dont /write-bases, sont donc atteignables par quiconque
+           trouve le dépôt. Le pare-feu par origine ne protège que des
+           appels navigateur. Non corrigé — décision à prendre.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

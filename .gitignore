@@ -1,3 +1,8 @@
 # Le worker Cloudflare n'est pas publie sur GitHub Pages et contient des cles
 # d'API en dur : il ne doit jamais partir dans ce depot (public).
 cloudflare_worker*.js
+
+# Outillage wrangler (config de deploiement, cache local)
+wrangler.toml
+.wrangler/
+node_modules/

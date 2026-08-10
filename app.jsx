@@ -808,7 +808,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.85";
+const APP_VERSION = "v28.86";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -824,7 +824,34 @@ const uid=()=>"t"+Date.now();
 ═══════════════════════════════════════════════════════════ */
 /* ── Cloudflare Worker Storage ─────────────────────────────────── */
 const CF_WORKER_URL = "https://still-moon-9884.fgodbille.workers.dev";
-const CF_AUTH_KEY   = "gdb-sons-secret-2026";
+
+/* Phrase secrete du worker.
+   Elle n'est PLUS ecrite en dur : l'app est un site public, tout ce qui est
+   dans le bundle est lisible par n'importe qui (devtools ou app.js en direct).
+   Elle est saisie une fois par appareil et conservee en localStorage — elle
+   ne quitte donc jamais le navigateur. Cote Cloudflare, AUTH_KEY est un
+   secret, plus une variable en clair. */
+const CF_KEY_LS = "gdb_cf_key";
+let CF_AUTH_KEY = (function(){ try { return localStorage.getItem(CF_KEY_LS) || ""; } catch(e){ return ""; } })();
+function cfHasKey(){ return !!CF_AUTH_KEY; }
+function cfSetKey(k){
+  CF_AUTH_KEY = String(k || "").trim();
+  try { localStorage.setItem(CF_KEY_LS, CF_AUTH_KEY); } catch(e){}
+}
+function cfClearKey(){
+  CF_AUTH_KEY = "";
+  try { localStorage.removeItem(CF_KEY_LS); } catch(e){}
+}
+/* Renseigne par App : reaffiche la saisie des qu'un appel revient en 401
+   (phrase changee cote Cloudflare, faute de frappe, cache vide...). */
+let cfOnUnauthorized = null;
+
+/* Verifie une phrase sans transferer la moindre donnee : une route inexistante
+   repond 404 quand la phrase est bonne, 401 quand elle ne l'est pas. */
+function cfCheckKey(k){
+  return fetch(CF_WORKER_URL + "/__authcheck", { headers: { "X-Auth-Key": String(k || "").trim() } })
+    .then(function(r){ return r.status !== 401; });
+}
 
 /* Helpers d'appel au worker : centralisent URL + cle + en-tetes (migration = 1 ligne).
    Renvoient la promesse fetch brute (les .ok/.json()/.catch restent au site d'appel). */
@@ -838,7 +865,10 @@ function cfFetch(path, opts){
     if(!headers["Content-Type"]) headers["Content-Type"] = "application/json";
   }
   if(opts.timeout) init.signal = AbortSignal.timeout(opts.timeout);
-  return fetch(CF_WORKER_URL + path, init);
+  return fetch(CF_WORKER_URL + path, init).then(function(r){
+    if(r && r.status === 401 && cfOnUnauthorized) { try { cfOnUnauthorized(); } catch(e){} }
+    return r;
+  });
 }
 function cfGet(path, opts){ return cfFetch(path, opts); }
 function cfPost(path, body, opts){ opts = Object.assign({}, opts); opts.method = "POST"; opts.body = body; return cfFetch(path, opts); }
@@ -9736,7 +9766,7 @@ function PageNewsletter(){
       else setMsg({ok:false,text:(d&&(d.error||d.skipped))||"Échec de l'envoi"});
     }).catch(function(e){ setBusy(false); setMsg({ok:false,text:(e&&e.message)||"Erreur réseau"}); });
   }
-  var previewUrl = CF_WORKER_URL + "/newsletter/view?key=" + CF_AUTH_KEY;
+  var previewUrl = CF_WORKER_URL + "/newsletter/view?key=" + encodeURIComponent(CF_AUTH_KEY);
   var on = !!(prefs && prefs.enabled);
 
   return (
@@ -11514,8 +11544,61 @@ function PageAbout(){
   );
 }
 
+/* Saisie de la phrase secrete du worker — affichee tant qu'aucune phrase
+   valide n'est enregistree sur cet appareil, ou des qu'un appel revient 401. */
+function CfKeyGate({ C, onDone }){
+  const [val, setVal]   = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState("");
+  const submit = async () => {
+    const k = val.trim();
+    if(!k){ setErr("Saisir la phrase secrète."); return; }
+    setBusy(true); setErr("");
+    let ok = false;
+    try { ok = await cfCheckKey(k); }
+    catch(e){ setBusy(false); setErr("Worker injoignable — vérifier la connexion."); return; }
+    setBusy(false);
+    if(!ok){ setErr("Phrase refusée par le worker."); return; }
+    cfSetKey(k);
+    onDone();
+  };
+  return (
+    <div style={{fontFamily:"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,
+      maxWidth:430,margin:"0 auto",display:"flex",flexDirection:"column",alignItems:"center",
+      justifyContent:"center",padding:"0 24px"}}>
+      <div style={{fontSize:48,marginBottom:8}}>₿</div>
+      <div style={{fontSize:22,fontWeight:800,color:C.btc,marginBottom:4}}>GDB &amp; Sons</div>
+      <div style={{fontSize:11,color:C.gray,marginBottom:28,textAlign:"center",lineHeight:1.6}}>
+        Phrase secrète du worker<br/>
+        <span style={{color:C.text3}}>Demandée une seule fois par appareil</span>
+      </div>
+      <input
+        type="password" value={val} autoFocus
+        onChange={e=>{ setVal(e.target.value); if(err) setErr(""); }}
+        onKeyDown={e=>{ if(e.key==="Enter") submit(); }}
+        placeholder="Phrase secrète"
+        style={{width:"100%",padding:"14px 16px",fontSize:16,borderRadius:12,
+          background:C.bg2,color:C.text,border:`1.5px solid ${err?C.red:C.border}`,outline:"none"}}/>
+      {err ? <div style={{color:C.red,fontSize:12,marginTop:10,alignSelf:"flex-start"}}>{err}</div> : null}
+      <button onClick={submit} disabled={busy}
+        style={{width:"100%",marginTop:16,padding:"14px 0",fontSize:15,fontWeight:700,
+          borderRadius:12,border:"none",cursor:busy?"default":"pointer",
+          background:busy?C.bg3:C.btc,color:busy?C.gray:"#1a0e00"}}>
+        {busy ? "Vérification…" : "Valider"}
+      </button>
+      <div style={{fontSize:10,color:C.text3,marginTop:24,textAlign:"center",lineHeight:1.6}}>
+        Elle est conservée sur cet appareil uniquement et n'est jamais<br/>
+        incluse dans le code de l'application.
+      </div>
+      <div style={{position:"absolute",top:16,right:20,fontSize:10,color:C.btc,fontFamily:"monospace"}}>{APP_VERSION}</div>
+    </div>
+  );
+}
+
 function App(){
   const[tab,setTab]=useState(0);
+  // Passerelle d'authentification : bloque l'app tant que la phrase manque ou est refusee.
+  const[needKey,setNeedKey]=useState(()=>!cfHasKey());
   const[chartData,setChartData]=useState(CHART_MONTHLY);
   // Séries temporelles en state pour pouvoir les muter après snapshot/refresh
   const[liveDD,setLiveDD]=useState(DD);
@@ -12815,16 +12898,30 @@ function App(){
 
   // Splash : on le retire seulement quand l'app est prete (anime jusqu'au bout du chargement).
   useEffect(()=>{
-    if(!ready) return;
+    // Le splash doit aussi disparaitre quand on demande la phrase secrete,
+    // sinon il recouvrirait la saisie jusqu'au filet de securite de 30 s.
+    if(!ready && !needKey) return;
     if(typeof window!=="undefined" && window.__hideLoader){ window.__hideLoader(); return; }
     const l=(typeof document!=="undefined")&&document.getElementById("loader");
     if(l){ l.style.opacity="0"; setTimeout(function(){ l.style.display="none"; }, 500); }
-  }, [ready]);
+  }, [ready, needKey]);
+
+  // Tout appel worker qui revient en 401 redemande la phrase (phrase changee
+  // cote Cloudflare, faute de frappe, localStorage vide...).
+  useEffect(()=>{
+    cfOnUnauthorized = ()=>{ cfClearKey(); setNeedKey(true); };
+    return ()=>{ cfOnUnauthorized = null; };
+  }, []);
 
   const delTxn=useCallback(async id=>{
     const next=txns.filter(t=>t.id!==id);setTxns(next);await save(SK.txns,next);
     saveBase('gdb_txns', next);   // Phase 3 — propager la suppression vers la base canonique
   },[txns]);
+
+  // Passerelle d'authentification — prioritaire sur tout le reste.
+  // Rechargement apres saisie : garantit que tous les chargements repartent
+  // proprement avec la bonne phrase, sans etat residuel d'appels en 401.
+  if(needKey) return <CfKeyGate C={C} onDone={()=>window.location.reload()}/>;
 
   if(!ready)return(
     <div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
@@ -13079,7 +13176,15 @@ function App(){
             </div>
             <div style={{background:C.bg2,borderRadius:10,padding:"12px 14px",fontFamily:"monospace",fontSize:11,display:"flex",flexDirection:"column",gap:8}}>
               <div><span style={{color:C.gray}}>WORKER :</span> <span style={{color:C.text,fontSize:9}}>{CF_WORKER_URL}</span></div>
-              <div><span style={{color:C.gray}}>AUTH_KEY :</span> <span style={{color:C.text}}>{CF_AUTH_KEY.slice(0,8)}…</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{color:C.gray}}>PHRASE :</span>
+                <span style={{color:C.text}}>{CF_AUTH_KEY ? CF_AUTH_KEY.slice(0,4)+"…" : "—"}</span>
+                <button onClick={()=>{ cfClearKey(); window.location.reload(); }}
+                  style={{marginLeft:"auto",padding:"4px 10px",fontSize:10,fontWeight:700,borderRadius:6,
+                    border:`1px solid ${C.border2}`,background:C.bg3,color:C.text2,cursor:"pointer"}}>
+                  Changer
+                </button>
+              </div>
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8}}>
                 <span style={{color:C.gray}}>Statut :</span>{" "}
                 {gistSync ? (

@@ -588,11 +588,28 @@ WORKER v159 — déploiement par wrangler
            cron horaire. Conséquence limitée : les logos sont mis en cache
            dans ICON_DB côté app, et l'UI gère déjà l'absence de données FMP.
 
-         ⚠ SÉCURITÉ — AUTH_KEY est une variable en clair, présente dans
-           app.jsx sur un dépôt public. Les endpoints authentifiés du
-           worker, dont /write-bases, sont donc atteignables par quiconque
-           trouve le dépôt. Le pare-feu par origine ne protège que des
-           appels navigateur. Non corrigé — décision à prendre.
+         ▸ Preview URLs désactivées (preview_urls = false) : inutilisées,
+           et chacune était une URL publique de plus servant le worker.
+
+
+v28.86   SÉCURITÉ — la clé du worker quitte le bundle
+         ▸ Problème : AUTH_KEY était écrite en dur dans app.jsx. L'app étant
+           un site public, la clé était lisible par quiconque (devtools ou
+           app.js en direct) — donc /write-bases, et l'écriture dans le KV
+           du portefeuille, étaient ouverts à tous. Rendre le dépôt privé
+           n'y aurait rien changé : c'est le site qui est public.
+         ▸ Correction : plus aucune clé dans le code. L'app demande une
+           phrase secrète, une fois par appareil, conservée en localStorage.
+           Côté Cloudflare, AUTH_KEY devient un SECRET (wrangler secret put)
+           et disparaît de wrangler.toml.
+         ▸ Validation d'une phrase sans transfert de données : une route
+           inexistante répond 404 si la phrase est bonne, 401 sinon.
+         ▸ Tout appel revenant en 401 efface la phrase et réaffiche la
+           saisie — changer le secret ne peut donc pas bloquer un appareil.
+         ▸ Bouton « Changer » dans Paramètres → Connexion Cloudflare.
+         ▸ Testé : phrase refusée (rien n'est stocké), phrase acceptée
+           (rechargement, données KV OK), phrase périmée (retour automatique
+           à la saisie).
 
 
 ARCHITECTURE TECHNIQUE

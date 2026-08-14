@@ -696,6 +696,40 @@ v28.88   Market / BTC : intégration du CBBI (worker v160)
            la fenêtre de temps, le plein écran et le repli sont corrects.
          ▸ Source : colintalkscrypto.com — projet Zaczero/CBBI (AGPL-3.0).
 
+v28.89   Consignes paramétrables par échelle de score
+         ▸ Problème : un seul jeu de consignes servait les trois échelles,
+           alors qu'elles ne se lisent pas pareil. L'Historique plafonne bas
+           (bornes calibrées sur 2013-2017), l'Adaptative colle 100 à tout
+           nouveau plus haut, le CBBI a sa propre normalisation. Un score de
+           45 n'y veut pas dire la même chose, donc des seuils communs
+           donnaient forcément une consigne fausse sur au moins deux des
+           trois.
+         ▸ Chaque échelle a désormais son jeu : l'éditeur (⚙ Consignes)
+           s'ouvre sur trois onglets — Historique, Adaptative, CBBI — et
+           s'ouvre par défaut sur l'échelle affichée au moment du clic. Un
+           point gris marque les onglets réglés différemment de celui en
+           cours.
+         ▸ « Enregistrer » sauvegarde les trois d'un coup : on peut les régler
+           tous les trois avant de valider. « Appliquer aux 3 échelles »
+           recopie l'onglet courant sur les deux autres (le cas fréquent reste
+           les mêmes consignes partout, qu'on ne veut pas ressaisir trois
+           fois). « Valeurs par défaut » ne remet que l'onglet en cours.
+         ▸ Répercuté partout : consigne affichée en tête, couleur des boutons
+           de période, lignes de seuil du graphe, et plein écran.
+         ▸ Base gdb_btc_reco : passe du tableau de règles à un objet
+           {abs, rel, cbbi}. Les deux formes sont acceptées à la lecture —
+           un appareil resté en v28.88 renvoie l'ancien tableau, qui est repris
+           à l'identique sur les trois échelles. Rien à refaire côté
+           utilisateur, et le worker ne fait que transporter cette base, il ne
+           l'interprète pas.
+         ▸ Testé : 10 cas de reprise/normalisation en isolation (ancien
+           tableau, objet partiel, base vide, règles invalides, bornes hors
+           plage), puis en navigateur — réglage CBBI distinct appliqué au bon
+           endroit (« CBBI-TEST » à 31/100 pendant que les deux autres
+           échelles restent sur « Accumuler » à 36/100), lignes de seuil du
+           graphe suivant l'échelle, ouverture sur l'onglet actif, copie vers
+           les trois, et Annuler qui n'écrit rien.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

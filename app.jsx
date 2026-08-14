@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.88";
+const APP_VERSION = "v28.89";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9700,11 +9700,50 @@ function btcRecoThresholds(rules){
   return out;
 }
 
-/* Éditeur des consignes BTC — seuils de score → recommandation */
-function BtcRecoModal({ rules, onSave, onClose }){
-  const [rows,setRows] = useState(function(){
-    return btcRecoNorm(rules).map(function(r){ return { max:String(r.max), label:r.label, color:r.color }; });
+/* v28.89 — Un jeu de consignes PAR echelle de score.
+   Les trois echelles ne produisent pas la meme distribution : l'Historique
+   plafonne bas (bornes calibrees sur 2013-2017), l'Adaptative colle 100 a tout
+   nouveau plus haut, et le CBBI a sa propre normalisation. Un score de 45 n'y
+   veut donc pas dire la meme chose, et les seuils doivent pouvoir differer. */
+const BTC_RECO_SCALES = [
+  { key:"abs",  label:"Historique" },
+  { key:"rel",  label:"Adaptative" },
+  { key:"cbbi", label:"CBBI" },
+];
+/* Normalise la base en {abs, rel, cbbi}.
+   Retro-compatibilite : jusqu'a la v28.88 la base etait un simple TABLEAU de
+   regles, commun aux echelles. On le reprend alors tel quel pour les trois —
+   l'utilisateur retrouve exactement son reglage, et peut ensuite les separer. */
+function btcRecoSet(v){
+  var legacy = Array.isArray(v) ? v : null;
+  var obj = (v && !Array.isArray(v) && typeof v==="object") ? v : null;
+  var out = {};
+  BTC_RECO_SCALES.forEach(function(s){
+    var r = obj ? obj[s.key] : legacy;
+    out[s.key] = btcRecoNorm(Array.isArray(r)&&r.length ? r : legacy);   // btcRecoNorm() retombe sur le defaut
   });
+  return out;
+}
+// Regles applicables a une echelle donnee.
+function btcRecoRules(v, scale){
+  var set = btcRecoSet(v);
+  return set[scale] || set.abs;
+}
+
+/* Éditeur des consignes BTC — seuils de score → recommandation, par échelle */
+function BtcRecoModal({ rules, scale, onSave, onClose }){
+  const toRows=function(r){ return btcRecoNorm(r).map(function(x){ return { max:String(x.max), label:x.label, color:x.color }; }); };
+  // v28.89 — Un brouillon par echelle : on peut regler les trois avant d'enregistrer.
+  const [draft,setDraft] = useState(function(){
+    var set=btcRecoSet(rules), d={};
+    BTC_RECO_SCALES.forEach(function(s){ d[s.key]=toRows(set[s.key]); });
+    return d;
+  });
+  const [sc,setSc] = useState(function(){
+    return BTC_RECO_SCALES.some(function(s){ return s.key===scale; }) ? scale : "abs";
+  });
+  const rows = draft[sc];
+  const setRows=function(fn){ setDraft(function(p){ var n=Object.assign({},p); n[sc]=(typeof fn==="function")?fn(p[sc]):fn; return n; }); };
   function upd(i,patch){ setRows(function(p){ var n=p.slice(); n[i]=Object.assign({},n[i],patch); return n; }); }
   function del(i){ if(rows.length<=2) return; setRows(function(p){ return p.filter(function(_,j){ return j!==i; }); }); }
   function add(){
@@ -9717,15 +9756,46 @@ function BtcRecoModal({ rules, onSave, onClose }){
       return n;
     });
   }
+  // Recopie l'echelle courante sur les deux autres — le cas frequent reste
+  // "les memes consignes partout", qu'on ne veut pas ressaisir trois fois.
+  function copyToOthers(){
+    setDraft(function(p){
+      var n=Object.assign({},p);
+      BTC_RECO_SCALES.forEach(function(s){ if(s.key!==sc) n[s.key]=p[sc].map(function(r){ return Object.assign({},r); }); });
+      return n;
+    });
+  }
+  var norm=function(rs){ return btcRecoNorm(rs.map(function(r){ return { max:parseFloat(r.max), label:r.label, color:r.color }; })); };
   // Aperçu trié : c'est ce qui sera réellement appliqué
-  var preview = btcRecoNorm(rows.map(function(r){ return { max:parseFloat(r.max), label:r.label, color:r.color }; }));
+  var preview = norm(rows);
+  // Une echelle differe-t-elle des autres ? Sert a signaler les onglets modifies.
+  var sig=function(rs){ return norm(rs).map(function(r){ return r.max+":"+r.label; }).join("|"); };
+  var sigCur=sig(rows);
   var lo = 0;
   return (
     <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
       <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:520,background:C.bg0,borderRadius:"18px 18px 0 0",padding:"18px 18px 28px",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:3}}>Consignes d'achat</div>
-        <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:14}}>
+        <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:12}}>
           Chaque consigne s'applique tant que le score de surchauffe reste <b>sous</b> sa borne. Ex. : « Acheter » avec une borne à 25 vaut pour tout score de 0 à 24,9.
+        </div>
+
+        {/* v28.89 — Un jeu de consignes par échelle de score */}
+        <div style={{display:"flex",gap:5,marginBottom:8}}>
+          {BTC_RECO_SCALES.map(function(s){
+            var on=sc===s.key, diff=sig(draft[s.key])!==sigCur;
+            return (
+              <button key={s.key} onClick={function(){ setSc(s.key); }}
+                style={{flex:1,background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:8,
+                  padding:"7px 4px",color:on?C.btc:C.text3,fontSize:11,fontWeight:700,cursor:"pointer",position:"relative"}}>
+                {s.label}
+                {!on && diff && <span style={{position:"absolute",top:4,right:5,width:5,height:5,borderRadius:"50%",background:C.text3}}/>}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10,color:C.text3,lineHeight:1.5,marginBottom:12}}>
+          Vous réglez l'échelle <b style={{color:C.btc}}>{(BTC_RECO_SCALES.filter(function(s){return s.key===sc;})[0]||{}).label}</b>. Les trois échelles ne se lisent pas pareil — l'Historique plafonne bas, l'Adaptative colle 100 à tout nouveau plus haut, le CBBI a sa propre normalisation — donc un même score n'y a pas le même sens. Le point gris signale une échelle réglée différemment.
         </div>
 
         {rows.map(function(r,i){
@@ -9775,10 +9845,16 @@ function BtcRecoModal({ rules, onSave, onClose }){
 
         <div style={{display:"flex",gap:8}}>
           <Btn label="Annuler" onClick={onClose} color={C.text3} outline full/>
-          <Btn label="Enregistrer" onClick={function(){ onSave(preview); }} full/>
+          <Btn label="Enregistrer" onClick={function(){
+            var out={}; BTC_RECO_SCALES.forEach(function(s){ out[s.key]=norm(draft[s.key]); }); onSave(out);
+          }} full/>
         </div>
-        <div style={{marginTop:8}}>
-          <Btn label="Rétablir les valeurs par défaut" onClick={function(){ setRows(BTC_RECO_DEFAULT.map(function(x){ return {max:String(x.max),label:x.label,color:x.color}; })); }} color={C.text3} outline full/>
+        <div style={{marginTop:8,display:"flex",gap:8}}>
+          <Btn label="Appliquer aux 3 échelles" onClick={copyToOthers} color={C.text3} outline full/>
+          <Btn label="Valeurs par défaut" onClick={function(){ setRows(BTC_RECO_DEFAULT.map(function(x){ return {max:String(x.max),label:x.label,color:x.color}; })); }} color={C.text3} outline full/>
+        </div>
+        <div style={{fontSize:9,color:C.text3,marginTop:7,lineHeight:1.45}}>
+          « Enregistrer » sauvegarde les trois échelles. « Valeurs par défaut » ne remet que celle en cours d'édition.
         </div>
       </div>
     </div>
@@ -10520,7 +10596,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   // Defini au niveau de PageMarket (et non dans un composant imbrique) pour rester
   // accessible a la fois par la carte BTC et par l'overlay plein ecran.
   var renderBtcChart = function(isFull){
-                var _rules = btcRecoNorm(btcReco);
+                var _rules = btcRecoRules(btcReco, btcScaleEff);
                 var _rc = btcRecoFor((btcScaleEff==="cbbi" && btcSig && btcSig.cbbi && btcSig.cbbi.value!=null) ? btcSig.cbbi.value : (btcSig && btcSig.aggHeat), _rules);
                 var m=btcChartMemo;
                 var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
@@ -10859,7 +10935,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
       {btcFull && btcSig && btcChartMemo && (function(){
         // v28.88 — Le plein ecran suit l'echelle choisie : en mode CBBI il affiche la valeur du CBBI.
         var _h2 = (btcScaleEff==="cbbi" && btcSig.cbbi && btcSig.cbbi.value!=null) ? btcSig.cbbi.value : btcSig.aggHeat;
-        var _r2 = btcRecoNorm(btcReco), _rc2 = btcRecoFor(_h2, _r2);
+        var _r2 = btcRecoRules(btcReco, btcScaleEff), _rc2 = btcRecoFor(_h2, _r2);
         var TFB2=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
         return (
           <div style={{position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column"}}>
@@ -10887,7 +10963,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
       })()}
 
       {/* v28.76 — Editeur des consignes BTC */}
-      {recoOpen && <BtcRecoModal rules={btcReco} onClose={function(){ setRecoOpen(false); }}
+      {recoOpen && <BtcRecoModal rules={btcReco} scale={btcScaleEff} onClose={function(){ setRecoOpen(false); }}
         onSave={function(r){ onSaveBtcReco && onSaveBtcReco(r); setRecoOpen(false); }}/>}
 
       {mkt && !loading && sub==="secteurs" && (function(){ var ss=mkt.sectors||[]; return (
@@ -11386,7 +11462,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
         if(!btcSig) return null;
         var d=btcSig;
         // v28.76 — Le worker fournit le score brut ; la consigne vient des regles de l'utilisateur.
-        var _rules = btcRecoNorm(btcReco);
+        var _rules = btcRecoRules(btcReco, btcScaleEff);
         // v28.88 — En echelle CBBI, tout l'ecran bascule sur le CBBI : la valeur du
         // jour est la sienne, et seuls ses 9 indicateurs sont listes.
         var _cbbiOn = (btcScaleEff==="cbbi" && d.cbbi && d.cbbi.value!=null);
@@ -11629,6 +11705,7 @@ function PageChangelog(){
     ["v28.69 \u2014 Correctifs de calcul", "P&L r\u00e9alis\u00e9 recalcul\u00e9 en FIFO strict : il ne porte plus que sur la quantit\u00e9 r\u00e9ellement appari\u00e9e \u00e0 des achats connus. Corrige les positions d\u00e9tenues avant le d\u00e9but du journal de transactions, dont le produit de vente exc\u00e9dentaire \u00e9tait compt\u00e9 comme gain (cas de l'Or : +1 491 \u20ac affich\u00e9 au lieu de \u2212643 \u20ac). Encart Ma position align\u00e9 sur le portefeuille (m\u00eames quantit\u00e9, PRU et P&L que l'onglet Portfolio, base USD). Ic\u00f4nes du donut de r\u00e9partition align\u00e9es sur celles du d\u00e9tail des positions (logos compris)."],
     ["v28.70 \u2014 Legend : trades en cours", "Les positions non cl\u00f4tur\u00e9es apparaissent avec la pastille Ouvert (date d'entr\u00e9e, anciennet\u00e9, quantit\u00e9 restante, PA moyen), supprimables comme les autres et restaurables. Filtre Tous / Ouverts / Cl\u00f4tur\u00e9s. Les statistiques (P&L total, win rate, meilleur/pire, dur\u00e9e moyenne) ne portent que sur le r\u00e9alis\u00e9."],
     ["v28.88 \u2014 CBBI dans le tableau BTC", "Les 9 m\u00e9triques du Colin Talks Crypto Bitcoin Bull Run Index sont int\u00e9gr\u00e9es : 7 \u00e9taient d\u00e9j\u00e0 pr\u00e9sentes, Trolololo Trend Line et Woobull Top Cap vs CVDD sont ajout\u00e9es (22 indicateurs). Nouvelle \u00e9chelle CBBI \u00e0 c\u00f4t\u00e9 d'Historique et Adaptative : elle ne retient que ces 9 indicateurs, avec la normalisation du CBBI \u2014 chaque m\u00e9trique situ\u00e9e entre deux r\u00e9gressions ajust\u00e9es sur ses valeurs aux sommets et aux creux de cycle pass\u00e9s, donc des bornes qui d\u00e9rivent avec le march\u00e9. Rep\u00e8res de cycle cliquables sur le graphe : halving, sommet, creux."],
+    ["v28.89 \u2014 Consignes par \u00e9chelle", "Chaque \u00e9chelle de score (Historique, Adaptative, CBBI) a d\u00e9sormais son propre jeu de consignes : les trois ne se lisent pas pareil, un m\u00eame score n'y a donc pas le m\u00eame sens. L'\u00e9diteur s'ouvre sur l'\u00e9chelle affich\u00e9e, signale celles r\u00e9gl\u00e9es diff\u00e9remment et sait recopier un r\u00e9glage sur les trois. Les consignes d\u00e9j\u00e0 en place sont reprises \u00e0 l'identique sur les trois \u00e9chelles."],
   ];
   return (
     <div style={{paddingBottom:40}}>
@@ -11772,7 +11849,10 @@ function App(){
   // v28.65 — Suivi (watchlist / idees de trade)
   const[liveWatchlist,setLiveWatchlist]=useState(function(){ try{ var v=lsv9Get('gdb_watchlist'); return Array.isArray(v)?v:[]; }catch(e){ return []; } });
   // v28.76 — consignes d'achat BTC (seuils de score) parametrables
-  const[liveBtcReco,setLiveBtcReco]=useState(function(){ try{ var v=lsv9Get('gdb_btc_reco'); return Array.isArray(v)&&v.length?v:null; }catch(e){ return null; } });
+  // v28.89 — La base accepte les DEUX formes : l'ancien tableau commun (<= v28.88)
+  // et le nouvel objet {abs, rel, cbbi}. btcRecoSet() se charge de la conversion.
+  const _btcRecoOk=function(v){ return (Array.isArray(v)&&v.length) || (v&&!Array.isArray(v)&&typeof v==="object"&&Object.keys(v).length); };
+  const[liveBtcReco,setLiveBtcReco]=useState(function(){ try{ var v=lsv9Get('gdb_btc_reco'); return _btcRecoOk(v)?v:null; }catch(e){ return null; } });
   const saveBtcReco=function(r){ setLiveBtcReco(r); saveBase('gdb_btc_reco', r); };
   const saveWatchlist=function(nl){ setLiveWatchlist(nl); saveBase('gdb_watchlist', nl); };
   const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
@@ -12106,7 +12186,7 @@ function App(){
       if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
       if(Array.isArray(kv.gdb_quadrants) && kv.gdb_quadrants.length) setLiveQuad(kv.gdb_quadrants);
       if(Array.isArray(kv.gdb_watchlist)) setLiveWatchlist(kv.gdb_watchlist);
-      if(Array.isArray(kv.gdb_btc_reco) && kv.gdb_btc_reco.length) setLiveBtcReco(kv.gdb_btc_reco);
+      if(_btcRecoOk(kv.gdb_btc_reco)) setLiveBtcReco(kv.gdb_btc_reco);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
       mergeDrawingsKV(kv.gdb_drawings);
@@ -12151,7 +12231,7 @@ function App(){
       const lvGH = lsv9Get('gdb_gold_hist'); if(Array.isArray(lvGH)){ setLiveGoldHist(lvGH); }
       const lvQD = lsv9Get('gdb_quadrants'); if(Array.isArray(lvQD)&&lvQD.length){ setLiveQuad(lvQD); }
       const lvWL = lsv9Get('gdb_watchlist'); if(Array.isArray(lvWL)){ setLiveWatchlist(lvWL); }
-      const lvBR = lsv9Get('gdb_btc_reco'); if(Array.isArray(lvBR)&&lvBR.length){ setLiveBtcReco(lvBR); }
+      const lvBR = lsv9Get('gdb_btc_reco'); if(_btcRecoOk(lvBR)){ setLiveBtcReco(lvBR); }
       if(lvDD)   setLiveDD(_mergeArrays(DD, lvDD));
       if(lvGDBS) setLiveGDBS(_mergeArrays(GDBS, lvGDBS));
       if(lvGC)   setLiveGC(_mergeArrays(GC_FULL, lvGC));

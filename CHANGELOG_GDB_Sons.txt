@@ -730,6 +730,89 @@ v28.89   Consignes paramétrables par échelle de score
            graphe suivant l'échelle, ouverture sur l'onglet actif, copie vers
            les trois, et Annuler qui n'écrit rien.
 
+Worker   Newsletter recentrée sur le marché
+v161     ▸ Le portefeuille sort de la newsletter. La fiche parle du marché,
+           pas du wallet : plus de valeur totale, plus de Δ24h/Δ7j par poche,
+           plus de top/flop du jour, ni dans l'e-mail ni dans le résumé
+           Telegram. La perf 7 jours par poche disparaît aussi du récap hebdo.
+           /newsletter/portfolio reste servi, et le snapshot continue
+           d'alimenter l'historique du baromètre (gdb_risk_hist) — c'est lui
+           qui trace la courbe patrimoine de Market → Macro.
+         ▸ Pouls du marché : l'ancienne tuile « Signal BTC » (score agrégé,
+           échelle Historique) est remplacée par les DEUX échelles suivies —
+           CBBI et Adaptative — chacune avec son score /100 et la consigne
+           réglée pour elle. Le calcul est le portage exact de btcRecoNorm /
+           btcRecoFor (app.jsx) : la newsletter ne peut donc pas afficher une
+           consigne différente de celle de l'app. Les trois formes de la base
+           gdb_btc_reco sont acceptées (objet {abs,rel,cbbi} de la v28.89,
+           tableau hérité de la v28.88, base absente → valeurs par défaut).
+         ▸ Récap hebdo : ajout des Flux, repris de l'onglet Market → Flux —
+           les 20 classes d'actifs classées par performance 1 semaine, la
+           fenêtre 1 mois en rappel.
+         ▸ Récap hebdo : TOUT y est désormais sur la semaine et non sur la
+           journée. Indices & macro passent de l'overnight à la variation sur
+           5 séances, les secteurs et le cross-asset lisent pct1w, et les flux
+           ETF crypto s'affichent en cumul 7 jours au lieu du dernier jour.
+           Les titres de section le disent (« semaine » au lieu de « jour »).
+           La perf hebdo des indices est calculée par le cron à 9h UTC et
+           rangée en KV : l'envoi du dimanche ne dépense pas une sous-requête
+           de plus pour l'obtenir.
+         ▸ News & impact : ajout de Reuters, AP et Bloomberg, pour capter les
+           nouvelles qui font bouger le marché sans être financières au départ
+           — conflits armés en premier lieu. Reuters et AP ayant fermé leurs
+           flux RSS publics, on passe par la recherche Google News restreinte
+           au domaine ; Bloomberg sert encore le sien, doublé de la même
+           recherche en repli (son fil mélange dépêches et segments TV).
+           Une requête dédiée balaie les trois médias sur les mots de la
+           géopolitique. Les titres repérés sont étiquetés « geo » et l'IA a
+           pour consigne de ne pas les écarter au motif qu'elles ne sont pas
+           financières, et d'en retenir au moins une si elle est d'ampleur.
+           Quotas de sélection (8 géo, 10 dépêches, 10 crypto, 5 par média
+           maximum) : sans eux Yahoo, qui rend 6 titres par symbole, raflait
+           la liste et aucune dépêche n'atteignait l'IA.
+         ▸ Funding devient « Funding, open interest & liquidations » :
+           · variation d'open interest BTC et ETH sur 24 h et 7 jours — un
+             niveau d'OI seul ne dit rien, c'est sa variation qui informe.
+             Un historique (funding_oi_hist, 9 jours) est tenu à chaque build,
+             avec recherche du point le plus proche de la fenêtre visée et une
+             tolérance au-delà de laquelle rien n'est affiché plutôt qu'une
+             variation trompeuse. Les deux premiers jours après déploiement
+             montreront donc « — » le temps que l'historique se constitue ;
+           · liquidations 24 h BTC et ETH, réparties longs / shorts. Source
+             OKX, le seul flux public sans clé (Coinglass et Binance sont
+             fermés) : ce sont donc les liquidations d'OKX, une part du marché
+             et non un total, et l'affichage le dit ;
+           · Nasdaq : open interest du COT de la CFTC (NASDAQ-100
+             Consolidated), variation d'une semaine sur l'autre et net
+             spéculatif. C'est hebdomadaire et publié le vendredi — la date du
+             rapport est affichée. Les futures réglementés ne publiant aucune
+             donnée de liquidation, la fiche le mentionne au lieu de laisser
+             croire à une donnée manquante.
+         ▸ Correctifs de fond trouvés en chemin :
+           · nlBuildFiche lisait « btc_signals_v2 » en dur alors que la clé de
+             cache est passée à _v3 : le signal BTC de la newsletter ne
+             trouvait plus rien. Toutes les clés lues passent par CACHE_KEYS ;
+           · le cron avait deux branches « else if (h === 16) » — la seconde,
+             morte, était le snapshot BTC, qui n'a donc jamais été écrit. Les
+             flux passent à 10h UTC et le snapshot BTC retrouve son créneau ;
+           · 9h UTC rafraîchit aussi /btc-history-full, seule source des
+             échelles Adaptative et CBBI, dont le cache 12 h pouvait avoir
+             expiré à l'heure de l'envoi si l'app n'avait pas été ouverte.
+             Un extrait minuscule (nl_btc_scale) évite de reparser les
+             milliers de points de la série pendant l'envoi.
+         ▸ Nouvelles routes de diagnostic : /newsletter/week-metrics et
+           /newsletter/btc-pulse.
+         ▸ Testé sur banc d'essai (worker chargé dans un contexte vm, KV en
+           mémoire) : les 4 rendus — web et e-mail, quotidien et hebdo — avec
+           bascule correcte des titres et des valeurs jour/semaine ; KV vide,
+           où tout se rend en « — » sans lever ; les 3 formes de gdb_btc_reco ;
+           10 cas du détecteur géopolitique (« World War Two Memorial » ne
+           doit pas passer pour un conflit). En réseau réel : agrégation des
+           news (32 titres, 8 géo, Reuters/AP/Bloomberg présents), buildFunding
+           complet (liquidations OKX et COT Nasdaq réels), variation d'OI
+           vérifiée sur un historique simulé (+6,38 % attendu et obtenu), et
+           perf hebdo des 9 indices.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
@@ -738,8 +821,11 @@ Storage    localStorage (offline) + Cloudflare KV (cloud)
 APIs       Yahoo Finance (cours, news, recherche), FMP (logos stocks),
            CoinGecko (crypto : cours, métriques, logos, dominance),
            SEC EDGAR (Form 4), House Stock Watcher (Congrès),
+           Reuters / AP / Bloomberg via Google News (newsletter, v161),
+           OKX (liquidations), CFTC COT (open interest Nasdaq),
+           colintalkscrypto.com (CBBI), Farside (flux ETF),
            Resend + Telegram (newsletter), Claude (résumés de news)
-Worker     Cloudflare Worker v149 (proxy API, KV store, no CORS, cron)
+Worker     Cloudflare Worker v161 (proxy API, KV store, no CORS, cron)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
 Validation avant chaque livraison :

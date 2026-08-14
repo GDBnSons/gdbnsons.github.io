@@ -611,6 +611,34 @@ v28.86   SÉCURITÉ — la clé du worker quitte le bundle
            (rechargement, données KV OK), phrase périmée (retour automatique
            à la saisie).
 
+v28.87   Investir / Désinvestir : le compte Cash Dip devient un choix
+         ▸ Problème : le compte de liquidités de contrepartie était imposé —
+           KUCOIN pour GDB.C, EURO pour GDB.S. Impossible de désinvestir
+           depuis un autre compte, et à l'investissement le crédit passait
+           inaperçu : pour GDB.C seule la VALEUR de KuCoin bougeait, sa
+           quantité restait à 0 et la tuile affichait toujours « Compte vide ».
+           L'argent semblait sortir du Cash Matelas sans arriver nulle part.
+         ▸ Nouveau champ « Vers (Cash Dip) » / « Depuis (Cash Dip) », qui
+           s'inverse comme le champ Cash Matelas selon le sens de l'opération.
+           Repris dans l'écran de confirmation et dans le résumé de l'impact
+           (« Débit BCI → crédit KUCOIN → création de parts »).
+         ▸ La quantité du compte crédité/débité est désormais mise à jour dans
+           les deux cas : en € pour EURO, en $ pour les poches dollar
+           (USD, KuCoin). La valeur en $ reste calculée à l'identique, donc le
+           cours du fonds ne bouge pas.
+         ▸ Ne sont proposées que les vraies poches de liquidités — les titres
+           quasi-cash cotés (STRC…) sont exclus. Les comptes rattachés au
+           fonds visé viennent en tête, le défaut historique en premier.
+           Choisir un compte rattaché à l'AUTRE fonds reste possible mais
+           affiche un avertissement : le montant irait gonfler l'actif net de
+           l'autre fonds alors que les parts sont créées ici, et les deux
+           cours bougeraient.
+         ▸ Testé en navigateur sur la base locale : investissement 1 000 €
+           GDB.C → BCI 5 000→4 000 €, KuCoin 0→1 162 USDT, cours GDB.C
+           inchangé ; désinvestissement 500 € GDB.S depuis USD → USD
+           -5 430→-6 011 $, Bourso 11 300→11 800 €, EURO intact, cours GDB.S
+           inchangé.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

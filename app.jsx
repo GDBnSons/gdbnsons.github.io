@@ -636,6 +636,31 @@ function isCashLine(ticker, cat){
   if(c==="cash" && CASH_NAMES.indexOf(String(ticker||"").toUpperCase().trim())>=0) return true;
   return false;
 }
+// v28.87 — Comptes "Cash Dip" proposes comme contrepartie d'un investissement.
+// On ne retient que les VRAIES poches de liquidites (pas les titres quasi-cash type
+// STRC, qui sont cotes). Les buckets rattaches au fonds vise viennent en tete, le
+// bucket historique du fonds (KUCOIN pour GDB.C, EURO pour GDB.S) en premier : c'est
+// le defaut, present meme si l'item n'existe pas encore dans le portefeuille.
+function dipAccounts(src, fonds){
+  const want = fonds==="GDB.C" ? "C" : "S";
+  const mine = [fonds==="GDB.C" ? "KUCOIN" : "EURO"], others = [];
+  (((src||{}).stocks||{}).items||[]).forEach(function(x){
+    const t = String(x.t||"").toUpperCase();
+    if(x.cat!=="Cash" || CASH_NAMES.indexOf(t)<0) return;
+    const bucket = fundOf(x)===want ? mine : others;
+    if(mine.indexOf(t)<0 && others.indexOf(t)<0) bucket.push(t);
+  });
+  return mine.concat(others);
+}
+// Le compte choisi appartient-il bien au fonds vise ? Sinon le montant gonfle l'actif
+// net de l'AUTRE fonds tandis que les parts sont creees ici : les deux VL bougent.
+function dipMatchesFund(src, dip, fonds){
+  const want = fonds==="GDB.C" ? "C" : "S";
+  const t = String(dip||"").toUpperCase();
+  const it = (((src||{}).stocks||{}).items||[]).find(function(x){ return String(x.t||"").toUpperCase()===t; });
+  if(!it) return t === (fonds==="GDB.C" ? "KUCOIN" : "EURO");  // bucket par defaut, pas encore cree
+  return fundOf(it)===want;
+}
 async function fetchAllPrices(){
   const results = {errors: []};
 
@@ -808,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.86";
+const APP_VERSION = "v28.87";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4410,11 +4435,14 @@ function buildSections(L){
         const kVal  = kucoinItem?.val  ?? 0;
         const kLive = kucoinItem?.live ?? 0;
         const kPA   = kucoinItem?.pa   ?? 0;
+        // v28.87 — un investissement peut crediter KuCoin d'un montant non entier : on arrondit
+        // a l'affichage, sinon "1163.4241379 USDT".
+        const kQtyTxt = Math.round(kQty*100)/100;
         out.push({
           ticker:"KUCOIN", icon:null, iconComponent:"KUCOIN", label:"KuCoin",
           detail: kQty === 0 ? "Compte vide — rattaché GDB.C"
-                : kQty > 0  ? `${kQty} USDT · live $${kLive}`
-                :              `${kQty} USDT (découvert)`,
+                : kQty > 0  ? `${kQtyTxt} USDT · live $${kLive}`
+                :              `${kQtyTxt} USDT (découvert)`,
           valUSD: kVal, valEUR: Math.round(kVal*usdEur),
           pnl: kucoinItem?.pnl ?? 0,
           pct: kucoinItem?.pct ?? 0,
@@ -6502,10 +6530,16 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
   const[showNew,setShowNew]=useState(false);
   const[depot,setDepot]=useState({date:today(),bank:"BCI",montant:"",type:"depot",note:""});
   const[confirm,setConfirm]=useState(false);
-  const[invest,setInvest]=useState({date:today(),holder:"FLO",io:"IN",fonds:"GDB.C",montant:"",bank:"BCI",newHolder:""});
+  const[invest,setInvest]=useState({date:today(),holder:"FLO",io:"IN",fonds:"GDB.C",montant:"",bank:"BCI",dip:"KUCOIN",newHolder:""});
   const[confirmInv,setConfirmInv]=useState(false);
   const[done,setDone]=useState(null); // {type, montant, bank} après succès
   const src = EFF||CURRENT;
+  // v28.87 — contrepartie Cash Dip de l'investissement (ou sa source si desinvestissement).
+  // dipSel retombe sur le defaut du fonds quand la selection courante n'est plus proposee
+  // (typiquement apres un changement de fonds).
+  const dipOpts = dipAccounts(src, invest.fonds);
+  const dipSel  = dipOpts.indexOf(invest.dip)>=0 ? invest.dip : dipOpts[0];
+  const dipOff  = !dipMatchesFund(src, dipSel, invest.fonds);
 
   const submitDepot=()=>{
     if(!depot.montant||!depot.bank) return;
@@ -6972,11 +7006,17 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
               </div>
             </div>
             <div><FS label="Investisseur" value={invest.holder} onChange={v=>setInvest({...invest,holder:v})} options={[...(holders&&holders.length?holders:["FLO","GB"]),"+ Nouveau"]}/></div>
-            <div><FS label="Fonds" value={invest.fonds} onChange={v=>setInvest({...invest,fonds:v})} options={["GDB.C","GDB.S"]}/></div>
+            <div><FS label="Fonds" value={invest.fonds} onChange={v=>setInvest({...invest,fonds:v,dip:dipAccounts(src,v)[0]})} options={["GDB.C","GDB.S"]}/></div>
             {invest.holder==="+ Nouveau" && <div style={{gridColumn:"1/-1"}}><FI label="Nom du nouvel investisseur" value={invest.newHolder||""} onChange={v=>setInvest({...invest,newHolder:v.toUpperCase()})} placeholder="Initiales / nom"/></div>}
             <div style={{gridColumn:"1/-1"}}><FI label="Montant €" type="number" value={invest.montant} onChange={v=>setInvest({...invest,montant:v})} placeholder="0"/></div>
             <div style={{gridColumn:"1/-1"}}><FI label="Date" type="date" value={invest.date} onChange={v=>setInvest({...invest,date:v})}/></div>
             <div style={{gridColumn:"1/-1"}}><FS label={invest.io==="IN"?"Depuis (Cash Matelas)":"Vers (Cash Matelas)"} value={invest.bank} onChange={v=>setInvest({...invest,bank:v})} options={Object.keys((src.bank&&src.bank.breakdown)||{BCI:0,Bourso:0,DeBlock:0})}/></div>
+            <div style={{gridColumn:"1/-1"}}><FS label={invest.io==="IN"?"Vers (Cash Dip)":"Depuis (Cash Dip)"} value={dipSel} onChange={v=>setInvest({...invest,dip:v})} options={dipOpts}/></div>
+            {dipOff&&(
+              <div style={{gridColumn:"1/-1",marginTop:-7,marginBottom:6,background:C.red+"15",border:`1px solid ${C.red}44`,borderRadius:8,padding:"8px 12px",fontSize:11,color:C.red,lineHeight:1.5}}>
+                ⚠ {dipSel} n'est pas rattaché à {invest.fonds} — le montant ira dans l'actif net de l'autre fonds et les deux cours bougeront.
+              </div>
+            )}
           </div>
           {(()=>{
             const coursEur=(invest.fonds==="GDB.C"?(src.gdbC||0):(src.gdbS||0))*(src.usdEur||1);
@@ -7032,15 +7072,27 @@ function TradeModal({onClose, onAdd, onTradeApplied, EFF, holders, onInvestAppli
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:`1px solid ${C.border}`}}>
                       <span style={{fontSize:12,color:C.text2}}>{isIn?"Depuis":"Vers"} (Cash Matelas)</span>
-                      <span style={{fontSize:12,fontWeight:700,color:C.teal}}>{invest.bank}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:C.teal}}>{holderR===INV_OWNER?invest.bank:"—"}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderTop:`1px solid ${C.border}`}}>
+                      <span style={{fontSize:12,color:C.text2}}>{isIn?"Vers":"Depuis"} (Cash Dip)</span>
+                      <span style={{fontSize:12,fontWeight:700,color:dipOff?C.red:C.teal}}>{dipSel}</span>
                     </div>
                   </div>
+                  {dipOff&&(
+                    <div style={{background:C.red+"15",border:`1px solid ${C.red}44`,borderRadius:8,padding:"8px 12px",marginBottom:14,fontSize:11,color:C.red,textAlign:"center",lineHeight:1.5}}>
+                      ⚠ {dipSel} n'est pas rattaché à {invest.fonds} — le cours des deux fonds va bouger.
+                    </div>
+                  )}
                   <div style={{background:C.btc+"15",border:`1px solid ${C.btc}44`,borderRadius:8,padding:"8px 12px",marginBottom:14,fontSize:11,color:C.text3,textAlign:"center"}}>
-                    {holderR===INV_OWNER ? ((isIn?"Débit":"Crédit")+" "+invest.bank+" → "+(isIn?"création":"destruction")+" de parts · cours inchangé") : ("Apport externe de "+holderR+" → fonds brut (sans Cash Matelas)")}
+                    {holderR===INV_OWNER
+                      ? (isIn ? ("Débit "+invest.bank+" → crédit "+dipSel+" → création de parts"+(dipOff?"":" · cours inchangé"))
+                              : ("Débit "+dipSel+" → crédit "+invest.bank+" → destruction de parts"+(dipOff?"":" · cours inchangé")))
+                      : ("Apport externe de "+holderR+" → "+(isIn?"crédit ":"débit ")+dipSel+" (sans Cash Matelas)")}
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <Btn label="← Modifier" onClick={()=>setConfirmInv(false)} color={C.gray} outline/>
-                    <Btn label={isIn?"✓ Investir":"✓ Désinvestir"} onClick={()=>{ onInvestApplied&&onInvestApplied({holder:holderR,io:invest.io,fonds:invest.fonds,montant:montant,date:invest.date,bank:invest.bank}); setConfirmInv(false); onClose(); }} color={col}/>
+                    <Btn label={isIn?"✓ Investir":"✓ Désinvestir"} onClick={()=>{ onInvestApplied&&onInvestApplied({holder:holderR,io:invest.io,fonds:invest.fonds,montant:montant,date:invest.date,bank:invest.bank,dip:dipSel}); setConfirmInv(false); onClose(); }} color={col}/>
                   </div>
                 </div>
               </div>
@@ -12731,20 +12783,27 @@ function App(){
       const u=b.usdEur||(b.eurUsd?1/b.eurUsd:0.8605);
       const eurUsd=b.eurUsd||1/u;
       const deltaUSD=sign*(montantEUR/u);
-      const tgt=inv.fonds==="GDB.C"?"KUCOIN":"EURO";
-      // Injecter deltaUSD dans le cash-bucket du fonds. Robuste : recherche insensible a la
-      // casse, creation si absent, et NORMALISATION du ticker vers KUCOIN/EURO (calcGdbPrices
-      // lit ces tickers en exact -> sinon le fonds n'augmente pas et le cours derive).
+      // v28.87 — le compte Cash Dip credite (IN) / debite (OUT) est choisi dans le modal.
+      // Defaut historique : KUCOIN pour GDB.C, EURO pour GDB.S. dipAccounts() ne propose que
+      // des buckets rattaches au fonds vise, donc le cours reste inchange.
+      const tgt=String(inv.dip||"").toUpperCase()||(inv.fonds==="GDB.C"?"KUCOIN":"EURO");
+      const isEurDip=tgt==="EURO"||tgt==="EUR";
+      // qty d'un bucket de liquidites est libelle dans SA devise : € pour EURO, $ pour les
+      // poches dollar (USD, KUCOIN). deltaUSD reste la variation de valeur en $ dans tous les cas.
+      const dipQty=isEurDip?sign*montantEUR:deltaUSD;
+      // Injecter deltaUSD dans le cash-bucket choisi. Robuste : recherche insensible a la
+      // casse, creation si absent, et NORMALISATION du ticker (calcGdbPrices lit ces tickers
+      // en exact -> sinon le fonds n'augmente pas et le cours derive).
       let stocksItems=b.stocks.items.map(i=>({...i}));
       let fi=stocksItems.findIndex(x=>(x.t||"").toUpperCase()===tgt);
       if(fi<0){
-        stocksItems.push(inv.fonds==="GDB.C"
-          ? {t:"KUCOIN",cat:"Cash",qty:0,pa:1,live:1,val:0,pnl:0,pct:0}
-          : {t:"EURO",cat:"Cash",qty:0,pa:1.17,live:eurUsd,val:0,pnl:0,pct:0});
+        stocksItems.push(isEurDip
+          ? {t:tgt,cat:"Cash",qty:0,pa:1.17,live:eurUsd,val:0,pnl:0,pct:0}
+          : {t:tgt,cat:"Cash",qty:0,pa:1,live:1,val:0,pnl:0,pct:0});
         fi=stocksItems.length-1;
       }
       { const it={...stocksItems[fi]}; it.t=tgt; it.val=(it.val||0)+deltaUSD;
-        if(inv.fonds==="GDB.S"){ it.qty=(it.qty||0)+sign*montantEUR; } stocksItems[fi]=it; }
+        it.qty=(it.qty||0)+dipQty; stocksItems[fi]=it; }
       let bank={...b.bank, breakdown:{...b.bank.breakdown}};
       let portfolioItems=b.portfolio&&b.portfolio.items;
       // Tuile du bucket fonds dans portfolio.items (affichage KuCoin / EURO)
@@ -12753,13 +12812,13 @@ function App(){
         portfolioItems=portfolioItems.map(it=>{
           if((it.t||"").toUpperCase()!==tgt) return it;
           seen=true; const nv=(it.val||0)+deltaUSD;
-          return inv.fonds==="GDB.S"
-            ? {...it, t:tgt, val:nv, qty:(it.qty||0)+sign*montantEUR, valEUR:(it.valEUR!=null?it.valEUR:0)+sign*montantEUR}
-            : {...it, t:tgt, val:nv, valEUR:Math.round(nv*u)};
+          return isEurDip
+            ? {...it, t:tgt, val:nv, qty:(it.qty||0)+dipQty, valEUR:(it.valEUR!=null?it.valEUR:0)+sign*montantEUR}
+            : {...it, t:tgt, val:nv, qty:(it.qty||0)+dipQty, valEUR:Math.round(nv*u)};
         });
-        if(!seen) portfolioItems=[...portfolioItems, inv.fonds==="GDB.C"
-          ? {t:"KUCOIN",cat:"Cash",qty:0,pa:1,live:1,val:deltaUSD,pnl:0,pct:0,valEUR:Math.round(deltaUSD*u)}
-          : {t:"EURO",cat:"Cash",qty:sign*montantEUR,pa:1.17,live:eurUsd,val:deltaUSD,pnl:0,pct:0,valEUR:sign*montantEUR}];
+        if(!seen) portfolioItems=[...portfolioItems, isEurDip
+          ? {t:tgt,cat:"Cash",qty:dipQty,pa:1.17,live:eurUsd,val:deltaUSD,pnl:0,pct:0,valEUR:sign*montantEUR}
+          : {t:tgt,cat:"Cash",qty:dipQty,pa:1,live:1,val:deltaUSD,pnl:0,pct:0,valEUR:Math.round(deltaUSD*u)}];
       }
       if(inv.holder===INV_OWNER){
         bank.breakdown[inv.bank]=(bank.breakdown[inv.bank]||0)-sign*montantEUR;
@@ -12785,7 +12844,7 @@ function App(){
     setLiveInv(newInv);
     lsv9Set('gdb_inv', newInv);
     saveBase('gdb_inv', newInv);
-    console.info("[invest] "+inv.io+" "+inv.fonds+" "+inv.holder+" "+montantEUR+" -> "+sharesSigned.toFixed(4)+" parts | FUND_PARTS="+JSON.stringify(FUND_PARTS));
+    console.info("[invest] "+inv.io+" "+inv.fonds+" "+inv.holder+" "+montantEUR+" -> "+sharesSigned.toFixed(4)+" parts | dip="+(inv.dip||"(defaut)")+" matelas="+(inv.holder===INV_OWNER?inv.bank:"-")+" | FUND_PARTS="+JSON.stringify(FUND_PARTS));
   },[live, liveInv]);
 
   const reconcilePositions=useCallback(function(updates){

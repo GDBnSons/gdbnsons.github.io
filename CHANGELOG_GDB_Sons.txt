@@ -639,6 +639,63 @@ v28.87   Investir / Désinvestir : le compte Cash Dip devient un choix
            -5 430→-6 011 $, Bourso 11 300→11 800 €, EURO intact, cours GDB.S
            inchangé.
 
+v28.88   Market / BTC : intégration du CBBI (worker v160)
+         ▸ Le CBBI (Colin Talks Crypto Bitcoin Bull Run Index) agrège 9
+           métriques. Sept étaient déjà présentes dans le panneau — Pi Cycle
+           Top, NUPL (RUPL), RHODL, Puell, 2-Year MA, MVRV Z-Score, Reserve
+           Risk. Les deux manquantes sont ajoutées, portant le panneau à 22
+           indicateurs :
+             · Trolololo Trend Line — position du prix entre deux droites
+               logarithmiques historiques. Distincte de notre Rainbow Band,
+               qui est une régression ajustée sur toute la série.
+             · Woobull Top Cap vs CVDD — position entre le CVDD (plancher) et
+               le Top Cap (capitalisation moyenne × 35). Aucune de nos sources
+               on-chain ne publie ces deux modèles.
+           Les neuf portent une pastille CBBI dans la liste.
+         ▸ Troisième échelle du graphe, à côté d'Historique et Adaptative :
+           bouton CBBI. Il ne retient QUE les 9 indicateurs du CBBI et bascule
+           tout l'écran dessus — courbe de score, valeur du jour dans la
+           pastille de tête (« CBBI 31/100 »), et liste d'indicateurs réduite
+           à ces neuf. Un panneau dépliant détaille les 9 métriques avec leur
+           barre 0-100.
+         ▸ Pourquoi c'est plus fiable que nos deux échelles : le CBBI ne
+           normalise pas sur des bornes fixes. Pour chaque métrique il ajuste
+           deux droites de régression — une sur les valeurs prises aux SOMMETS
+           de cycle passés, une sur celles prises aux CREUX — et situe la
+           valeur du jour entre les deux. Les bornes dérivent donc avec le
+           marché, là où notre échelle Historique reste calée sur 2013-2017
+           (sommets récents plafonnés) et où l'Adaptative colle 100 à tout
+           nouveau plus haut par construction.
+         ▸ Repères de cycle cliquables sur le graphe, comme sur le site :
+           Halving (orange), Sommet de cycle (rouge), Creux de cycle (bleu).
+           Masqués par défaut, ils s'activent depuis la légende et ne
+           s'affichent que dans la fenêtre de temps visible. Le portage JS de
+           l'algorithme du CBBI (mark_highs_lows) retrouve exactement ses
+           dates : sommets 12/2013, 12/2017, 04/2021, 10/2025 ; creux 11/2011,
+           01/2015, 12/2018, 11/2022.
+         ▸ Worker v160 : route /cbbi (diagnostic), série CBBI alignée sur la
+           grille de dates du graphe dans /btc-history-full (champ scoreCbbi +
+           halvings/priceHighs/priceLows), bloc cbbi dans /btc-signals. La
+           série publiée par le projet est consommée telle quelle et mise en
+           cache KV 12 h — la recalculer demanderait un historique on-chain
+           complet (CVDD, Top Cap, RHODL…) que nos sources ne servent qu'en
+           « dernière valeur ». Si la source tombe, le worker sert le dernier
+           cache connu.
+         ▸ Repli : si la série CBBI manque (worker non déployé, source en
+           panne), le bouton CBBI disparaît et l'affichage retombe sur
+           l'échelle Historique — la préférence reste mémorisée et repart dès
+           que les données reviennent. Sans ce repli, un appareil ayant déjà
+           choisi CBBI se retrouvait devant une courbe vide sans bouton pour
+           en sortir.
+         ▸ Testé en navigateur sur un banc d'essai simulant le worker : les 22
+           indicateurs s'affichent, les 3 échelles tracent bien 3 courbes
+           distinctes, les 9 valeurs du panneau CBBI correspondent à celles
+           publiées (Pi Cycle 39, RUPL 35, RHODL 31, Puell 62, 2YMA 44,
+           Trolololo 14, MVRV 14, Reserve Risk 19, Woobull 25 → CBBI 31,2),
+           les repères apparaissent/disparaissent avec la légende et suivent
+           la fenêtre de temps, le plein écran et le repli sont corrects.
+         ▸ Source : colintalkscrypto.com — projet Zaczero/CBBI (AGPL-3.0).
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

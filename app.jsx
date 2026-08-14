@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.87";
+const APP_VERSION = "v28.88";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -10335,6 +10335,11 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   const [btcOpen,setBtcOpen]=useState({});
   const [btcChartOpen,setBtcChartOpen]=useState(true);
   const [btcTF,setBtcTF]=useState("ALL");
+  // v28.88 — Echelle reellement appliquee. "cbbi" reste memorise mais n'est
+  // honore que si la serie CBBI a pu etre chargee : sans ce repli, un appareil
+  // ayant deja choisi CBBI se retrouverait devant une courbe vide, et sans
+  // bouton CBBI pour en sortir puisqu'il est masque faute de donnees.
+  var btcScaleEff = (btcScale==="cbbi" && !(btcSig && btcSig._hasCbbi)) ? "abs" : btcScale;
   // Graphe BTC : calcul lourd (filtre ~2920 pts + 2 chemins SVG) mémoïsé → recalcul uniquement si la série ou la timeframe change.
   var btcChartMemo = React.useMemo(function(){
     var full = btcSig && btcSig._series;
@@ -10366,18 +10371,26 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
     var scorePath=(function(){
       var out=[], pen=false;
       S.forEach(function(p){
-        var sv = (btcScale==="rel" && p.scoreRel!=null) ? p.scoreRel : p.score;
+        // v28.88 — Trois echelles possibles ; on retombe sur le score historique
+        // si celle demandee n'a pas de valeur sur ce point.
+        var sv = p.score;
+        if(btcScaleEff==="rel"  && p.scoreRel!=null)  sv=p.scoreRel;
+        if(btcScaleEff==="cbbi") sv=p.scoreCbbi;
         if(sv==null || !isFinite(sv)){ pen=false; return; }
         out.push((pen?"L":"M")+X(p.t).toFixed(1)+" "+YS(sv).toFixed(1));
         pen=true;
       });
       return out.join(" ");
     })();
+    // v28.88 — Reperes verticaux (halving / sommet / creux) visibles dans la fenetre.
+    var mk=(btcSig&&btcSig._marks)||{};
+    var marksIn=function(a){ return ((mk[a])||[]).filter(function(t){ return t>=S[0].t && t<=S[S.length-1].t; }); };
+    var marks={halving:marksIn("halving"), high:marksIn("high"), low:marksIn("low")};
     var pTicks=[Math.pow(10,pMax),Math.pow(10,(pMax+pMin)/2),Math.pow(10,pMin)];
     var spanDays=(t1-t0)/864e5;
     var xt=[]; var nT=4; for(var k=0;k<nT;k++){ xt.push(S[Math.round(k*(S.length-1)/(nT-1))]); }
-    return {W:W,HH:HH,padL:padL,padR:padR,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt};
-  }, [btcSig && btcSig._series, btcTF, btcFull, vp.w, vp.h, btcScale]);
+    return {W:W,HH:HH,padL:padL,padR:padR,padT:padT,padB:padB,X:X,YP:YP,YS:YS,pricePath:pricePath,scorePath:scorePath,pTicks:pTicks,spanDays:spanDays,xt:xt,marks:marks};
+  }, [btcSig && btcSig._series, btcSig && btcSig._marks, btcTF, btcFull, vp.w, vp.h, btcScaleEff]);
   function loadSec(p,setD,setLd,setEr,noCache){
     setLd(true); setEr(null);
     cfGet(p+(noCache?(p.indexOf("?")>=0?"&":"?")+"no_cache=1":""),{timeout:25000})
@@ -10448,10 +10461,13 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
           var sw=0,swh=0,nok=0; ind.forEach(function(o){ if(o.heat!=null){ sw+=o.weight; swh+=o.heat*o.weight; nok++; } });
           var ah=sw>0?swh/sw:null;
           var reco=ah==null?null:(ah<25?"Acheter":ah<40?"Accumuler":ah<60?"Conserver":ah<80?"Alléger":"Vendre");
-          var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ var _sr=(hf&&hf.scoreRel)||[]; for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z], scoreRel:(_sr[z]!=null?_sr[z]:null)}); }
+          var series=[]; if(hf&&hf.t&&hf.price&&hf.score){ var _sr=(hf&&hf.scoreRel)||[], _sc=(hf&&hf.scoreCbbi)||[]; for(var z=0;z<hf.t.length;z++) series.push({t:hf.t[z]*1000, price:hf.price[z], score:hf.score[z], scoreRel:(_sr[z]!=null?_sr[z]:null), scoreCbbi:(_sc[z]!=null?_sc[z]:null)}); }
           var _cov=(hf&&hf.coverage)||[], _covAll=(hf&&hf.allNames)||[];
           var _histErr=(hf&&hf._err)||((!hf||!hf.t||!hf.t.length)?"reponse vide":null);
-          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null,_relAnchor:(hf&&hf.relAnchor)||null,_hasRel:!!(hf&&hf.scoreRel&&hf.scoreRel.length)}));
+          // v28.88 — Reperes du graphe CBBI : halvings, sommets et creux de cycle (en ms).
+          var _mk=function(a){ return ((hf&&hf[a])||[]).map(function(s){ return s*1000; }); };
+          var _marks={halving:_mk("halvings"), high:_mk("priceHighs"), low:_mk("priceLows")};
+          setBtcSig(Object.assign({},d,{indicators:ind,aggHeat:ah,reco:reco,recoColor:btcHeatColor(ah),nIndicators:nok,_series:series,_coverage:_cov,_covAll:_covAll,_histErr:_histErr,_histSrc:(hf&&hf.src)||null,_relAnchor:(hf&&hf.relAnchor)||null,_hasRel:!!(hf&&hf.scoreRel&&hf.scoreRel.length),_marks:_marks,_hasCbbi:!!(hf&&hf.scoreCbbi&&hf.scoreCbbi.some(function(v){return v!=null;}))}));
           setBtcSigL(false);
           if(ah!=null){ cfPost("/btc-history-record",{h:ah,reco:reco}).catch(function(){}); }
         };
@@ -10505,7 +10521,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
   // accessible a la fois par la carte BTC et par l'overlay plein ecran.
   var renderBtcChart = function(isFull){
                 var _rules = btcRecoNorm(btcReco);
-                var _rc = btcRecoFor(btcSig && btcSig.aggHeat, _rules);
+                var _rc = btcRecoFor((btcScaleEff==="cbbi" && btcSig && btcSig.cbbi && btcSig.cbbi.value!=null) ? btcSig.cbbi.value : (btcSig && btcSig.aggHeat), _rules);
                 var m=btcChartMemo;
                 var W=m.W, HH=m.HH, padL=m.padL, padR=m.padR;
                 var X=m.X, YP=m.YP, YS=m.YS, pricePath=m.pricePath, scorePath=m.scorePath, pTicks=m.pTicks, spanDays=m.spanDays, xt=m.xt;
@@ -10523,20 +10539,23 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                       {TFB.map(function(tf){ var on=btcTF===tf; return <button key={tf} onClick={function(ev){ev.stopPropagation(); setBtcTF(tf);}} style={{flex:1,minWidth:0,padding:"4px 0",fontSize:9,fontWeight:700,borderRadius:6,border:"1px solid "+(on?_rc.color:C.border),background:on?_rc.color+"22":"transparent",color:on?_rc.color:C.text3,cursor:"pointer"}}>{tf}</button>; })}
                     </div>
                     {/* v28.83 — Echelle du score */}
-                    {btcSig && btcSig._hasRel && (
+                    {btcSig && (btcSig._hasRel||btcSig._hasCbbi) && (
                       <div style={{display:"flex",alignItems:"center",gap:6,margin:"2px 0 6px"}}>
                         <span style={{fontSize:9,color:C.text3,flexShrink:0}}>Échelle</span>
-                        {[["abs","Historique"],["rel","Adaptative"]].map(function(o){
-                          var on=btcScale===o[0];
+                        {[["abs","Historique"],["rel","Adaptative"]].concat(btcSig&&btcSig._hasCbbi?[["cbbi","CBBI"]]:[]).map(function(o){
+                          var on=btcScaleEff===o[0];
                           return <button key={o[0]} onClick={function(ev){ ev.stopPropagation(); setScale(o[0]); }}
                             style={{flex:1,background:on?C.green+"22":C.bg2,border:"1px solid "+(on?C.green:C.border),borderRadius:7,
                               padding:"4px 6px",color:on?C.green:C.text3,fontSize:10,fontWeight:700,cursor:"pointer"}}>{o[1]}</button>;
                         })}
                       </div>
                     )}
-                    {btcSig && btcSig._hasRel && (
+                    {btcSig && (btcSig._hasRel||btcSig._hasCbbi) && (
                       <div style={{fontSize:8,color:C.text3,marginBottom:6,lineHeight:1.45}}>
-                        {btcScale==="rel"
+                        {btcScaleEff==="cbbi"
+                          ? ("CBBI : seuls les 9 indicateurs du Colin Talks Crypto Bitcoin Bull Run Index sont retenus, avec SA normalisation — chaque indicateur est situé entre deux droites ajustées sur ses valeurs aux sommets et aux creux passés. Les bornes dérivent donc avec le marché au lieu de rester calées sur 2013-2017."
+                             + ((btcSig.cbbi&&btcSig.cbbi.value!=null) ? (" Valeur du jour : "+btcSig.cbbi.value.toFixed(1)+"/100.") : ""))
+                          : btcScaleEff==="rel"
                           ? ("Adaptative : chaque indicateur est repositionné entre le creux du cycle"
                              + (btcSig._relAnchor ? (" (" + new Date(btcSig._relAnchor*1000).toLocaleDateString("fr-FR") + ")") : "")
                              + " et aujourd'hui. Compense la compression des cycles, mais 100 signifie « plus haut depuis ce creux » : un nouveau sommet s'y colle par construction, et la référence se réinitialise au prochain plus bas.")
@@ -10545,8 +10564,17 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                     )}
                     {/* v28.76 — Legende cliquable : afficher / masquer chaque courbe */}
                     <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",margin:"2px 0 8px"}}>
-                      {[["price","Prix BTC (log)",C.text],["score","Score de l'indicateur",C.green],["seuils","Seuils de consigne",C.text3]].map(function(sx){
-                        var on=!btcHidden[sx[0]];
+                      {[["price","Prix BTC (log)",C.text],
+                        ["score",(btcScaleEff==="cbbi"?"Score CBBI":"Score de l'indicateur"),C.green],
+                        ["seuils","Seuils de consigne",C.text3],
+                        // v28.88 — Reperes du graphe CBBI. Masques par defaut : ils
+                        // n'apparaissent que si l'utilisateur les active.
+                        ["halving","Halving",C.btc],
+                        ["high","Sommet de cycle",C.red],
+                        ["low","Creux de cycle",C.teal]].map(function(sx){
+                        var isMark=(sx[0]==="halving"||sx[0]==="high"||sx[0]==="low");
+                        if(isMark && !((m.marks&&m.marks[sx[0]])||[]).length) return null;
+                        var on=isMark?!!btcHidden[sx[0]]:!btcHidden[sx[0]];
                         return (
                           <button key={sx[0]} onClick={function(ev){ ev.stopPropagation(); setBtcHidden(function(h){ var n2=Object.assign({},h); n2[sx[0]]=!h[sx[0]]; return n2; }); }}
                             style={{display:"flex",alignItems:"center",gap:5,background:on?sx[2]+"22":"transparent",border:"1.5px solid "+(on?sx[2]:C.border),
@@ -10573,15 +10601,58 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                           </g>
                         );
                       })}
+                      {/* v28.88 — Reperes verticaux facon CBBI : halving, sommet et creux de cycle */}
+                      {[["halving",C.btc,"H"],["high",C.red,"▲"],["low",C.teal,"▼"]].map(function(mk){
+                        if(!btcHidden[mk[0]]) return null;
+                        return ((m.marks&&m.marks[mk[0]])||[]).map(function(t,mi){
+                          var mx=X(t);
+                          if(mx<padL-0.5 || mx>W-padR+0.5) return null;
+                          return (
+                            <g key={mk[0]+mi}>
+                              <line x1={mx} y1={m.padT} x2={mx} y2={HH-m.padB} stroke={mk[1]} strokeWidth="0.9" strokeDasharray="2 2.5" opacity="0.75"/>
+                              <text x={mx} y={m.padT-3} textAnchor="middle" fontSize="6.5" fontWeight="700" fill={mk[1]}>{mk[2]}</text>
+                            </g>
+                          );
+                        });
+                      })}
                       {!btcHidden.score && <path d={scorePath} fill="none" stroke="url(#btcScoreStroke)" strokeWidth="1.8" strokeLinejoin="round"/>}
                       {!btcHidden.price && <path d={pricePath} fill="none" stroke={C.text} strokeWidth="1.4" strokeLinejoin="round"/>}
                       {!btcHidden.price && pTicks.map(function(pv,i){ return <text key={"p"+i} x={padL-3} y={YP(pv)+2.5} textAnchor="end" fontSize="8" fill={C.text}>{fmtP(pv)}</text>; })}
                       {[0,50,100].map(function(sv){ return <text key={"s"+sv} x={W-padR+3} y={YS(sv)+2.5} textAnchor="start" fontSize="8" fill={C.green}>{sv}</text>; })}
                       {xt.map(function(p,i){ return <text key={"x"+i} x={Math.max(padL,Math.min(W-padR,X(p.t)))} y={HH-5} textAnchor={i===0?"start":i===xt.length-1?"end":"middle"} fontSize="8" fill={C.text3}>{fmtX(p.t)}</text>; })}
                     </svg>
-                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente.</div>
+                    <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>{btcScaleEff==="cbbi"?"Indice CBBI publié (moyenne des 9 métriques, historique quotidien depuis 2011). Courbe verte = zone d'achat, rouge = zone de vente.":"Score de cycle reconstitué (indicateurs de prix). Courbe verte = zone d'achat, rouge = zone de vente."}</div>
+                    {/* v28.88 — En mode CBBI, le detail des 9 metriques remplace le
+                        bandeau de couverture (qui decrit notre score reconstitue). */}
+                    {btcScaleEff==="cbbi" && btcSig && btcSig.cbbi && (function(){
+                      var cb=btcSig.cbbi, mm=cb.metrics||{};
+                      var LBL=[["PiCycle","Pi Cycle Top"],["RUPL","RUPL / NUPL"],["RHODL","RHODL Ratio"],["Puell","Puell Multiple"],["2YMA","2 Year Moving Average"],["Trolololo","Trolololo Trend Line"],["MVRV","MVRV Z-Score"],["ReserveRisk","Reserve Risk"],["Woobull","Top Cap vs CVDD"]];
+                      return (
+                        <div style={{marginTop:8,background:C.bg2,border:"1px solid "+C.border,borderRadius:9,padding:"9px 11px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                            <span style={{fontSize:11,fontWeight:800,color:C.text}}>CBBI — 9 métriques</span>
+                            <span style={{fontSize:12,fontWeight:800,color:btcHeatColor(cb.value)}}>{cb.value!=null?cb.value.toFixed(1):"—"}<span style={{fontSize:9,fontWeight:600,color:C.text3}}>/100</span></span>
+                          </div>
+                          {LBL.map(function(x){
+                            var v=mm[x[0]];
+                            return (
+                              <div key={x[0]} style={{display:"flex",alignItems:"center",gap:7,padding:"2.5px 0"}}>
+                                <span style={{fontSize:10,color:C.text2,flex:1,minWidth:0}}>{x[1]}</span>
+                                <span style={{position:"relative",width:64,height:4,borderRadius:3,background:C.bg3,flexShrink:0}}>
+                                  {v!=null && <span style={{position:"absolute",left:0,top:0,height:4,borderRadius:3,width:Math.max(2,Math.min(100,v))+"%",background:btcHeatColor(v)}}/>}
+                                </span>
+                                <span style={{fontSize:10,fontWeight:700,color:v==null?C.text3:btcHeatColor(v),width:26,textAlign:"right",flexShrink:0}}>{v==null?"—":Math.round(v)}</span>
+                              </div>
+                            );
+                          })}
+                          <div style={{fontSize:8,color:C.text3,marginTop:7,lineHeight:1.45}}>
+                            Chaque métrique est ramenée sur 0-100 par la méthode du CBBI : régression sur ses valeurs aux sommets de cycle (100) et aux creux (0). L'indice est leur moyenne simple. Source : colintalkscrypto.com — projet Zaczero/CBBI (AGPL-3.0), mis à jour quotidiennement.
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {/* v28.81 — Couverture des indicateurs du score reconstitue */}
-                    {(function(){
+                    {btcScaleEff!=="cbbi" && (function(){
                       var cov = (btcSig && btcSig._coverage) || [];
                       if(!cov.length) return null;
                       var fD=function(ts){ var d=new Date(ts*1000); return ("0"+(d.getUTCMonth()+1)).slice(-2)+"/"+d.getUTCFullYear(); };
@@ -10786,7 +10857,9 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
 
       {/* v28.78 — Plein écran du graphe BTC (même logique que Home et GDB) */}
       {btcFull && btcSig && btcChartMemo && (function(){
-        var _r2 = btcRecoNorm(btcReco), _rc2 = btcRecoFor(btcSig.aggHeat, _r2);
+        // v28.88 — Le plein ecran suit l'echelle choisie : en mode CBBI il affiche la valeur du CBBI.
+        var _h2 = (btcScaleEff==="cbbi" && btcSig.cbbi && btcSig.cbbi.value!=null) ? btcSig.cbbi.value : btcSig.aggHeat;
+        var _r2 = btcRecoNorm(btcReco), _rc2 = btcRecoFor(_h2, _r2);
         var TFB2=["1W","1M","YTD","1Y","2Y","5Y","ALL"];
         return (
           <div style={{position:"fixed",inset:0,zIndex:1000,background:C.bg,display:"flex",flexDirection:"column"}}>
@@ -10803,7 +10876,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
             </div>
             <div style={{display:"flex",alignItems:"baseline",gap:10,padding:"0 12px 4px",flexShrink:0}}>
               <span style={{fontSize:15,fontWeight:800,color:_rc2.color}}>{_rc2.label}</span>
-              <span style={{fontSize:11,color:C.text2}}>{btcSig.aggHeat!=null?Math.round(btcSig.aggHeat)+"/100":"—"}</span>
+              <span style={{fontSize:11,color:C.text2}}>{_h2!=null?Math.round(_h2)+"/100":"—"}{btcScaleEff==="cbbi"?" CBBI":""}</span>
               <span style={{fontSize:11,color:C.text3}}>BTC ${num(btcSig.price,0)}</span>
             </div>
             <div style={{flex:1,minHeight:0,overflowY:"auto",padding:"0 12px 12px"}}>
@@ -11314,11 +11387,22 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
         var d=btcSig;
         // v28.76 — Le worker fournit le score brut ; la consigne vient des regles de l'utilisateur.
         var _rules = btcRecoNorm(btcReco);
-        var _reco  = btcRecoFor(d.aggHeat, _rules);
-        d = Object.assign({}, d, { reco:_reco.label, recoColor:_reco.color });
+        // v28.88 — En echelle CBBI, tout l'ecran bascule sur le CBBI : la valeur du
+        // jour est la sienne, et seuls ses 9 indicateurs sont listes.
+        var _cbbiOn = (btcScaleEff==="cbbi" && d.cbbi && d.cbbi.value!=null);
+        var _heat  = _cbbiOn ? d.cbbi.value : d.aggHeat;
+        var _reco  = btcRecoFor(_heat, _rules);
+        d = Object.assign({}, d, { aggHeat:_heat, reco:_reco.label, recoColor:_reco.color });
         var grad="linear-gradient(90deg,"+C.green+" 0%,"+C.green+" 28%,"+C.gold+" 50%,"+C.orange+" 72%,"+C.red+" 100%)";
         var byKey={}; (d.indicators||[]).forEach(function(o){ byKey[o.key]=o; });
-        var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","sthmvrv","rhodl","reserverisk","asopr","vdd"]],["Sentiment",["feargreed"]]];
+        var groups=[["Cycle & valorisation",["ma2y","mayer","picycle","picyclebot","ma200w","rainbow","trolololo","ahr999"]],["Tendance & momentum",["bmsb","ema918","rsiw"]],["On-chain",["puell","hashribbons","mvrvz","nupl","sthmvrv","rhodl","reserverisk","asopr","vdd","woobull"]],["Sentiment",["feargreed"]]];
+        if(_cbbiOn){
+          var _ck=(d.cbbi&&d.cbbi.keys)||[];
+          groups=groups.map(function(g){ return [g[0], g[1].filter(function(k){ return _ck.indexOf(k)>=0; })]; })
+                       .filter(function(g){ return g[1].length; });
+        }
+        var _nOk=_cbbiOn?_ck.filter(function(k){ return byKey[k] && byKey[k].heat!=null; }).length:d.nIndicators;
+        var _nTot=_cbbiOn?_ck.length:(d.indicators||[]).length;
         var tog=function(k){ setBtcOpen(function(p){ var n=Object.assign({},p); n[k]=!p[k]; return n; }); };
         var maj=d.ts?new Date(d.ts).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
 
@@ -11331,7 +11415,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                   <div style={{fontSize:28,fontWeight:800,color:d.recoColor,lineHeight:1.1,marginTop:3}}>{d.reco||"—"}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5}}>Surchauffe</div>
+                  <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:0.5}}>{_cbbiOn?"CBBI":"Surchauffe"}</div>
                   <div style={{fontSize:24,fontWeight:800,color:d.recoColor,lineHeight:1.1,marginTop:3}}>{d.aggHeat!=null?Math.round(d.aggHeat):"—"}<span style={{fontSize:12,fontWeight:600,color:C.text2}}>/100</span></div>
                 </div>
               </div>
@@ -11340,7 +11424,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
               </div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.text3,marginTop:6}}><span>{_rules[0].label}</span><span>{_rules.length>2?_rules[Math.floor(_rules.length/2)].label:""}</span><span>{_rules[_rules.length-1].label}</span></div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
-                <span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {d.nIndicators}/{(d.indicators||[]).length} indic.</span>
+                <span style={{fontSize:10,color:C.text2,fontWeight:600}}>BTC ${num(d.price,0)} · {_nOk}/{_nTot} indic.{_cbbiOn?" CBBI":""}</span>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <button onClick={function(ev){ ev.stopPropagation(); setRecoOpen(true); }} title="Paramétrer les consignes"
                     style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:7,padding:"3px 9px",color:C.text2,fontSize:10,fontWeight:700,cursor:"pointer"}}>⚙ Consignes</button>
@@ -11370,7 +11454,7 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                         <div key={k} style={{background:C.bg1,border:"1px solid "+C.border,borderLeft:"3px solid "+o.color,borderRadius:10,overflow:"hidden"}}>
                           <div onClick={function(){tog(k);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",cursor:"pointer",gap:8}}>
                             <div style={{minWidth:0}}>
-                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{o.name}</div>
+                              <div style={{fontSize:12,fontWeight:700,color:C.text}}>{o.name}{o.cbbi && !_cbbiOn && <span style={{marginLeft:5,fontSize:8,fontWeight:800,color:C.teal,border:"1px solid "+C.teal+"66",borderRadius:4,padding:"1px 3px",verticalAlign:"middle"}}>CBBI</span>}</div>
                               <div style={{fontSize:9,color:o.color,marginTop:1,fontWeight:600}}>{o.zone}</div>
                             </div>
                             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
@@ -11544,6 +11628,7 @@ function PageChangelog(){
     ["v28.68 \u2014 Catalyseurs (scoring)", "Chaque id\u00e9e porte des catalyseurs, techniques (moyenne mobile, RSI, ATH, support, r\u00e9sistance, MACD, pic de volume \u2014 valid\u00e9s automatiquement depuis les bougies, en unit\u00e9 D/W/M) ou fondamentaux (coch\u00e9s \u00e0 la main, avec raccourcis). Score affich\u00e9 sur la ligne et dans la fiche (\u2744\ufe0f \u2192 \u{1F680}), avec la mesure qui justifie chaque validation. Une condition non mesurable n'est jamais compt\u00e9e comme invalid\u00e9e."],
     ["v28.69 \u2014 Correctifs de calcul", "P&L r\u00e9alis\u00e9 recalcul\u00e9 en FIFO strict : il ne porte plus que sur la quantit\u00e9 r\u00e9ellement appari\u00e9e \u00e0 des achats connus. Corrige les positions d\u00e9tenues avant le d\u00e9but du journal de transactions, dont le produit de vente exc\u00e9dentaire \u00e9tait compt\u00e9 comme gain (cas de l'Or : +1 491 \u20ac affich\u00e9 au lieu de \u2212643 \u20ac). Encart Ma position align\u00e9 sur le portefeuille (m\u00eames quantit\u00e9, PRU et P&L que l'onglet Portfolio, base USD). Ic\u00f4nes du donut de r\u00e9partition align\u00e9es sur celles du d\u00e9tail des positions (logos compris)."],
     ["v28.70 \u2014 Legend : trades en cours", "Les positions non cl\u00f4tur\u00e9es apparaissent avec la pastille Ouvert (date d'entr\u00e9e, anciennet\u00e9, quantit\u00e9 restante, PA moyen), supprimables comme les autres et restaurables. Filtre Tous / Ouverts / Cl\u00f4tur\u00e9s. Les statistiques (P&L total, win rate, meilleur/pire, dur\u00e9e moyenne) ne portent que sur le r\u00e9alis\u00e9."],
+    ["v28.88 \u2014 CBBI dans le tableau BTC", "Les 9 m\u00e9triques du Colin Talks Crypto Bitcoin Bull Run Index sont int\u00e9gr\u00e9es : 7 \u00e9taient d\u00e9j\u00e0 pr\u00e9sentes, Trolololo Trend Line et Woobull Top Cap vs CVDD sont ajout\u00e9es (22 indicateurs). Nouvelle \u00e9chelle CBBI \u00e0 c\u00f4t\u00e9 d'Historique et Adaptative : elle ne retient que ces 9 indicateurs, avec la normalisation du CBBI \u2014 chaque m\u00e9trique situ\u00e9e entre deux r\u00e9gressions ajust\u00e9es sur ses valeurs aux sommets et aux creux de cycle pass\u00e9s, donc des bornes qui d\u00e9rivent avec le march\u00e9. Rep\u00e8res de cycle cliquables sur le graphe : halving, sommet, creux."],
   ];
   return (
     <div style={{paddingBottom:40}}>

@@ -802,6 +802,22 @@ v161     ▸ Le portefeuille sort de la newsletter. La fiche parle du marché,
              milliers de points de la série pendant l'envoi.
          ▸ Nouvelles routes de diagnostic : /newsletter/week-metrics et
            /newsletter/btc-pulse.
+
+Worker   Retouches
+v161.1   ▸ La fiche retient 7 news au lieu de 5, et le résumé Telegram liste
+           les mêmes 7 au lieu des 3 premières — l'écart entre les deux se
+           remarquait. Budget de sortie de l'IA relevé en conséquence.
+         ▸ Consignes BTC : /newsletter/btc-pulse indique désormais d'où vient
+           chaque jeu de règles — « perso » (l'échelle a son propre réglage
+           dans gdb_btc_reco), « perso-hérité » (base au format v28.88,
+           commune aux trois échelles) ou « défaut » (rien n'a jamais été
+           enregistré) — et renvoie les règles appliquées. Un écart avec
+           l'app se diagnostique ainsi sans deviner.
+         ▸ Équivalence app/worker prouvée et non plus supposée : les fonctions
+           de consigne sont extraites de app.jsx et comparées à celles du
+           worker sur 12 000 tirages (base absente, format v28.88, objet
+           v28.89 complet ou partiel, règles et scores aléatoires) — 0 écart,
+           ni sur le jeu de règles retenu ni sur la consigne produite.
          ▸ Testé sur banc d'essai (worker chargé dans un contexte vm, KV en
            mémoire) : les 4 rendus — web et e-mail, quotidien et hebdo — avec
            bascule correcte des titres et des valeurs jour/semaine ; KV vide,

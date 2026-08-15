@@ -893,6 +893,26 @@ v28.90   Suivi — onglet Opportunités : screener S&P 500 (worker v162)
            montées, et la base est mémorisée 10 minutes entre deux montages) ;
            deux critères cochés dans le même cycle de rendu n'en enregistraient
            qu'un (mises à jour d'état passées en forme fonctionnelle).
+         ▸ Worker v162 déployé le 2026-08-15. PREMIER BUILD RÉEL, relu
+           directement en KV : 26 lots sur 26, 500 valeurs mesurées sur 503,
+           65 Ko, univers datahub complet avec ses 11 secteurs. La crainte d'un
+           étranglement de Yahoo sur 500 requêtes en rafale ne s'est PAS
+           matérialisée : aucune valeur perdue pour cause de 429.
+           Les 3 absentes — FDXF (FedEx Freight), HONA (Honeywell Aerospace),
+           Q (Qnity Electronics) — sont des scissions entrées dans l'indice en
+           2025-2026 : moins de 60 bougies hebdomadaires, donc écartées par le
+           garde-fou, à raison. Même logique pour les 6 valeurs sans MM200
+           (GEHC, GEV, KVUE, SNDK, SOLV, VLTO) : moins de 200 semaines de
+           cotation, la mesure est nulle plutôt qu'inventée.
+           Distributions cohérentes : MM200 médiane +18,6 %, RSI 55,8,
+           choppiness 51,5, repli 52 s −10,9 %, ATR 6,4 %, volume ×0,95 ;
+           46 divergences haussières et 76 baissières sur l'indice.
+           Réserve connue : ces 3 valeurs sans historique repartent dans
+           `failed` à chaque construction et déclenchent une passe de
+           rattrapage inutile (3 lots, ~60 requêtes Yahoo). Sans conséquence
+           sur les données — un lot relancé ne peut pas appauvrir la base —
+           mais il faudra distinguer « historique trop court » de « échec de
+           récupération » pour l'éviter.
 
 
 ARCHITECTURE TECHNIQUE

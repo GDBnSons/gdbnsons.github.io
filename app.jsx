@@ -1,4 +1,4 @@
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
 /* ─── THEMES ─────────────────────────────────────────────── */
 const THEMES = {
@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.89";
+const APP_VERSION = "v28.90";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1718,6 +1718,102 @@ function cgiMACD(closes){
   var h0=macd[n-1]-sig[n-1], h1=macd[n-2]-sig[n-2];
   return { crossUp:(h1<=0&&h0>0), crossDown:(h1>=0&&h0<0), hist:h0 };
 }
+/* v28.90 — Indicateurs partagés par le screener et les catalyseurs du Suivi.
+   Le worker calcule les mêmes mesures sur 500 valeurs (voir scrChop/scrDiverg
+   dans cloudflare_worker_v162.js) ; ici on les recalcule pour UNE valeur, à
+   partir des bougies déjà chargées, quand une idée est réévaluée. Les deux
+   implémentations doivent rester d'accord — même formule, mêmes fenêtres. */
+// Indice de choppiness (Dreiss) : ~100 = marché en range, ~0 = tendance franche.
+function cgiCHOP(candles, n){
+  n = n || 14;
+  if(!candles || candles.length < n+1) return null;
+  var h=[], l=[], c=[];
+  candles.forEach(function(k){
+    if(k.c == null) return;
+    c.push(k.c); h.push(k.h != null ? k.h : k.c); l.push(k.l != null ? k.l : k.c);
+  });
+  var len = c.length; if(len < n+1) return null;
+  var sum=0, hi=-Infinity, lo=Infinity;
+  for(var i=len-n;i<len;i++){
+    sum += Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1]));
+    if(h[i] > hi) hi = h[i];
+    if(l[i] < lo) lo = l[i];
+  }
+  var rng = hi-lo;
+  if(!(rng > 0) || !(sum > 0)) return null;
+  return 100*(Math.log(sum/rng)/Math.LN10)/(Math.log(n)/Math.LN10);
+}
+// RSI de Wilder, série complète (la divergence a besoin de l'historique).
+function cgiRSISeries(cl, p){
+  p = p || 14;
+  var n = cl.length; if(n < p+1) return null;
+  var out = new Array(n); for(var z=0;z<n;z++) out[z]=null;
+  var g=0, l=0, d;
+  for(var i=1;i<=p;i++){ d=cl[i]-cl[i-1]; if(d>=0) g+=d; else l-=d; }
+  var ag=g/p, al=l/p;
+  out[p] = al===0 ? 100 : 100-100/(1+ag/al);
+  for(var j=p+1;j<n;j++){
+    d = cl[j]-cl[j-1];
+    ag = (ag*(p-1)+(d>0?d:0))/p;
+    al = (al*(p-1)+(d<0?-d:0))/p;
+    out[j] = al===0 ? 100 : 100-100/(1+ag/al);
+  }
+  return out;
+}
+// Pivot : bougie plus basse (dir<0) ou plus haute (dir>0) que ses `lr` voisines
+// de chaque côté. Les `lr` dernières bougies ne peuvent donc pas en être un.
+function cgiPivots(vals, lr, dir){
+  var out=[];
+  for(var i=lr;i<vals.length-lr;i++){
+    var ok=true;
+    for(var j=i-lr;j<=i+lr;j++){
+      if(j===i) continue;
+      if(dir<0){ if(vals[j]<=vals[i]){ ok=false; break; } }
+      else      { if(vals[j]>=vals[i]){ ok=false; break; } }
+    }
+    if(ok) out.push(i);
+  }
+  return out;
+}
+// Divergence RSI : le prix creuse un plus bas que le RSI ne confirme pas
+// (haussière), ou l'inverse (baissière). Renvoie {dir, age} en bougies.
+function cgiDIV(candles, look){
+  if(!candles || candles.length < 30) return { dir:0, age:null };
+  var c=[], h=[], l=[];
+  candles.forEach(function(k){
+    if(k.c == null) return;
+    c.push(k.c); h.push(k.h != null ? k.h : k.c); l.push(k.l != null ? k.l : k.c);
+  });
+  var rsi = cgiRSISeries(c, 14);
+  if(!rsi) return { dir:0, age:null };
+  var n = l.length, from = Math.max(0, n-(look||52));
+  var pl = cgiPivots(l, 2, -1).filter(function(i){ return i>=from; });
+  if(pl.length >= 2){
+    var b=pl[pl.length-1], a=pl[pl.length-2];
+    if(l[b]<l[a] && rsi[b]!=null && rsi[a]!=null && rsi[b]>rsi[a]+1) return { dir:1, age:n-1-b };
+  }
+  var ph = cgiPivots(h, 2, 1).filter(function(i){ return i>=from; });
+  if(ph.length >= 2){
+    var d=ph[ph.length-1], e=ph[ph.length-2];
+    if(h[d]>h[e] && rsi[d]!=null && rsi[e]!=null && rsi[d]<rsi[e]-1) return { dir:-1, age:n-1-d };
+  }
+  return { dir:0, age:null };
+}
+// Repli depuis le plus haut de la fenêtre (en % — toujours ≤ 0).
+function cgiDD(candles, win){
+  if(!candles || !candles.length) return null;
+  var arr = candles.slice(-(win||52));
+  var hi = -Infinity, last = null;
+  arr.forEach(function(k){
+    if(k.c == null) return;
+    last = k.c;
+    var x = k.h != null ? k.h : k.c;
+    if(x > hi) hi = x;
+  });
+  if(last == null || !(hi > 0)) return null;
+  return (last/hi-1)*100;
+}
+
 function computeKeyIndicators(candles){
   if(!candles || candles.length<5) return [];
   var closes=candles.map(function(k){return k.c;}).filter(function(v){return v!=null;});
@@ -7459,10 +7555,13 @@ function wlCatFromQuoteType(qt){
 const COND_TF_UNITS    = [["D","Daily"],["W","Weekly"],["M","Monthly"]];
 const COND_TF_INTERVAL = { D:"1d", W:"1wk", M:"1mo" };
 const COND_TF_RANGE    = { D:"2y", W:"5y", M:"max" };
-const COND_MM_PERIODS  = [9,20,50,200];
+const COND_MM_PERIODS  = [9,20,30,50,100,200];
 const COND_TECH_TEMPLATES = [
   { id:"mm",         label:"Moyenne mobile",  param:"mm"    },
   { id:"rsi",        label:"RSI",             param:"rsi"   },
+  { id:"chop",       label:"Choppiness",      param:"chop"  },   // v28.90
+  { id:"divrsi",     label:"Divergence RSI",  param:"div"   },   // v28.90
+  { id:"dd52",       label:"Repli / plus haut", param:"dd"  },   // v28.90
   { id:"ath",        label:"ATH / plus haut", param:"unit"  },
   { id:"support",    label:"Support",         param:"level" },
   { id:"resistance", label:"Résistance",      param:"level" },
@@ -7485,8 +7584,11 @@ function condText(c){
   if(!c) return "";
   if(c.cat==="technique" && c.templateId){
     var p=c.params||{}, u=p.unit||"D";
-    if(c.templateId==="mm")         return "MM"+(p.period||50)+" ("+u+") — prix "+(p.sens==="below"?"sous la MM":"au-dessus de la MM");
+    if(c.templateId==="mm")         return "MM"+(p.period||50)+" ("+u+") — prix "+(p.sens==="near"?("à moins de "+(p.tol!=null?p.tol:5)+" % de la MM"):(p.sens==="below"?"sous la MM":"au-dessus de la MM"));
     if(c.templateId==="rsi")        return "RSI ("+u+") "+(p.sens==="above"?"> ":"< ")+(p.seuil!=null?p.seuil:(p.sens==="above"?70:30));
+    if(c.templateId==="chop")       return "Choppiness ("+u+") "+(p.sens==="below"?"< ":"> ")+(p.seuil!=null?p.seuil:60);
+    if(c.templateId==="divrsi")     return "Divergence RSI "+(p.sens==="bear"?"baissière":"haussière")+" ("+u+")"+(p.maxAge!=null?(" — moins de "+p.maxAge+" périodes"):"");
+    if(c.templateId==="dd52")       return "Repli ≥ "+(p.min!=null?p.min:20)+" % sous le plus haut "+(p.win||52)+" périodes ("+u+")";
     if(c.templateId==="ath")        return "Proche du plus haut ("+u+")";
     if(c.templateId==="support")    return "Support "+(p.level!=null&&p.level!==""?"$"+p.level:"?")+" ("+u+")";
     if(c.templateId==="resistance") return "Cassure résistance "+(p.level!=null&&p.level!==""?"$"+p.level:"?")+" ("+u+")";
@@ -7508,8 +7610,31 @@ function condEval(c, candles){
   if(c.templateId==="mm"){
     var period=p.period||50, sma=cgiSMA(closes,period);
     if(sma==null) return null;
-    var above=last>sma;
+    var above=last>sma, ecart=(last/sma-1)*100;
+    // sens "near" (v28.90) : ce qui compte n'est plus le côté mais la distance.
+    if(p.sens==="near"){
+      var tol=(p.tol!=null&&p.tol!=="")?parseFloat(p.tol):5;
+      return { ok:Math.abs(ecart)<=tol, detail:"Prix à "+fmt(ecart)+"% de la MM"+period+" "+fmt(sma)+" ("+u+")" };
+    }
     return { ok:(p.sens==="below")?!above:above, detail:"Prix "+fmt(last)+(above?" > ":" < ")+"MM"+period+" "+fmt(sma)+" ("+u+")" };
+  }
+  if(c.templateId==="chop"){
+    var ch=cgiCHOP(candles,14); if(ch==null) return null;
+    var sc=(p.seuil!=null&&p.seuil!=="")?parseFloat(p.seuil):60;
+    return { ok:(p.sens==="below")?ch<sc:ch>sc, detail:"Choppiness "+fmt(ch)+(p.sens==="below"?" < ":" > ")+sc+" ("+u+")" };
+  }
+  if(c.templateId==="divrsi"){
+    var dv=cgiDIV(candles,p.look||52);
+    var want=(p.sens==="bear")?-1:1;
+    var maxAge=(p.maxAge!=null&&p.maxAge!=="")?parseFloat(p.maxAge):8;
+    var hit=(dv.dir===want && dv.age!=null && dv.age<=maxAge);
+    return { ok:hit, detail:hit ? ("Divergence "+(want<0?"baissière":"haussière")+" il y a "+dv.age+" périodes ("+u+")")
+                               : ("Aucune divergence "+(want<0?"baissière":"haussière")+" récente ("+u+")") };
+  }
+  if(c.templateId==="dd52"){
+    var dd=cgiDD(candles,p.win||52); if(dd==null) return null;
+    var mn=(p.min!=null&&p.min!=="")?parseFloat(p.min):20;
+    return { ok:(-dd)>=mn, detail:fmt(dd)+"% sous le plus haut "+(p.win||52)+" périodes ("+u+")" };
   }
   if(c.templateId==="rsi"){
     var rsi=cgiRSI(closes,p.period||14); if(rsi==null) return null;
@@ -7583,6 +7708,572 @@ function wlDecode(str){
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SCREENER S&P 500 — v28.90
+   Le worker (v162) mesure une trentaine d'indicateurs HEBDOMADAIRES sur les
+   ~503 composants de l'indice et sert le tout en un bloc compact (~60 Ko).
+   Ici on ne fait plus que filtrer en local : cumuler des critères est donc
+   instantané, et chaque critère garde ses propres réglages.
+
+   Chaque critère sait faire trois choses, et c'est ce qui relie le screener au
+   reste de l'app :
+     · test()  filtre la liste
+     · val()   affiche la mesure réelle de la valeur retenue
+     · cond()  se transforme en catalyseur du Suivi, réévalué automatiquement
+               ensuite (même formule côté worker et côté app).
+═══════════════════════════════════════════════════════════ */
+const SCR_COLS_DEF = ["sym","name","sec","px","d20","d30","d50","d200","rsi","chop","div","divAge",
+                      "dd52","up52","p13","p26","p52","volx","macdH","macdX","bbw","bbwR","atr"];
+const SCR_GROUPS = ["Tendance","Momentum","Volatilité","Position","Contexte"];
+
+function scrN(v, d){ return v==null ? "—" : (Math.round(v*Math.pow(10,d==null?1:d))/Math.pow(10,d==null?1:d)).toLocaleString("fr-FR"); }
+function scrSigned(v, d, suf){ return v==null ? "—" : ((v>=0?"+":"")+scrN(v,d)+(suf||"")); }
+const SCR_SIDE3 = [["any","au-dessus ou en dessous"],["above","au-dessus"],["below","en dessous"]];
+
+const SCR_CRIT = [
+  { id:"ma200", grp:"Tendance", label:"Proche de la MM200 weekly",
+    def:{ tol:5, side:"any" },
+    fields:[ {k:"tol", label:"écart max", type:"num", suf:"%"}, {k:"side", type:"sel", label:"position", opts:SCR_SIDE3} ],
+    test:function(r,p){ if(r.d200==null) return false;
+      if(p.side==="above" && r.d200<0) return false;
+      if(p.side==="below" && r.d200>0) return false;
+      return Math.abs(r.d200) <= (+p.tol||0); },
+    val:function(r){ return scrSigned(r.d200,1,"% MM200w"); },
+    text:function(p){ return "Prix à moins de "+p.tol+" % de la MM200 weekly"+(p.side==="any"?"":(" ("+(p.side==="above"?"au-dessus":"en dessous")+")")); },
+    cond:function(p){ return { templateId:"mm", params:{ period:200, unit:"W", sens:(p.side==="any"?"near":p.side), tol:+p.tol||5 } }; } },
+
+  { id:"ma50", grp:"Tendance", label:"Proche de la MM50 weekly",
+    def:{ tol:4, side:"any" },
+    fields:[ {k:"tol", label:"écart max", type:"num", suf:"%"}, {k:"side", type:"sel", label:"position", opts:SCR_SIDE3} ],
+    test:function(r,p){ if(r.d50==null) return false;
+      if(p.side==="above" && r.d50<0) return false;
+      if(p.side==="below" && r.d50>0) return false;
+      return Math.abs(r.d50) <= (+p.tol||0); },
+    val:function(r){ return scrSigned(r.d50,1,"% MM50w"); },
+    text:function(p){ return "Prix à moins de "+p.tol+" % de la MM50 weekly"+(p.side==="any"?"":(" ("+(p.side==="above"?"au-dessus":"en dessous")+")")); },
+    cond:function(p){ return { templateId:"mm", params:{ period:50, unit:"W", sens:(p.side==="any"?"near":p.side), tol:+p.tol||4 } }; } },
+
+  { id:"ma30", grp:"Tendance", label:"Tendance de fond (MM30 weekly)",
+    def:{ side:"above" },
+    fields:[ {k:"side", type:"sel", label:"prix", opts:[["above","au-dessus de la MM30"],["below","sous la MM30"]]} ],
+    test:function(r,p){ if(r.d30==null) return false; return p.side==="below" ? r.d30<0 : r.d30>0; },
+    val:function(r){ return scrSigned(r.d30,1,"% MM30w"); },
+    text:function(p){ return "Prix "+(p.side==="below"?"sous":"au-dessus de")+" la MM30 weekly"; },
+    cond:function(p){ return { templateId:"mm", params:{ period:30, unit:"W", sens:p.side } }; } },
+
+  { id:"macd", grp:"Tendance", label:"Croisement MACD weekly haussier",
+    def:{ maxAge:4 },
+    fields:[ {k:"maxAge", label:"depuis moins de", type:"num", suf:"sem."} ],
+    test:function(r,p){ return r.macdX!=null && r.macdX <= (+p.maxAge||0); },
+    val:function(r){ return r.macdX==null ? "pas de croisement" : ("MACD croisé il y a "+r.macdX+" sem."); },
+    text:function(p){ return "Croisement MACD weekly haussier de moins de "+p.maxAge+" semaines"; },
+    cond:function(){ return { templateId:"macd", params:{ unit:"W" } }; } },
+
+  { id:"rsi", grp:"Momentum", label:"RSI weekly",
+    def:{ side:"below", seuil:40 },
+    fields:[ {k:"side", type:"sel", opts:[["below","RSI <"],["above","RSI >"]]}, {k:"seuil", type:"num"} ],
+    test:function(r,p){ if(r.rsi==null) return false; return p.side==="above" ? r.rsi > +p.seuil : r.rsi < +p.seuil; },
+    val:function(r){ return "RSI "+scrN(r.rsi,1); },
+    text:function(p){ return "RSI weekly "+(p.side==="above"?">":"<")+" "+p.seuil; },
+    cond:function(p){ return { templateId:"rsi", params:{ unit:"W", sens:p.side, seuil:+p.seuil } }; } },
+
+  { id:"divrsi", grp:"Momentum", label:"Divergence RSI weekly",
+    def:{ side:"bull", maxAge:8 },
+    fields:[ {k:"side", type:"sel", opts:[["bull","haussière"],["bear","baissière"]]},
+             {k:"maxAge", label:"depuis moins de", type:"num", suf:"sem."} ],
+    test:function(r,p){ var want = p.side==="bear" ? -1 : 1;
+      return r.div===want && r.divAge!=null && r.divAge <= (+p.maxAge||0); },
+    val:function(r){ return r.div===0||r.div==null ? "aucune divergence"
+      : ("divergence "+(r.div<0?"baissière":"haussière")+" il y a "+r.divAge+" sem."); },
+    text:function(p){ return "Divergence RSI weekly "+(p.side==="bear"?"baissière":"haussière")+" de moins de "+p.maxAge+" semaines"; },
+    cond:function(p){ return { templateId:"divrsi", params:{ unit:"W", sens:p.side, look:52, maxAge:+p.maxAge } }; } },
+
+  { id:"perf52", grp:"Momentum", label:"Performance 12 mois",
+    def:{ side:"below", seuil:0 },
+    fields:[ {k:"side", type:"sel", opts:[["below","perf <"],["above","perf >"]]}, {k:"seuil", type:"num", suf:"%"} ],
+    test:function(r,p){ if(r.p52==null) return false; return p.side==="above" ? r.p52 > +p.seuil : r.p52 < +p.seuil; },
+    val:function(r){ return scrSigned(r.p52,0,"% 12m"); },
+    text:function(p){ return "Performance 12 mois "+(p.side==="above"?">":"<")+" "+p.seuil+" %"; },
+    cond:null },
+
+  { id:"perf13", grp:"Momentum", label:"Performance 3 mois",
+    def:{ side:"above", seuil:0 },
+    fields:[ {k:"side", type:"sel", opts:[["below","perf <"],["above","perf >"]]}, {k:"seuil", type:"num", suf:"%"} ],
+    test:function(r,p){ if(r.p13==null) return false; return p.side==="above" ? r.p13 > +p.seuil : r.p13 < +p.seuil; },
+    val:function(r){ return scrSigned(r.p13,0,"% 3m"); },
+    text:function(p){ return "Performance 3 mois "+(p.side==="above"?">":"<")+" "+p.seuil+" %"; },
+    cond:null },
+
+  { id:"chop", grp:"Volatilité", label:"Indice de choppiness weekly",
+    def:{ side:"above", seuil:60 },
+    fields:[ {k:"side", type:"sel", opts:[["above","CHOP >"],["below","CHOP <"]]}, {k:"seuil", type:"num"} ],
+    test:function(r,p){ if(r.chop==null) return false; return p.side==="above" ? r.chop > +p.seuil : r.chop < +p.seuil; },
+    val:function(r){ return "CHOP "+scrN(r.chop,1); },
+    text:function(p){ return "Indice de choppiness weekly "+(p.side==="above"?">":"<")+" "+p.seuil; },
+    cond:function(p){ return { templateId:"chop", params:{ unit:"W", sens:p.side, seuil:+p.seuil } }; } },
+
+  { id:"squeeze", grp:"Volatilité", label:"Compression des bandes de Bollinger",
+    def:{ maxRank:20 },
+    fields:[ {k:"maxRank", label:"rang max sur 2 ans", type:"num", suf:"e centile"} ],
+    test:function(r,p){ return r.bbwR!=null && r.bbwR <= (+p.maxRank||0); },
+    val:function(r){ return r.bbwR==null ? "—" : ("bandes au "+Math.round(r.bbwR)+"e centile"); },
+    text:function(p){ return "Bandes de Bollinger weekly comprimées (largeur sous le "+p.maxRank+"e centile de 2 ans)"; },
+    cond:null },
+
+  { id:"atr", grp:"Volatilité", label:"Volatilité hebdo (ATR 14)",
+    def:{ side:"below", seuil:5 },
+    fields:[ {k:"side", type:"sel", opts:[["below","ATR <"],["above","ATR >"]]}, {k:"seuil", type:"num", suf:"%"} ],
+    test:function(r,p){ if(r.atr==null) return false; return p.side==="above" ? r.atr > +p.seuil : r.atr < +p.seuil; },
+    val:function(r){ return "ATR "+scrN(r.atr,1)+"%"; },
+    text:function(p){ return "ATR 14 weekly "+(p.side==="above"?">":"<")+" "+p.seuil+" % du prix"; },
+    cond:null },
+
+  { id:"volx", grp:"Volatilité", label:"Volume hebdo au-dessus de la normale",
+    def:{ mult:1.5 },
+    fields:[ {k:"mult", label:"au moins", type:"num", suf:"× la moy. 20 sem."} ],
+    test:function(r,p){ return r.volx!=null && r.volx >= (+p.mult||0); },
+    val:function(r){ return r.volx==null ? "—" : ("volume ×"+scrN(r.volx,2)); },
+    text:function(p){ return "Volume de la dernière semaine clôturée ≥ "+p.mult+" × la moyenne 20 semaines"; },
+    cond:function(){ return { templateId:"volume", params:{ unit:"W" } }; } },
+
+  { id:"dd52", grp:"Position", label:"Repli depuis le plus haut 52 sem.",
+    def:{ min:20, max:90 },
+    fields:[ {k:"min", label:"au moins", type:"num", suf:"%"}, {k:"max", label:"au plus", type:"num", suf:"%"} ],
+    test:function(r,p){ if(r.dd52==null) return false; var d=-r.dd52; return d >= (+p.min||0) && d <= (+p.max||100); },
+    val:function(r){ return scrN(r.dd52,1)+"% du plus haut 52s"; },
+    text:function(p){ return "Repli de "+p.min+" à "+p.max+" % sous le plus haut 52 semaines"; },
+    cond:function(p){ return { templateId:"dd52", params:{ unit:"W", win:52, min:+p.min } }; } },
+
+  { id:"low52", grp:"Position", label:"Proche du plus bas 52 sem.",
+    def:{ tol:15 },
+    fields:[ {k:"tol", label:"à moins de", type:"num", suf:"% au-dessus"} ],
+    test:function(r,p){ return r.up52!=null && r.up52 <= (+p.tol||0); },
+    val:function(r){ return scrSigned(r.up52,0,"% / plus bas 52s"); },
+    text:function(p){ return "À moins de "+p.tol+" % au-dessus du plus bas 52 semaines"; },
+    cond:null },
+
+  { id:"sector", grp:"Contexte", label:"Secteur",
+    def:{ sel:[] }, multi:true, fields:[],
+    test:function(r,p){ return !p.sel || !p.sel.length || p.sel.indexOf(r.sec) >= 0; },
+    val:function(r){ return r.sec||"—"; },
+    text:function(p){ return "Secteur : "+((p.sel&&p.sel.length)?p.sel.join(", "):"tous"); },
+    cond:null },
+];
+const SCR_BY_ID = {}; SCR_CRIT.forEach(function(c){ SCR_BY_ID[c.id]=c; });
+
+const SCR_SORTS = [
+  ["fit",   "Pertinence"],
+  ["d200",  "Écart à la MM200w"],
+  ["rsi",   "RSI croissant"],
+  ["chop",  "Choppiness décroissant"],
+  ["dd52",  "Repli le plus fort"],
+  ["p52",   "Perf 12 mois croissante"],
+  ["sym",   "Ticker A→Z"],
+];
+
+/* La base survit au démontage du panneau : changer d'onglet, aller voir une
+   idée puis revenir ne doit pas re-télécharger 60 Ko ni reconstruire quoi que
+   ce soit. Au-delà de 10 minutes on redemande — les prix ont bougé. */
+var SCR_CACHE = null;   // { data, at }
+const SCR_CACHE_TTL = 600000;
+
+function ScreenerPanel({ tracked, onAdd, eur=false, usdEur=0.86 }){
+  const [data, setData]   = useState(SCR_CACHE ? SCR_CACHE.data : null);   // {cols, rows, gen, ts, missing, total, stale}
+  const [err, setErr]     = useState("");
+  const [busy, setBusy]   = useState(null);     // {done, total} pendant la construction
+  const [crit, setCrit]   = useState([]);       // [{id, p}] — l'ordre est celui du clic
+  const [sel, setSel]     = useState({});       // {ticker:true}
+  const [sort, setSort]   = useState("fit");
+  const [q, setQ]         = useState("");
+  const [mt, setMt]       = useState(null);
+  const [opened, setOpened] = useState(null);   // critère dont les réglages sont dépliés
+  const building = useRef(false);
+
+  // ── Chargement + construction progressive ────────────────────────────────
+  const mergeRows = function(rows, gen){
+    setData(function(prev){
+      var by = {};
+      ((prev && prev.rows) || []).forEach(function(r){ by[r[0]] = r; });
+      (rows||[]).forEach(function(r){ by[r[0]] = r; });
+      var out = [];
+      for(var k in by) if(by.hasOwnProperty(k)) out.push(by[k]);
+      return Object.assign({}, prev||{cols:SCR_COLS_DEF}, { rows:out, gen:gen });
+    });
+  };
+  // Les lots sont enchaînés 3 par 3 : chaque requête dispose de son propre
+  // budget de sous-requêtes côté worker, mais Yahoo n'aime pas les rafales.
+  const runQueue = function(gen, todo, onStep){
+    var queue = todo.slice(), failed = [];
+    function next(){
+      if(!queue.length) return Promise.resolve();
+      var i = queue.shift();
+      return cfGet("/screener/chunk?gen="+gen+"&i="+i, { timeout:90000 })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if(d && d.rows) mergeRows(d.rows, gen);
+          if(!d || (d.failed && d.failed.length)) failed.push(i);
+        })
+        .catch(function(){ failed.push(i); })
+        .then(function(){ onStep(); return next(); });
+    }
+    return Promise.all([next(), next(), next()]).then(function(){ return failed; });
+  };
+  const build = function(gen, todo){
+    if(building.current || !todo || !todo.length) return;
+    building.current = true;
+    var done = 0, total = todo.length;
+    setBusy({ done:0, total:total });
+    var step = function(){ done++; setBusy({ done:done, total:total }); };
+    runQueue(gen, todo, step).then(function(failed){
+      // Une seule passe de rattrapage : au-delà, c'est Yahoo qui ne veut pas.
+      if(!failed.length) return [];
+      done = 0; total = failed.length;
+      setBusy({ done:0, total:total, retry:true });
+      return runQueue(gen, failed, step);
+    }).then(function(){
+      building.current = false;
+      setBusy(null);
+      setData(function(p){ return p ? Object.assign({}, p, { stale:false, gen:gen, ts:Date.now() }) : p; });
+    }).catch(function(){ building.current = false; setBusy(null); });
+  };
+  const load = useCallback(function(force){
+    if(!force && SCR_CACHE && SCR_CACHE.data && (SCR_CACHE.data.rows||[]).length
+       && (Date.now() - SCR_CACHE.at) < SCR_CACHE_TTL){ setData(SCR_CACHE.data); return; }
+    setErr("");
+    cfGet("/screener", { timeout:30000 })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || d.error){ setErr((d && d.error) || "base indisponible"); return; }
+        setData(d);
+        var gen = d.current || d.gen;
+        if(force){
+          var all = [];
+          for(var i=0;i<(d.total||0);i+=(d.step||20)) all.push(i);
+          build(gen, all);
+        } else if(d.missing && d.missing.length){
+          build(gen, d.missing);
+        }
+      })
+      .catch(function(e){ setErr("worker injoignable ("+(e && e.message || e)+")"); });
+  }, []);
+  useEffect(function(){ load(false); }, [load]);
+  useEffect(function(){ if(data && (data.rows||[]).length) SCR_CACHE = { data:data, at:Date.now() }; }, [data]);
+
+  // ── Lignes → objets ──────────────────────────────────────────────────────
+  const rows = useMemo(function(){
+    if(!data || !data.rows) return [];
+    var cols = data.cols || SCR_COLS_DEF;
+    return data.rows.map(function(a){
+      var o = {};
+      for(var i=0;i<cols.length;i++) o[cols[i]] = a[i];
+      return o;
+    });
+  }, [data]);
+
+  const sectors = useMemo(function(){
+    var s = {};
+    rows.forEach(function(r){ if(r.sec) s[r.sec]=1; });
+    return Object.keys(s).sort();
+  }, [rows]);
+
+  const trackedSet = useMemo(function(){
+    var s = {};
+    (tracked||[]).forEach(function(e){ s[String(e.ticker||"").toUpperCase()] = 1; });
+    return s;
+  }, [tracked]);
+
+  // ── Filtrage : tous les critères actifs doivent passer ───────────────────
+  const shown = useMemo(function(){
+    var ql = q.trim().toUpperCase();
+    var out = rows.filter(function(r){
+      if(ql && String(r.sym).indexOf(ql)<0 && String(r.name||"").toUpperCase().indexOf(ql)<0) return false;
+      for(var i=0;i<crit.length;i++){
+        var c = SCR_BY_ID[crit[i].id];
+        if(c && !c.test(r, crit[i].p)) return false;
+      }
+      return true;
+    });
+    var cmpNum = function(k, dir){ return function(a,b){
+      var x=a[k], y=b[k];
+      if(x==null && y==null) return 0;
+      if(x==null) return 1;
+      if(y==null) return -1;
+      return dir*(x-y);
+    }; };
+    if(sort==="sym")       out.sort(function(a,b){ return String(a.sym).localeCompare(String(b.sym)); });
+    else if(sort==="rsi")  out.sort(cmpNum("rsi",1));
+    else if(sort==="chop") out.sort(cmpNum("chop",-1));
+    else if(sort==="dd52") out.sort(cmpNum("dd52",1));
+    else if(sort==="p52")  out.sort(cmpNum("p52",1));
+    else if(sort==="d200") out.sort(function(a,b){
+      var x=a.d200==null?1e9:Math.abs(a.d200), y=b.d200==null?1e9:Math.abs(b.d200);
+      return x-y;
+    });
+    else {
+      // Pertinence : à filtres égaux, on remonte ce qui est le plus tendu —
+      // RSI bas, repli marqué, prix proche de sa MM200.
+      var score = function(r){
+        var s = 0;
+        if(r.rsi!=null)  s += (50-r.rsi)/50;
+        if(r.dd52!=null) s += Math.min(1, (-r.dd52)/40);
+        if(r.d200!=null) s += Math.max(0, 1 - Math.abs(r.d200)/25);
+        return s;
+      };
+      out.sort(function(a,b){ return score(b)-score(a); });
+    }
+    return out;
+  }, [rows, crit, sort, q]);
+
+  const nSel = Object.keys(sel).filter(function(k){ return sel[k]; }).length;
+
+  // ── Critères ─────────────────────────────────────────────────────────────
+  function isOn(id){ return crit.some(function(c){ return c.id===id; }); }
+  function paramsOf(id){
+    var f = crit.filter(function(c){ return c.id===id; })[0];
+    return f ? f.p : Object.assign({}, SCR_BY_ID[id].def);
+  }
+  // Mises à jour fonctionnelles : deux appuis rapprochés tombent dans le même
+  // cycle de rendu, et une version lue dans la fermeture perdrait le premier.
+  function toggleCrit(id){
+    setCrit(function(prev){
+      return prev.some(function(c){ return c.id===id; })
+        ? prev.filter(function(c){ return c.id!==id; })
+        : prev.concat([{ id:id, p:Object.assign({}, SCR_BY_ID[id].def) }]);
+    });
+    // On ouvre les réglages à l'activation : un critère qu'on ne voit pas se règle mal.
+    setOpened(isOn(id) ? (opened===id ? null : opened) : id);
+  }
+  function setParam(id, k, v){
+    setCrit(function(prev){
+      return prev.map(function(c){
+        if(c.id!==id) return c;
+        var patch = {}; patch[k] = v;
+        return { id:id, p:Object.assign({}, c.p, patch) };
+      });
+    });
+  }
+  function toggleSector(s){
+    setCrit(function(prev){
+      return prev.map(function(c){
+        if(c.id!=="sector") return c;
+        var cur = ((c.p && c.p.sel) || []).slice();
+        var ix = cur.indexOf(s);
+        if(ix>=0) cur.splice(ix,1); else cur.push(s);
+        return { id:c.id, p:Object.assign({}, c.p, { sel:cur }) };
+      });
+    });
+  }
+
+  // ── Sélection ────────────────────────────────────────────────────────────
+  function toggleSel(sym){
+    if(trackedSet[sym]) return;
+    setSel(function(p){ var n=Object.assign({},p); if(n[sym]) delete n[sym]; else n[sym]=true; return n; });
+  }
+  function selectAllShown(){
+    var n = {};
+    shown.forEach(function(r){ if(!trackedSet[r.sym]) n[r.sym]=true; });
+    setSel(n);
+  }
+  function addSelected(){
+    var picked = shown.filter(function(r){ return sel[r.sym]; });
+    if(!picked.length) return;
+    onAdd(picked, crit.slice());
+    setSel({});
+  }
+
+  const fmtPx = function(v){
+    if(v==null) return "—";
+    var n = eur ? v*usdEur : v;
+    return (eur?"€":"$")+(Math.abs(n)>=1000 ? Math.round(n).toLocaleString("fr-FR") : n.toFixed(2));
+  };
+  const genTxt = data && data.gen ? (data.gen.slice(6,8)+"/"+data.gen.slice(4,6)) : "—";
+
+  const inputSt = { background:C.bg3, border:"1px solid "+C.border, borderRadius:7, color:C.text, fontSize:14, padding:"6px 8px", outline:"none", width:70 };
+  const selSt   = Object.assign({}, inputSt, { fontSize:12, width:"auto", maxWidth:190 });
+
+  return (
+    <div>
+      {/* État de la base */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"9px 11px",marginBottom:10}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+            {rows.length ? (rows.length+" valeurs du S&P 500") : "Base non construite"}
+            {data && data.total ? <span style={{color:C.text3,fontWeight:500}}>{" / "+data.total}</span> : null}
+          </div>
+          <div style={{fontSize:9,color:busy?C.btc:(data&&data.stale?C.orange:C.text3),marginTop:2}}>
+            {busy ? ((busy.retry?"Rattrapage ":"Construction ")+busy.done+"/"+busy.total+" lots — mesures hebdomadaires")
+                  : (data && data.stale ? ("Base du "+genTxt+" (veille) — actualise pour la séance du jour")
+                                        : ("Indicateurs hebdomadaires · base du "+genTxt))}
+          </div>
+        </div>
+        <button onClick={function(){ load(true); }} disabled={!!busy}
+          style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 11px",color:busy?C.text3:C.text2,fontSize:12,cursor:busy?"default":"pointer",flexShrink:0}}>
+          {busy?"…":"↻"}
+        </button>
+      </div>
+      {busy && (
+        <div style={{height:3,background:C.bg2,borderRadius:2,overflow:"hidden",marginBottom:10}}>
+          <div style={{height:"100%",width:(busy.total?Math.round(busy.done/busy.total*100):0)+"%",background:C.btc,transition:"width .3s"}}/>
+        </div>
+      )}
+      {err && <div style={{fontSize:11,color:C.red,background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>{err}</div>}
+
+      {/* Critères cliquables */}
+      <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:6}}>CRITÈRES {crit.length?("· "+crit.length+" actif"+(crit.length>1?"s":"")):""}</div>
+      {SCR_GROUPS.map(function(g){
+        var list = SCR_CRIT.filter(function(c){ return c.grp===g; });
+        if(!list.length) return null;
+        return (
+          <div key={g} style={{marginBottom:7}}>
+            <div style={{fontSize:8,color:C.text3,marginBottom:4,letterSpacing:0.6}}>{g.toUpperCase()}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {list.map(function(c){
+                var on = isOn(c.id);
+                return (
+                  <button key={c.id} onClick={function(){ toggleCrit(c.id); }}
+                    style={{background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:7,
+                            color:on?C.btc:C.text2,fontSize:10,fontWeight:on?800:600,padding:"6px 9px",cursor:"pointer",textAlign:"left"}}>
+                    {on?"☑ ":"☐ "}{c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Réglages des critères actifs */}
+      {crit.length>0 && (
+        <div style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:10,padding:"9px 11px",margin:"10px 0"}}>
+          <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:7}}>RÉGLAGES</div>
+          {crit.map(function(a){
+            var c = SCR_BY_ID[a.id];
+            if(!c) return null;
+            var open = opened===a.id;
+            return (
+              <div key={a.id} style={{borderTop:"1px solid "+C.border,paddingTop:7,marginTop:7}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>{c.label}</div>
+                    <div style={{fontSize:9,color:C.text3,marginTop:2}}>{c.text(a.p)}</div>
+                  </div>
+                  <button onClick={function(){ setOpened(open?null:a.id); }}
+                    style={{background:"none",border:"none",color:C.text2,fontSize:12,cursor:"pointer",padding:"0 4px"}}>{open?"▾":"⚙"}</button>
+                  <button onClick={function(){ toggleCrit(a.id); }}
+                    style={{background:"none",border:"none",color:C.red,fontSize:13,cursor:"pointer",padding:"0 2px"}}>✕</button>
+                </div>
+                {open && (
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginTop:7}}>
+                    {c.fields.map(function(f){
+                      return (
+                        <div key={f.k} style={{display:"flex",alignItems:"center",gap:4}}>
+                          {f.label && <span style={{fontSize:9,color:C.text3}}>{f.label}</span>}
+                          {f.type==="sel" ? (
+                            <select value={a.p[f.k]} onChange={function(ev){ setParam(a.id, f.k, ev.target.value); }} style={selSt}>
+                              {f.opts.map(function(o){ return <option key={o[0]} value={o[0]}>{o[1]}</option>; })}
+                            </select>
+                          ) : (
+                            <input type="number" value={a.p[f.k]} onChange={function(ev){ setParam(a.id, f.k, ev.target.value); }} style={inputSt}/>
+                          )}
+                          {f.suf && <span style={{fontSize:9,color:C.text3}}>{f.suf}</span>}
+                        </div>
+                      );
+                    })}
+                    {c.id==="sector" && (
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {sectors.map(function(s){
+                          var onS = (a.p.sel||[]).indexOf(s)>=0;
+                          return <button key={s} onClick={function(){ toggleSector(s); }}
+                            style={{background:onS?C.btc+"22":C.bg3,border:"1px solid "+(onS?C.btc:C.border),borderRadius:6,
+                                    color:onS?C.btc:C.text3,fontSize:9,padding:"3px 7px",cursor:"pointer"}}>{s}</button>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Barre de résultats */}
+      <div style={{display:"flex",gap:6,alignItems:"center",margin:"10px 0 8px"}}>
+        <input value={q} onChange={function(e){ setQ(e.target.value); }} placeholder="Filtrer par ticker ou nom"
+          style={{flex:1,minWidth:0,background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none"}}/>
+        <select value={sort} onChange={function(e){ setSort(e.target.value); }}
+          style={{background:C.bg2,border:"1px solid "+C.border2,borderRadius:8,padding:"8px 6px",color:C.text2,fontSize:11,outline:"none"}}>
+          {SCR_SORTS.map(function(s){ return <option key={s[0]} value={s[0]}>{s[1]}</option>; })}
+        </select>
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontSize:10,color:C.text3}}>
+          <b style={{color:C.text2}}>{shown.length}</b> valeur{shown.length>1?"s":""} retenue{shown.length>1?"s":""}{rows.length?(" sur "+rows.length):""}
+        </div>
+        {shown.length>0 && (
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={selectAllShown} style={{background:"none",border:"none",color:C.text2,fontSize:10,cursor:"pointer",padding:0,textDecoration:"underline"}}>Tout sélectionner</button>
+            {nSel>0 && <button onClick={function(){ setSel({}); }} style={{background:"none",border:"none",color:C.text3,fontSize:10,cursor:"pointer",padding:0,textDecoration:"underline"}}>Vider</button>}
+          </div>
+        )}
+      </div>
+
+      {/* Résultats */}
+      {shown.length===0 && !busy && (
+        <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"32px 12px",background:C.bg1,borderRadius:12,border:"1px solid "+C.border}}>
+          {rows.length===0 ? "Base vide — touchez ↻ pour la construire (≈ 30 s)."
+                           : "Aucune valeur ne passe tous les critères. Desserre un réglage ou retire un critère."}
+        </div>
+      )}
+      {shown.slice(0,150).map(function(r){
+        var isTracked = !!trackedSet[r.sym], picked = !!sel[r.sym];
+        var metrics = crit.length ? crit.map(function(a){ return SCR_BY_ID[a.id] ? SCR_BY_ID[a.id].val(r) : null; }).filter(Boolean)
+                                  : [scrSigned(r.d200,1,"% MM200w"), "RSI "+scrN(r.rsi,1), "CHOP "+scrN(r.chop,1)];
+        return (
+          <div key={r.sym} style={{display:"flex",alignItems:"center",gap:9,background:C.bg1,
+                border:"1px solid "+(picked?C.btc+"88":C.border),borderRadius:10,padding:"9px 11px",marginBottom:6}}>
+            <button onClick={function(){ toggleSel(r.sym); }} disabled={isTracked}
+              style={{background:"none",border:"none",cursor:isTracked?"default":"pointer",fontSize:14,padding:0,lineHeight:1,
+                      color:isTracked?C.green:(picked?C.btc:C.text3),flexShrink:0}}>{isTracked?"★":(picked?"☑":"☐")}</button>
+            <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={function(){ setMt({ticker:r.sym,cat:"Action"}); }}>
+              <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+                <span style={{fontSize:13,fontWeight:800,color:C.text}}>{r.sym}</span>
+                <span style={{fontSize:10,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name||""}</span>
+              </div>
+              <div style={{fontSize:9,color:C.text3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {(r.sec?r.sec+" · ":"")+metrics.join(" · ")}
+              </div>
+              {isTracked && <div style={{fontSize:8,color:C.green,marginTop:2}}>déjà dans mes idées</div>}
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.text}}>{fmtPx(r.px)}</div>
+              <div style={{fontSize:9,color:(r.p52||0)>=0?C.green:C.red,fontWeight:700}}>{scrSigned(r.p52,0,"% 1an")}</div>
+            </div>
+          </div>
+        );
+      })}
+      {shown.length>150 && (
+        <div style={{textAlign:"center",fontSize:10,color:C.text3,padding:"6px 0 2px"}}>
+          {shown.length-150} valeurs de plus — affine les critères pour les voir.
+        </div>
+      )}
+
+      {/* Barre d'ajout */}
+      {nSel>0 && (
+        <div style={{position:"fixed",left:0,right:0,bottom:64,zIndex:9000,display:"flex",justifyContent:"center",padding:"0 14px",pointerEvents:"none"}}>
+          <button onClick={addSelected}
+            style={{pointerEvents:"auto",width:"100%",maxWidth:520,background:C.btc,border:"none",borderRadius:12,padding:"13px",
+                    color:"#000",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>
+            ＋ Enregistrer {nSel} valeur{nSel>1?"s":""} dans mes idées
+          </button>
+        </div>
+      )}
+
+      {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={usdEur} onClose={function(){ setMt(null); }}/>}
+    </div>
+  );
+}
+
 function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
   const [prices, setPrices]   = useState({});
   const [loading, setLoading] = useState(false);
@@ -7599,8 +8290,59 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
   const [impText, setImpText] = useState("");
   const [impList, setImpList] = useState(null);
   const [impErr, setImpErr]   = useState("");
+  // v28.90 — deux onglets : le screener (repérage) et les idées retenues (suivi).
+  const [sub, setSub]         = useState("screen");
+  const [added, setAdded]     = useState("");
 
   const items = Array.isArray(list) ? list : [];
+
+  /* v28.90 — Une ligne du screener devient une idée de trade complète : les
+     critères de recherche se transforment en catalyseurs (réévalués ensuite
+     automatiquement quand ils s'y prêtent) et la thèse consigne, en toutes
+     lettres, ce qui a été mesuré le jour du repérage. */
+  function addFromScreener(picked, crit){
+    var today = new Date().toISOString().slice(0,10);
+    var seen = {};
+    items.forEach(function(e){ seen[String(e.ticker).toUpperCase()] = true; });
+    var adds = [];
+    picked.forEach(function(r){
+      if(seen[r.sym]) return;
+      var conds = [], lines = [];
+      crit.forEach(function(a){
+        var c = SCR_BY_ID[a.id];
+        if(!c) return;
+        var mesure = c.val(r);
+        lines.push("· " + c.text(a.p) + " — mesuré : " + mesure);
+        var tpl = c.cond ? c.cond(a.p) : null;
+        if(tpl) conds.push({ id:condUid(), cat:"technique", templateId:tpl.templateId, params:tpl.params,
+                             text:"", validated:true, auto:true });
+        // Les critères sans équivalent technique (compression, performance,
+        // secteur…) restent tracés comme catalyseurs manuels : ils étaient
+        // vrais au repérage, c'est à l'utilisateur de dire quand ils ne le
+        // sont plus.
+        else conds.push({ id:condUid(), cat:"fondamental", templateId:null, params:null,
+                          text:c.text(a.p) + " (" + mesure + ")", validated:true, auto:false });
+      });
+      adds.push({
+        id: wlUid(), ticker:r.sym, name:r.name||"", sym:r.sym, cat:"Action", domain:r.sec||"",
+        fav:false, conviction:3, horizon:"Moyen terme",
+        buyLow:null, buyHigh:null, alertBuy:null, alertSell:null, targets:[],
+        conditions: conds,
+        thesis: "Repérée par le screener S&P 500 le " + today
+              + (lines.length ? " — critères retenus :\n" + lines.join("\n") : " (sans critère actif)."),
+        risks:"", createdAt:today, updatedAt:today, author:"Screener"
+      });
+      seen[r.sym] = true;
+    });
+    if(!adds.length){ setAdded("Ces valeurs sont déjà suivies."); return; }
+    persist(items.concat(adds));
+    setAdded(adds.length + " idée" + (adds.length>1?"s":"") + " enregistrée" + (adds.length>1?"s":"") + " — onglet « Mes idées »");
+  }
+  useEffect(function(){
+    if(!added) return;
+    var t = setTimeout(function(){ setAdded(""); }, 4000);
+    return function(){ clearTimeout(t); };
+  }, [added]);
 
   // ── Prix live ────────────────────────────────────────────────────────────
   const loadPrices = useCallback(function(){
@@ -7786,13 +8528,40 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"6px 0 12px"}}>
         <div>
           <div style={{fontSize:19,fontWeight:800,color:C.text,letterSpacing:0.5}}>Suivi</div>
-          <div style={{fontSize:10,color:C.text3,marginTop:2}}>{items.length} idée{items.length>1?"s":""} suivie{items.length>1?"s":""}{nAlert?" · "+nAlert+" en alerte":""}</div>
+          <div style={{fontSize:10,color:C.text3,marginTop:2}}>
+            {sub==="screen" ? "Repérer des opportunités dans le S&P 500"
+                            : (items.length+" idée"+(items.length>1?"s":"")+" suivie"+(items.length>1?"s":"")+(nAlert?" · "+nAlert+" en alerte":""))}
+          </div>
         </div>
-        <div style={{display:"flex",gap:6}}>
-          <button onClick={loadPrices} title="Rafraîchir les prix" style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 11px",color:C.text2,fontSize:12,cursor:"pointer"}}>{loading?"…":"↻"}</button>
-          <button onClick={openAdd} style={{background:C.btc,border:"none",borderRadius:8,padding:"7px 13px",color:"#000",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Idée</button>
-        </div>
+        {sub==="ideas" && (
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={loadPrices} title="Rafraîchir les prix" style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 11px",color:C.text2,fontSize:12,cursor:"pointer"}}>{loading?"…":"↻"}</button>
+            <button onClick={openAdd} style={{background:C.btc,border:"none",borderRadius:8,padding:"7px 13px",color:"#000",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Idée</button>
+          </div>
+        )}
       </div>
+
+      {/* Onglets de la page */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["screen","Opportunités"],["ideas","Mes idées ("+items.length+")"]].map(function(t){
+          var on = sub===t[0];
+          return <button key={t[0]} onClick={function(){ setSub(t[0]); }}
+            style={{flex:1,background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:9,
+                    padding:"9px 4px",color:on?C.btc:C.text2,fontSize:12,fontWeight:800,cursor:"pointer"}}>{t[1]}</button>;
+        })}
+      </div>
+
+      {added && (
+        <div style={{fontSize:11,color:C.green,background:C.green+"14",border:"1px solid "+C.green+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>✓ {added}</div>
+      )}
+
+      {/* Les deux vues restent montées : aller voir une idée puis revenir au
+          screener ne doit pas effacer les critères réglés ni la sélection. */}
+      <div style={{display:sub==="screen"?"block":"none"}}>
+        <ScreenerPanel tracked={items} onAdd={addFromScreener} eur={eur} usdEur={usdEur}/>
+      </div>
+
+      <div style={{display:sub==="ideas"?"block":"none"}}>
 
       {/* Filtres */}
       <div style={{display:"flex",gap:6,marginBottom:12}}>
@@ -7924,6 +8693,8 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
         );
       })}
 
+      </div>
+
       {/* ── Modal ajout / édition ── */}
       {modal && (
         <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setModal(null)}>
@@ -8007,7 +8778,9 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       <select value={c.templateId||"mm"} onChange={function(ev){
                           var tid=ev.target.value;
-                          var defs={ mm:{period:50,unit:"D",sens:"above"}, rsi:{unit:"D",seuil:30,sens:"below"},
+                          var defs={ mm:{period:50,unit:"D",sens:"above",tol:5}, rsi:{unit:"D",seuil:30,sens:"below"},
+                                     chop:{unit:"W",seuil:60,sens:"above"}, divrsi:{unit:"W",sens:"bull",look:52,maxAge:8},
+                                     dd52:{unit:"W",win:52,min:20},
                                      ath:{unit:"D"}, support:{unit:"D",level:""}, resistance:{unit:"D",level:""},
                                      macd:{unit:"D"}, volume:{unit:"D"} };
                           upd({templateId:tid, params:defs[tid]||{unit:"D"}});
@@ -8030,8 +8803,41 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
                           style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:110}}>
                           <option value="above">Prix au-dessus</option>
                           <option value="below">Prix en dessous</option>
+                          <option value="near">Prix à proximité</option>
                         </select>
+                        {(c.params&&c.params.sens)==="near" && (
+                          <input type="number" value={(c.params&&c.params.tol)!=null?c.params.tol:5} onChange={function(ev){ upd({params:{tol:ev.target.value}}); }}
+                            title="écart maximum en %"
+                            style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",width:72}}/>
+                        )}
                       </>)}
+
+                      {pk==="chop" && (<>
+                        <select value={(c.params&&c.params.sens)||"above"} onChange={function(ev){ upd({params:{sens:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:96}}>
+                          <option value="above">CHOP &gt;</option>
+                          <option value="below">CHOP &lt;</option>
+                        </select>
+                        <input type="number" value={(c.params&&c.params.seuil)!=null?c.params.seuil:60} onChange={function(ev){ upd({params:{seuil:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",width:72}}/>
+                      </>)}
+
+                      {pk==="div" && (<>
+                        <select value={(c.params&&c.params.sens)||"bull"} onChange={function(ev){ upd({params:{sens:ev.target.value}}); }}
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:12,padding:"6px 8px",outline:"none",width:112}}>
+                          <option value="bull">Haussière</option>
+                          <option value="bear">Baissière</option>
+                        </select>
+                        <input type="number" value={(c.params&&c.params.maxAge)!=null?c.params.maxAge:8} onChange={function(ev){ upd({params:{maxAge:ev.target.value}}); }}
+                          title="ancienneté maximale, en périodes"
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",width:72}}/>
+                      </>)}
+
+                      {pk==="dd" && (
+                        <input type="number" value={(c.params&&c.params.min)!=null?c.params.min:20} onChange={function(ev){ upd({params:{min:ev.target.value}}); }}
+                          title="repli minimum en %"
+                          style={{background:C.bg3,border:"1px solid "+C.border,borderRadius:7,color:C.text,fontSize:14,padding:"6px 8px",outline:"none",width:88}}/>
+                      )}
 
                       {pk==="rsi" && (<>
                         <select value={(c.params&&c.params.sens)||"below"} onChange={function(ev){ upd({params:{sens:ev.target.value}}); }}
@@ -11706,6 +12512,7 @@ function PageChangelog(){
     ["v28.70 \u2014 Legend : trades en cours", "Les positions non cl\u00f4tur\u00e9es apparaissent avec la pastille Ouvert (date d'entr\u00e9e, anciennet\u00e9, quantit\u00e9 restante, PA moyen), supprimables comme les autres et restaurables. Filtre Tous / Ouverts / Cl\u00f4tur\u00e9s. Les statistiques (P&L total, win rate, meilleur/pire, dur\u00e9e moyenne) ne portent que sur le r\u00e9alis\u00e9."],
     ["v28.88 \u2014 CBBI dans le tableau BTC", "Les 9 m\u00e9triques du Colin Talks Crypto Bitcoin Bull Run Index sont int\u00e9gr\u00e9es : 7 \u00e9taient d\u00e9j\u00e0 pr\u00e9sentes, Trolololo Trend Line et Woobull Top Cap vs CVDD sont ajout\u00e9es (22 indicateurs). Nouvelle \u00e9chelle CBBI \u00e0 c\u00f4t\u00e9 d'Historique et Adaptative : elle ne retient que ces 9 indicateurs, avec la normalisation du CBBI \u2014 chaque m\u00e9trique situ\u00e9e entre deux r\u00e9gressions ajust\u00e9es sur ses valeurs aux sommets et aux creux de cycle pass\u00e9s, donc des bornes qui d\u00e9rivent avec le march\u00e9. Rep\u00e8res de cycle cliquables sur le graphe : halving, sommet, creux."],
     ["v28.89 \u2014 Consignes par \u00e9chelle", "Chaque \u00e9chelle de score (Historique, Adaptative, CBBI) a d\u00e9sormais son propre jeu de consignes : les trois ne se lisent pas pareil, un m\u00eame score n'y a donc pas le m\u00eame sens. L'\u00e9diteur s'ouvre sur l'\u00e9chelle affich\u00e9e, signale celles r\u00e9gl\u00e9es diff\u00e9remment et sait recopier un r\u00e9glage sur les trois. Les consignes d\u00e9j\u00e0 en place sont reprises \u00e0 l'identique sur les trois \u00e9chelles."],
+    ["v28.90 \u2014 Screener S&P 500", "L'onglet Suivi s'ouvre sur Opportunit\u00e9s : 15 crit\u00e8res cliquables, param\u00e9trables et cumulables (proximit\u00e9 MM200 et MM50 weekly, tendance MM30, MACD hebdo, RSI, divergence RSI, choppiness, compression des bandes de Bollinger, ATR, volume, repli 52 semaines, proximit\u00e9 du plus bas, performances 3 et 12 mois, secteur) filtrent les ~503 composants de l'indice, mesur\u00e9s chaque jour sur bougies hebdomadaires par le worker v162. Un appui ouvre le modal ticker du portefeuille ; les valeurs coch\u00e9es deviennent des id\u00e9es avec la th\u00e8se d\u00e9j\u00e0 r\u00e9dig\u00e9e \u2014 chaque crit\u00e8re retenu y figure avec sa mesure du jour et se transforme en catalyseur, r\u00e9\u00e9valu\u00e9 automatiquement quand il s'y pr\u00eate."],
   ];
   return (
     <div style={{paddingBottom:40}}>

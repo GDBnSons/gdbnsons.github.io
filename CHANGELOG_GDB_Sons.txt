@@ -829,6 +829,71 @@ v161.1   ▸ La fiche retient 7 news au lieu de 5, et le résumé Telegram liste
            vérifiée sur un historique simulé (+6,38 % attendu et obtenu), et
            perf hebdo des 9 indices.
 
+v28.90   Suivi — onglet Opportunités : screener S&P 500 (worker v162)
+         La page Suivi prend deux onglets : « Opportunités », un screener sur
+         les ~503 composants du S&P 500, et « Mes idées », la liste existante.
+         ▸ 15 critères CLIQUABLES, PARAMÉTRABLES et CUMULABLES, groupés par
+           famille. Tendance : proximité MM200 / MM50 weekly (écart et côté
+           réglables), position vs MM30 weekly, croisement MACD hebdo récent.
+           Momentum : RSI weekly, divergence RSI weekly (sens + ancienneté),
+           perf 3 et 12 mois. Volatilité : indice de choppiness, compression
+           des bandes de Bollinger (rang percentile sur 2 ans), ATR 14, volume
+           hebdo vs moyenne 20 semaines. Position : repli depuis le plus haut
+           52 semaines (fourchette), proximité du plus bas 52 semaines.
+           Contexte : secteur GICS (multi-choix). Chaque critère actif expose
+           ses réglages et se relit en toutes lettres (« Prix à moins de 5 %
+           de la MM200 weekly »). Tri par pertinence, écart MM200, RSI,
+           choppiness, repli, perf 12 mois ou ticker.
+         ▸ Un appui sur une valeur ouvre le MODAL TICKER du portefeuille —
+           même composant, mêmes graphes, mêmes fondamentaux.
+         ▸ Les valeurs cochées s'ENREGISTRENT EN IDÉES avec la thèse déjà
+           rédigée : chaque critère retenu y figure avec sa mesure du jour
+           (« Indice de choppiness weekly > 60 — mesuré : CHOP 73,3 »), et se
+           transforme en catalyseur. Les critères qui ont un équivalent
+           technique deviennent des catalyseurs AUTO-RÉÉVALUÉS ensuite ; les
+           autres restent des catalyseurs manuels, cochés au repérage. Les
+           valeurs déjà suivies sont signalées et non sélectionnables.
+         ▸ Vocabulaire partagé : le moteur de catalyseurs gagne trois modèles
+           (choppiness, divergence RSI, repli depuis le plus haut) et la
+           moyenne mobile un sens « à proximité » avec tolérance. MM30 et
+           MM100 rejoignent les périodes proposées. Une idée née du screener
+           se relit donc exactement comme une idée saisie à la main.
+         ▸ Worker v162 : univers lu une fois par semaine (liste datahub des
+           composants + secteurs GICS, repli sur sp500_list_v1 en KV), puis
+           une requête Yahoo hebdomadaire (10 ans) par valeur → 23 mesures
+           stockées en lignes-tableaux, ~125 octets par valeur, 62 Ko pour
+           l'indice entier. Le plan gratuit plafonnant à 50 sous-requêtes par
+           invocation, le calcul est découpé en lots de 20 servis par
+           /screener/chunk : chaque lot a son propre budget, l'app en enchaîne
+           26 trois par trois, base complète en ~25 s avec barre d'avancement.
+           /screener recolle les lots, fige la base du jour dès qu'elle est
+           complète (une seule lecture KV ensuite) et, tant qu'elle ne l'est
+           pas, sert celle de la veille marquée « veille » plutôt qu'un écran
+           vide. Un lot relancé ne peut jamais appauvrir la base : ce qui
+           échoue garde la mesure du passage précédent.
+         ▸ Corrigé au passage, côté worker : en séance, Yahoo ajoute après la
+           bougie de la semaine en cours une bougie du jour même. Non
+           fusionnées, ces deux entrées faussaient le rapport de volume (toutes
+           les valeurs paraissaient calmes, ×0,6 à ×0,9 systématiquement) et
+           décalaient d'un cran la « dernière semaine clôturée ».
+         ▸ Testé : indicateurs confrontés à la série de référence de Wilder
+           (RSI 70,46 / 66,25 / 66,48 au centième) et à des séries fabriquées
+           (choppiness 8,6 en tendance franche, 91,5 en range ; divergence
+           haussière détectée au bon pivot), puis sur bougies réelles (AAPL,
+           KO, XOM, NEE, BRK-B, MRNA) avec contrôle croisé indépendant de la
+           MM200, du repli 52 s et de la perf 12 mois — 0 écart. En navigateur
+           (serveur HTTP local, worker bouché par un univers synthétique de
+           503 valeurs) : construction 26 lots + rattrapage des lots en échec,
+           filtres cumulés vérifiés contre un calcul indépendant (45 → 21 → 6),
+           réglage d'un paramètre (tolérance 5 % → 2 % : 21 → 8), sélection
+           multiple, idée créée conforme (catalyseurs mm/near/W et chop/W
+           validés, thèse avec mesures), modal ticker, filtre secteur.
+         ▸ Deux défauts trouvés au test et corrigés : changer d'onglet jetait
+           la base et les critères réglés (les deux vues restent désormais
+           montées, et la base est mémorisée 10 minutes entre deux montages) ;
+           deux critères cochés dans le même cycle de rendu n'en enregistraient
+           qu'un (mises à jour d'état passées en forme fonctionnelle).
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
@@ -840,8 +905,9 @@ APIs       Yahoo Finance (cours, news, recherche), FMP (logos stocks),
            Reuters / AP / Bloomberg via Google News (newsletter, v161),
            OKX (liquidations), CFTC COT (open interest Nasdaq),
            colintalkscrypto.com (CBBI), Farside (flux ETF),
+           datahub / s-and-p-500-companies (composition du S&P 500, v162),
            Resend + Telegram (newsletter), Claude (résumés de news)
-Worker     Cloudflare Worker v161 (proxy API, KV store, no CORS, cron)
+Worker     Cloudflare Worker v162 (proxy API, KV store, no CORS, cron, screener)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
 Validation avant chaque livraison :
@@ -875,6 +941,11 @@ BASES KV (27 clés)
   gdb_gold_hist      Historique du cours de l'or
   gdb_quadrants      Quadrants macro
   gdb_watchlist      Suivi — idées de trade (v28.65)
+
+Caches du screener (worker v162, jamais sauvegardés — reconstructibles) :
+  scr_univ_v1        Univers S&P 500 [[symbole, nom, secteur]] — TTL 7 jours
+  scr_p_<gen>_<i>    Lot de 20 valeurs mesurées (gen = date NC) — TTL 3 jours
+  scr_all_<gen>      Base du jour recollée, figée dès qu'elle est complète
 
 Non synchronisées en KV :
   gdb_drawings_v1    Tracés du graphe (localStorage uniquement)

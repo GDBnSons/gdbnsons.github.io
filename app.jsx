@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.90";
+const APP_VERSION = "v28.91";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2371,18 +2371,17 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
             {/* Ticker grand + logo + nom YF petit */}
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               {(()=>{
-                // Priorité : icône user → logo fmp ICON_DB → logoUrl API
+                // Priorité : icône user → logo fmp ICON_DB → logoUrl API → CDN
                 const db = ICON_DB[ticker];
-                const logoSrc = db?.user ? null : (db?.fmp || data?.logoUrl);
                 const userIcon = db?.user;
                 if(userIcon) return(
                   <span style={{fontSize:24,lineHeight:1}}>{userIcon}</span>
                 );
+                const logoSrc = db?.fmp || data?.logoUrl || tickerLogoUrl(ticker, cat);
                 if(logoSrc) return(
-                  <img src={logoSrc} alt={ticker}
+                  <LogoImg src={logoSrc} alt={ticker}
                     style={{width:28,height:28,borderRadius:6,objectFit:"contain",
-                      background:C.bg2,border:`1px solid ${C.border}`,flexShrink:0}}
-                    onError={e=>{e.target.style.display="none";}}/>
+                      background:C.bg2,border:`1px solid ${C.border}`,flexShrink:0}}/>
                 );
                 return null;
               })()}
@@ -3451,6 +3450,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                         ticker={item.ticker}
                         size={32}
                         color={color+"22"}
+                        cat={item.cat}
                         iconDbVersion={iconDbVersion}
                         onIconSaved={onIconSaved}
                       />
@@ -4158,18 +4158,67 @@ function syncCustomIcons(){
     else delete CUSTOM_ICONS[t];
   });
 }
+/* ── v28.91 — Logos boursiers sans clé API ────────────────────────────────────
+   Le CDN d'images de FMP est public : il ne passe pas par /stable/profile, la
+   route qui répond 401 au worker. L'URL se déduit du seul ticker, donc aucun
+   appel réseau au lancement — le navigateur met les PNG en cache tout seul et
+   un ticker jamais consulté (UBER…) a son logo dès le premier affichage.     */
+const LOGO_CDN = "https://images.financialmodelingprep.com/symbol/";
+// Tickers qui ne doivent jamais aller chercher un logo boursier : devises et
+// comptes. La crypto est écartée à part — sur ce CDN, ETH c'est Ethan Allen.
+const NO_LOGO_CDN = new Set(["USD","EURO","EUR","CASH","KUCOIN","BOURSO","DEBLOCK","BCI"]);
+function tickerLogoUrl(ticker, cat){
+  const raw = String(ticker||"").trim();
+  const t   = raw.toUpperCase();
+  if(!t || cat==="Crypto" || CG_MAP[t] || NO_LOGO_CDN.has(t)) return null;
+  // Le symbole Yahoo porte le suffixe de place (RMS → RMS.PA), que le CDN
+  // comprend ; il trahit aussi les cryptos absentes de CG_MAP (…-USD).
+  // Certaines clés de YF_MAP sont en casse mixte (AVIOm) : chercher les deux.
+  const map = (typeof YF_MAP!=="undefined" && YF_MAP) || {};
+  let sym = String(map[raw] || map[t] || t).toUpperCase();
+  if(/-USD$/.test(sym)) return null;
+  if(!/^[A-Z0-9]{1,10}(\.[A-Z]{1,4})?$/.test(sym)) return null;
+  return LOGO_CDN + sym + ".png";
+}
 // Retourne la meilleure icône disponible pour un ticker :
 //   1. icône user choisie (emoji/texte)
 //   2. URL logo FMP (à afficher comme <img>)
 //   3. icône base hardcodée
-//   4. null (fallback catégorie)
-function getBestIcon(ticker){
+//   4. logo déduit du ticker via le CDN FMP
+//   5. null (fallback catégorie)
+function getBestIcon(ticker, cat){
   const db = ICON_DB[ticker];
   if(db?.user)  return { type:"emoji", value: db.user };
   if(db?.fmp)   return { type:"img",   value: db.fmp  };
   const base = TICKER_ICONS_BASE[ticker];
   if(base)      return { type:"emoji", value: base };
+  const cdn = tickerLogoUrl(ticker, cat);
+  if(cdn)       return { type:"img",   value: cdn };
   return null;
+}
+/* <img> qui se replie sur `fallback` au lieu de laisser un trou : le CDN
+   ne connaît pas tous les tickers (AVIO → 404). */
+function LogoImg({ src, alt, style, fallback=null, ...rest }){
+  const [bad, setBad] = useState(false);
+  useEffect(function(){ setBad(false); }, [src]);
+  if(!src || bad) return fallback;
+  return <img src={src} alt={alt||""} loading="lazy" style={style}
+              onError={function(){ setBad(true); }} {...rest}/>;
+}
+/* Pastille logo des listes du Suivi (screener S&P 500 + idées suivies).
+   Fond blanc : beaucoup de logos sont noirs sur transparent, donc invisibles
+   sur le thème sombre. Repli sur le début du ticker si le CDN ne l'a pas. */
+function ScrLogo({ ticker, size=28, cat="Action" }){
+  const best = getBestIcon(ticker, cat);
+  const box  = { width:size, height:size, borderRadius:size*0.28, flexShrink:0,
+                 display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" };
+  const fb   = <div style={{...box, background:C.bg3, fontSize:size*0.33, fontWeight:800, color:C.text3}}>
+                 {String(ticker||"").slice(0,3)}</div>;
+  if(best && best.type==="img")
+    return <LogoImg src={best.value} alt={ticker} fallback={fb}
+             style={{...box, background:"#fff", objectFit:"contain", padding:2, boxSizing:"border-box"}}/>;
+  if(best) return <div style={{...box, background:C.bg3, fontSize:size*0.5}}>{best.value}</div>;
+  return fb;
 }
 // Écrit dans ICON_DB, resync CUSTOM_ICONS, persiste en localStorage
 function setIconDb(ticker, patch){
@@ -4230,12 +4279,14 @@ initIconDbFromLS();
    En cliquant dessus : mini-modal inline pour choisir entre user/fmp/base.
    Le clic sur le reste de la ligne déclenche le TickerModal habituel.
 ─────────────────────────────────────────────────────────────────────────── */
-function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVersion=0 }){
+function TickerIcon({ ticker, size=32, color="#ffffff22", cat="", onIconSaved, iconDbVersion=0 }){
   const [open, setOpen] = useState(false);
   const [userInput, setUserInput] = useState("");
   const [saving, setSaving] = useState(false);
   const db = ICON_DB[ticker] || {};
-  const best = getBestIcon(ticker);
+  const best = getBestIcon(ticker, cat);
+  // Logo proposé dans le sélecteur : celui déjà stocké, sinon celui du CDN.
+  const logoOpt = db.fmp || tickerLogoUrl(ticker, cat);
 
   const saveIcon = async (patch) => {
     setSaving(true);
@@ -4262,7 +4313,9 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVer
         title="Changer l'icône"
       >
         {best?.type==="img"
-          ? <img src={best.value} alt={ticker} style={{width:"80%",height:"80%",objectFit:"contain",borderRadius:4}} onError={e=>e.target.style.display="none"}/>
+          ? <LogoImg src={best.value} alt={ticker}
+              style={{width:"80%",height:"80%",objectFit:"contain",borderRadius:4}}
+              fallback={<span style={{fontSize:size*0.34,fontWeight:800}}>{ticker.slice(0,3)}</span>}/>
           : (best?.value || ticker.slice(0,3))
         }
       </div>
@@ -4278,18 +4331,20 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", onIconSaved, iconDbVer
               Icône — <span style={{color:C.btc,fontFamily:"monospace"}}>{ticker}</span>
             </div>
 
-            {/* Option FMP officielle */}
-            {db.fmp && (
-              <button onClick={()=>saveIcon({user:null})} style={{
-                display:"flex",alignItems:"center",gap:10,width:"100%",background:!db.user?C.btc+"22":"transparent",
-                border:`1px solid ${!db.user?C.btc:C.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",marginBottom:8,
+            {/* Option logo officiel — stocké dans .fmp, il passe devant l'emoji
+                par défaut, sinon le choix serait sans effet sur QQQ, BTC… */}
+            {logoOpt && (
+              <button onClick={()=>saveIcon({user:null, fmp:logoOpt})} style={{
+                display:"flex",alignItems:"center",gap:10,width:"100%",background:(!db.user&&db.fmp)?C.btc+"22":"transparent",
+                border:`1px solid ${(!db.user&&db.fmp)?C.btc:C.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",marginBottom:8,
               }}>
-                <img src={db.fmp} alt="" style={{width:28,height:28,objectFit:"contain",borderRadius:4,background:"#fff"}} onError={e=>e.target.style.display="none"}/>
+                <LogoImg src={logoOpt} style={{width:28,height:28,objectFit:"contain",borderRadius:4,background:"#fff"}}
+                  fallback={<span style={{fontSize:10,color:C.gray,width:28,textAlign:"center"}}>—</span>}/>
                 <div style={{textAlign:"left"}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.text}}>Logo officiel</div>
                   <div style={{fontSize:9,color:C.gray}}>Source FMP</div>
                 </div>
-                {!db.user && <span style={{marginLeft:"auto",fontSize:11,color:C.btc}}>✓ actif</span>}
+                {!db.user && db.fmp && <span style={{marginLeft:"auto",fontSize:11,color:C.btc}}>✓ actif</span>}
               </button>
             )}
 
@@ -5052,7 +5107,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                       {selSec.items.slice(0,7).map((item,i)=>{
                         const name  = item.t||item.ticker||item.label||"—";
                         // v28.69 — meme source d'icone que le detail des positions ci-dessous
-                        const best  = getBestIcon(item.t||item.ticker);
+                        const best  = getBestIcon(item.t||item.ticker, item.cat);
                         const valUSD= item.val||item.valUSD||0;
                         const pnl   = item.pnl||0;
                         const pct   = selSec.totalUSD>0?(valUSD/selSec.totalUSD)*100:0;
@@ -5060,7 +5115,8 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                           <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                             <div style={{display:"flex",alignItems:"center",gap:5}}>
                               {best && best.type==="img"
-                                ? <img src={best.value} alt="" style={{width:14,height:14,borderRadius:3,objectFit:"contain",flexShrink:0}}/>
+                                ? <LogoImg src={best.value} style={{width:14,height:14,borderRadius:3,objectFit:"contain",flexShrink:0,background:"#fff"}}
+                                    fallback={<span style={{fontSize:12}}>{item.icon||"•"}</span>}/>
                                 : <span style={{fontSize:12}}>{(best&&best.value)||item.icon||"•"}</span>}
                               <span style={{fontSize:10,color:C.text,fontWeight:600}}>{name}</span>
                             </div>
@@ -8235,6 +8291,7 @@ function ScreenerPanel({ tracked, onAdd, eur=false, usdEur=0.86 }){
             <button onClick={function(){ toggleSel(r.sym); }} disabled={isTracked}
               style={{background:"none",border:"none",cursor:isTracked?"default":"pointer",fontSize:14,padding:0,lineHeight:1,
                       color:isTracked?C.green:(picked?C.btc:C.text3),flexShrink:0}}>{isTracked?"★":(picked?"☑":"☐")}</button>
+            <ScrLogo ticker={r.sym} size={28}/>
             <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={function(){ setMt({ticker:r.sym,cat:"Action"}); }}>
               <div style={{display:"flex",alignItems:"baseline",gap:7}}>
                 <span style={{fontSize:13,fontWeight:800,color:C.text}}>{r.sym}</span>
@@ -8595,6 +8652,7 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
             {/* Ligne principale */}
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",cursor:"pointer"}} onClick={()=>setOpenId(open?null:e.id)}>
               <button onClick={function(ev){ ev.stopPropagation(); toggleFav(e.id); }} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:e.fav?C.gold:C.text3,padding:0,lineHeight:1}}>{e.fav?"★":"☆"}</button>
+              <ScrLogo ticker={e.ticker} cat={e.cat} size={30}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"baseline",gap:7}}>
                   <span style={{fontSize:14,fontWeight:800,color:C.text}}>{e.ticker}</span>

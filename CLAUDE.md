@@ -96,9 +96,12 @@ récupérable. En cas de perte, en reposer une nouvelle sur Cloudflare.
 - **FMP répond 401 aux appels du worker** alors que la même clé fonctionne
   depuis un poste local, pour tous les tickers. Antérieur à la v28.85, ce n'est
   pas une régression. Pistes : blocage des IP de datacenter, ou quota de
-  250 appels/jour épuisé par le cron horaire. Impact limité, les logos sont mis
-  en cache dans `ICON_DB`. Attention : `_fmpDebug.hasKey` est un `false` écrit
-  en dur avec le commentaire « FMP désactivé » — un vestige, pas un diagnostic.
+  250 appels/jour épuisé par le cron horaire. Attention : `_fmpDebug.hasKey`
+  est un `false` écrit en dur avec le commentaire « FMP désactivé » — un
+  vestige, pas un diagnostic.
+  Les **logos ne dépendent plus de cette route** depuis la v28.91 :
+  `tickerLogoUrl()` construit l'URL à partir du seul ticker sur le CDN public
+  `images.financialmodelingprep.com/symbol/<SYM>.png`, qui n'exige pas de clé.
 
 ## Conventions
 

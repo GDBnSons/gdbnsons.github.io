@@ -914,6 +914,37 @@ v28.90   Suivi — onglet Opportunités : screener S&P 500 (worker v162)
            mais il faudra distinguer « historique trop court » de « échec de
            récupération » pour l'éviter.
 
+v28.91   Logos des actions — un ticker suffit, plus aucun appel d'API
+         Les tickers jamais consultés n'avaient pas de logo (UBER…) : le logo
+         n'arrivait que par /stable/profile de FMP, la route qui répond 401 au
+         worker (point ouvert connu). Le CDN d'images de FMP, lui, est PUBLIC
+         et sans clé : images.financialmodelingprep.com/symbol/<SYM>.png.
+         ▸ L'URL se DÉDUIT DU TICKER — rien à charger au lancement, rien à
+           stocker en KV, le navigateur met les PNG en cache tout seul. Un
+           ticker nouveau a son logo dès le premier affichage.
+         ▸ Le symbole Yahoo (YF_MAP) sert de source : le suffixe de place est
+           conservé, donc les valeurs européennes marchent aussi (RMS →
+           RMS.PA, AVIOm → AVIO.MI). Clés de YF_MAP en casse mixte gérées.
+         ▸ Écartés du CDN : la crypto (CG_MAP, plus toute paire …-USD de
+           YF_MAP — sur ce CDN, ETH c'est Ethan Allen Interiors), les devises
+           et les comptes bancaires, qui gardent leur logo ou leur emoji.
+         ▸ Ordre de priorité inchangé et complété : icône choisie par
+           l'utilisateur → logo stocké (BANK_LOGOS, CoinGecko) → emoji par
+           défaut → CDN. Le sélecteur d'icône propose désormais le logo même
+           quand rien n'est stocké, et l'enregistre pour qu'il passe devant
+           l'emoji par défaut (sinon le choix restait sans effet sur QQQ…).
+         ▸ LOGOS DANS LE SUIVI : pastille de logo sur chaque ligne du screener
+           S&P 500 et sur chaque idée suivie. Fond blanc — beaucoup de logos
+           sont noirs sur transparent, invisibles sur le thème sombre.
+         ▸ Nouveau <LogoImg> : replie sur le début du ticker quand le CDN ne
+           connaît pas la valeur, au lieu de laisser un trou (AVIO → 404).
+           Chargement paresseux, pour les 150 lignes du screener.
+         ▸ Testé : 50 tickers du S&P 500 (dont BRK.B, BF.B) + les tickers EU
+           et ETF de l'app — 200 partout sauf AVIO, qui tombe bien sur le
+           repli. En navigateur (serveur HTTP local) : URLs vérifiées pour
+           15 tickers représentatifs, image réellement chargée (128×128) et
+           repli confirmé sur un ticker inexistant.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

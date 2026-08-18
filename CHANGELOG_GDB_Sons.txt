@@ -945,6 +945,42 @@ v28.91   Logos des actions — un ticker suffit, plus aucun appel d'API
            15 tickers représentatifs, image réellement chargée (128×128) et
            repli confirmé sur un ticker inexistant.
 
+v28.92   Logos « tout blancs » — le fond de la pastille suit le logo
+         Depuis la v28.91, certaines valeurs s'affichaient en carré blanc, dans
+         le détail du donut comme dans les listes. Cause : environ UN LOGO SUR
+         DOUZE est un glyphe BLANC sur fond transparent (UBER, QQQ, ANET, NKE,
+         V, DIS, IBM, MCD, BA, UNH…), dessiné pour un fond sombre. Posé sur la
+         pastille blanche introduite en v28.91, il devenait invisible. Les
+         autres sont à l'encre sombre (PLTR, NVDA, IBKR, TSLA…) et
+         disparaîtraient à l'inverse sur un fond sombre : aucun fond unique ne
+         convient, c'est le TON DU LOGO qui doit choisir.
+         ▸ Les 43 logos clairs du S&P 500 et du portefeuille sont écrits EN DUR
+           dans l'app : pour eux, rien à mesurer ni à recharger, jamais.
+         ▸ Pour un ticker hors de cette liste, le ton est déduit UNE FOIS de
+           l'image déjà affichée — le CDN renvoie Access-Control-Allow-Origin,
+           donc le canvas est lisible — puis gardé en mémoire de session.
+           Aucune requête supplémentaire : la mesure se fait sur l'élément
+           <img> déjà chargé, pas sur un second téléchargement.
+         ▸ Mesure : part des pixels opaques plus sombres que 200 de luminance.
+           Sur les 526 logos mesurés (S&P 500 + portefeuille), la séparation
+           est nette — 42 logos clairs à 0,00 % PILE, MCD à 1,95 % (ses arches
+           jaunes), puis plus rien avant 3,3 %. Seuil posé à 2,5 %.
+         ▸ Fond appliqué partout où un logo s'affiche : icône du portefeuille,
+           en-tête du modal, détail du donut, screener S&P 500, idées suivies,
+           sélecteur d'icône. Blanc sous une encre sombre, ardoise (#252a33)
+           sous un glyphe clair.
+         ▸ crossOrigin n'est posé QUE sur les URL de notre CDN : l'imposer à un
+           logo servi sans CORS (Amundi, Mimo, comptes bancaires) l'empêcherait
+           de s'afficher du tout. Canvas illisible → fond clair, sans bruit.
+         ▸ Testé en navigateur : 43 logos clairs et 483 sombres classés
+           conformément à la mesure ; 4 logos clairs HORS liste en dur (ROKU,
+           OKTA, ZM, DOCU) correctement basculés à la volée, ce qui prouve la
+           lecture du canvas depuis une <img> rendue par React ; repli sur le
+           ticker pour un symbole inconnu ; et surtout — une image déjà en
+           cache SANS CORS (cas d'un appareil déjà passé en v28.91) reste
+           affichée et lisible une fois redemandée avec crossOrigin, donc la
+           mise à jour ne casse rien sur les appareils existants.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.91";
+const APP_VERSION = "v28.92";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2379,9 +2379,9 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 );
                 const logoSrc = db?.fmp || data?.logoUrl || tickerLogoUrl(ticker, cat);
                 if(logoSrc) return(
-                  <LogoImg src={logoSrc} alt={ticker}
-                    style={{width:28,height:28,borderRadius:6,objectFit:"contain",
-                      background:C.bg2,border:`1px solid ${C.border}`,flexShrink:0}}/>
+                  <LogoImg chip src={logoSrc} alt={ticker}
+                    style={{width:28,height:28,borderRadius:6,objectFit:"contain",padding:2,
+                      boxSizing:"border-box",border:`1px solid ${C.border}`,flexShrink:0}}/>
                 );
                 return null;
               })()}
@@ -4196,13 +4196,76 @@ function getBestIcon(ticker, cat){
   if(cdn)       return { type:"img",   value: cdn };
   return null;
 }
+/* ── v28.92 — le fond de la pastille dépend du logo ───────────────────────────
+   Environ un logo sur douze est un glyphe BLANC sur fond transparent (UBER,
+   QQQ, ANET, NKE, V, DIS, IBM…) : posé sur la pastille blanche de la v28.91,
+   il disparaissait — l'« icône toute blanche ». Les autres sont à l'encre
+   sombre (PLTR, NVDA, IBKR…) et disparaîtraient sur un fond sombre. C'est
+   donc le ton du logo qui choisit le fond.
+   Les logos clairs du S&P 500 et du portefeuille sont écrits EN DUR : rien à
+   mesurer ni à recharger pour eux. Pour un ticker hors de cette liste, le ton
+   est déduit une fois de l'image déjà affichée (le CDN autorise CORS, donc le
+   canvas est lisible) et gardé en mémoire — aucune requête supplémentaire.
+   Mesure : part des pixels opaques plus sombres que 200 de luminance. Sur les
+   526 logos mesurés, les clairs sont sous 2 % (42 à 0,00 % pile, MCD à 1,95 %
+   avec ses arches jaunes) et les suivants à 3,3 % et plus : seuil à 2,5 %. */
+const LOGO_PALE = new Set(("ABBV ADI ADSK AIG ALB ALL AMP ANET APP AVB AWK AXON BA BAX BLK "+
+  "CEG CSX CTAS DHI DIS FAST HSY IBM KR LMT MCD MRVL NKE NTAP OIH ON QQQ RCL REGN STT UBER "+
+  "ULTA UNH V VRTX WSM WYNN XPEV").split(" "));
+const LOGO_CHIP = { ink:"#ffffff", pale:"#252a33" };
+const LOGO_TONE = {};          // url → "pale" | "ink", mémoire de session
+function logoSymOf(url){
+  return (typeof url==="string" && url.indexOf(LOGO_CDN)===0)
+    ? url.slice(LOGO_CDN.length).replace(/\.png$/,"") : null;
+}
+// Ton connu d'avance : liste en dur, puis mesures de la session. Sinon "ink",
+// le cas de loin le plus fréquent — et le repli sûr.
+function logoTone(url){
+  if(!url) return "ink";
+  const sym = logoSymOf(url);
+  if(sym && LOGO_PALE.has(sym)) return "pale";
+  return LOGO_TONE[url] || "ink";
+}
+function logoToneKnown(url){
+  const sym = logoSymOf(url);
+  return !!url && (!!LOGO_TONE[url] || !!(sym && LOGO_PALE.has(sym)));
+}
+// Mesure le ton sur l'image DÉJÀ chargée. Un canvas teinté (logo servi sans
+// CORS) lève : on garde alors le fond clair, sans bruit.
+function noteLogoTone(url, el){
+  if(!url || !el || logoToneKnown(url)) return null;
+  let tone = "ink";
+  try{
+    const w = el.naturalWidth, h = el.naturalHeight;
+    if(!w || !h) return null;
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d"); x.drawImage(el, 0, 0);
+    const d = x.getImageData(0, 0, w, h).data;
+    let op = 0, dark = 0;
+    for(let i=0;i<w*h;i++){
+      if(d[i*4+3] < 24) continue;
+      op++;
+      if(0.2126*d[i*4] + 0.7152*d[i*4+1] + 0.0722*d[i*4+2] < 200) dark++;
+    }
+    if(op && dark/op < 0.025) tone = "pale";
+  }catch(e){ return null; }
+  LOGO_TONE[url] = tone;
+  return tone;
+}
 /* <img> qui se replie sur `fallback` au lieu de laisser un trou : le CDN
-   ne connaît pas tous les tickers (AVIO → 404). */
-function LogoImg({ src, alt, style, fallback=null, ...rest }){
+   ne connaît pas tous les tickers (AVIO → 404).
+   Avec `chip`, l'image porte son propre fond, choisi d'après son ton. */
+function LogoImg({ src, alt, style, fallback=null, chip=false, ...rest }){
   const [bad, setBad] = useState(false);
-  useEffect(function(){ setBad(false); }, [src]);
+  const [tone, setTone] = useState(function(){ return logoTone(src); });
+  useEffect(function(){ setBad(false); setTone(logoTone(src)); }, [src]);
   if(!src || bad) return fallback;
-  return <img src={src} alt={alt||""} loading="lazy" style={style}
+  const st = chip ? { ...style, background: LOGO_CHIP[tone] || LOGO_CHIP.ink } : style;
+  // crossOrigin seulement sur notre CDN (qui renvoie Access-Control-Allow-Origin:*) :
+  // l'imposer à un logo servi sans CORS l'empêcherait de s'afficher du tout.
+  const cors = (typeof src==="string" && src.indexOf(LOGO_CDN)===0) ? "anonymous" : undefined;
+  return <img src={src} alt={alt||""} loading="lazy" style={st} crossOrigin={cors}
+              onLoad={chip ? function(e){ const t = noteLogoTone(src, e.target); if(t) setTone(t); } : undefined}
               onError={function(){ setBad(true); }} {...rest}/>;
 }
 /* Pastille logo des listes du Suivi (screener S&P 500 + idées suivies).
@@ -4216,7 +4279,7 @@ function ScrLogo({ ticker, size=28, cat="Action" }){
                  {String(ticker||"").slice(0,3)}</div>;
   if(best && best.type==="img")
     return <LogoImg src={best.value} alt={ticker} fallback={fb}
-             style={{...box, background:"#fff", objectFit:"contain", padding:2, boxSizing:"border-box"}}/>;
+             chip style={{...box, objectFit:"contain", padding:2, boxSizing:"border-box"}}/>;
   if(best) return <div style={{...box, background:C.bg3, fontSize:size*0.5}}>{best.value}</div>;
   return fb;
 }
@@ -4313,8 +4376,9 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", cat="", onIconSaved, i
         title="Changer l'icône"
       >
         {best?.type==="img"
-          ? <LogoImg src={best.value} alt={ticker}
-              style={{width:"80%",height:"80%",objectFit:"contain",borderRadius:4}}
+          ? <LogoImg chip src={best.value} alt={ticker}
+              style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:size*0.25,
+                      padding:size*0.12,boxSizing:"border-box"}}
               fallback={<span style={{fontSize:size*0.34,fontWeight:800}}>{ticker.slice(0,3)}</span>}/>
           : (best?.value || ticker.slice(0,3))
         }
@@ -4338,7 +4402,7 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", cat="", onIconSaved, i
                 display:"flex",alignItems:"center",gap:10,width:"100%",background:(!db.user&&db.fmp)?C.btc+"22":"transparent",
                 border:`1px solid ${(!db.user&&db.fmp)?C.btc:C.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",marginBottom:8,
               }}>
-                <LogoImg src={logoOpt} style={{width:28,height:28,objectFit:"contain",borderRadius:4,background:"#fff"}}
+                <LogoImg chip src={logoOpt} style={{width:28,height:28,objectFit:"contain",borderRadius:4}}
                   fallback={<span style={{fontSize:10,color:C.gray,width:28,textAlign:"center"}}>—</span>}/>
                 <div style={{textAlign:"left"}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.text}}>Logo officiel</div>
@@ -5115,7 +5179,7 @@ function PageAllocation({hidden, EFF, eur=false, setEur, iconDbVersion=0, bumpIc
                           <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                             <div style={{display:"flex",alignItems:"center",gap:5}}>
                               {best && best.type==="img"
-                                ? <LogoImg src={best.value} style={{width:14,height:14,borderRadius:3,objectFit:"contain",flexShrink:0,background:"#fff"}}
+                                ? <LogoImg chip src={best.value} style={{width:14,height:14,borderRadius:3,objectFit:"contain",flexShrink:0}}
                                     fallback={<span style={{fontSize:12}}>{item.icon||"•"}</span>}/>
                                 : <span style={{fontSize:12}}>{(best&&best.value)||item.icon||"•"}</span>}
                               <span style={{fontSize:10,color:C.text,fontWeight:600}}>{name}</span>

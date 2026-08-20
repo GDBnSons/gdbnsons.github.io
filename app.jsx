@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.96";
+const APP_VERSION = "v28.97";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -12196,20 +12196,18 @@ function PageMarket({ eur=false, hfRead={}, onHfRead, quadRows, btcReco, onSaveB
                     return vals.map(function(v){ return v==null?null:(H-P-((v-mn)/rg)*(H-2*P)); });
                   }
                   function line(ys){ if(!ys) return ""; var out=[]; ys.forEach(function(y,i){ if(y!=null) out.push((P+i*(W-2*P)/(n-1)).toFixed(1)+","+y.toFixed(1)); }); return out.join(" "); }
-                  var yR=norm("index"), yS=norm("spy"), yP=norm("port");
+                  var yR=norm("index"), yS=norm("spy");
                   var last=pts[n-1];
                   function leg(col,lab,val){ return <span style={{display:"inline-flex",alignItems:"center",gap:4,marginRight:12}}><span style={{width:10,height:3,background:col,borderRadius:2,display:"inline-block"}}/><span style={{fontSize:10,color:C.text2}}>{lab}{val?(" · "+val):""}</span></span>; }
                   return (
                     <div>
                       <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto",display:"block",background:C.bg,borderRadius:8}}>
                         {yS && <polyline points={line(yS)} fill="none" stroke="#4a9eff" strokeWidth="1.5" strokeLinejoin="round"/>}
-                        {yP && <polyline points={line(yP)} fill="none" stroke={C.green} strokeWidth="1.5" strokeLinejoin="round"/>}
                         {yR && <polyline points={line(yR)} fill="none" stroke={C.btc} strokeWidth="2.2" strokeLinejoin="round"/>}
                       </svg>
                       <div style={{marginTop:8,display:"flex",flexWrap:"wrap",alignItems:"center"}}>
                         {yR && leg(C.btc,"Baromètre",(last.bullish!=null&&last.max!=null)?(last.bullish+"/"+last.max):null)}
                         {yS && leg("#4a9eff","SPY",last.spy!=null?String(Math.round(last.spy)):null)}
-                        {yP && leg(C.green,"Portefeuille",last.port!=null?("$"+Math.round(last.port/1000)+"k"):null)}
                       </div>
                       <div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4}}>{n} jours · séries normalisées (min-max) pour comparer les formes — 1 point/jour à 6h00.</div>
                     </div>

@@ -1098,6 +1098,12 @@ v28.96   Legend — le tri par nom part de A vers Z
            XLE, XPEV avec ↑ ; second appui, l'exact miroir avec ↓ ; P&L et Date
            toujours en ↓ au premier appui.
 
+v28.97   Market → Macro — le portefeuille sort de l'historique du baromètre
+         Le graphe ne trace plus que le baromètre et le SPY : la courbe verte
+         du portefeuille et son entrée de légende sont retirées. Les points
+         enregistrés côté worker gardent le champ `port`, seul l'affichage
+         change — la série est réaffichable en rétablissant `norm("port")`.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

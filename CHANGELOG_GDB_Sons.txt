@@ -981,6 +981,57 @@ v28.92   Logos « tout blancs » — le fond de la pastille suit le logo
            affichée et lisible une fois redemandée avec crossOrigin, donc la
            mise à jour ne casse rien sur les appareils existants.
 
+v28.93   Legend — breakeven, moyennes, et recul après la sortie
+         Cinq demandes sur l'onglet Legend, plus un outil de relecture des
+         trades clôturés.
+         ▸ BREAKEVEN. Un trade dont la performance tient dans ±2,5 % n'est ni
+           un gain ni une perte : c'est un BE. La bande est portée par
+           tradeOutcome() (BE_BAND = 2.5), au-dessus de computeClosedTrades,
+           partagée par la liste, les statistiques et le modal. Sans
+           pourcentage exploitable, repli sur le signe du P&L.
+           Conséquences : pastille BE grise dans la liste, montant et % en
+           gris neutre au lieu de vert/rouge, et surtout un win rate qui ne
+           compte plus les BE au dénominateur — il se lit gagnants /
+           (gagnants + perdants), le détail « 13G · 22P · 9BE » étant affiché
+           sous le chiffre. Sur la base réelle, le spot passe ainsi de 30 %
+           (13/44) à 37 % (13/35) : les neuf trades sortis à plat ne pèsent
+           plus comme des pertes.
+         ▸ P&L MOYEN, GAGNANT MOYEN, PERDANT MOYEN. Les deux dernières
+           moyennes se calculent sur les seuls gagnants et les seuls perdants
+           au sens ci-dessus — un BE ne tire ni l'une ni l'autre vers le bas.
+         ▸ COMMISSIONS / FRAIS et DIVIDENDES REÇUS, sur le périmètre des
+           trades du tableau. Spot : commissions des fills (converties en USD
+           au taux de la date de sortie quand le trade est en EUR) plus
+           l'annexe IBKR de la fenêtre du trade — attention, les montants
+           d'annexe sont en base EUR malgré le nom valueUSD, comme dans
+           TradeDetailModal. Futures : commissions d'un côté, funding net de
+           l'autre, car un funding peut être encaissé et non payé.
+         ▸ MEILLEUR / PIRE RESSERRÉS. Ils occupaient une demi-largeur chacun ;
+           ils tiennent maintenant sur trois colonnes avec la durée moyenne,
+           qui perd sa bande pleine largeur. Le bandeau complet fait quatre
+           rangées au lieu de trois pour huit mesures de plus.
+         ▸ RECUL APRÈS LA SORTIE. Dans le détail d'un trade clôturé, un bouton
+           « → Aujourd'hui » à droite de la légende prolonge la courbe Yahoo
+           jusqu'à ce jour, et affiche la variation du cours depuis la sortie
+           avec son verdict : sorti trop tôt, bien sorti, ou timing neutre en
+           deçà de la même bande de ±2,5 %. Le verdict est inversé pour un
+           SHORT — une hausse après la sortie y est une bonne nouvelle.
+           Aucun appel supplémentaire : pickRange() part de la date d'entrée,
+           donc Yahoo renvoyait déjà les bougies jusqu'à aujourd'hui, seule la
+           fenêtre de filtrage change. Le bouton n'apparaît pas sur une
+           position ouverte, dont le graphe court déjà jusqu'à ce jour.
+         ▸ Testé en navigateur (serveur HTTP local, base locale) : bornes de la
+           bande vérifiées une à une (+2,6 gagnant, +2,5 BE, −2,5 BE, −2,6
+           perdant, pct absent → signe du P&L) ; les huit chiffres affichés
+           recoupés contre un recalcul indépendant à partir de SEED_TXNS_REAL
+           et SEED_IBKR_ANNEX (590 $ de frais, 104 $ de dividendes, 13/22/9,
+           37 %, −645 $, +517 $, −1 591 $ — identiques) ; aucun débordement de
+           pavé à 375 px, ni sur le spot ni sur les futures dont les montants
+           sont plus longs ; et les trois verdicts obtenus sur cours simulés
+           (+25 % → sorti trop tôt, −20 % → bien sorti, +1 % → timing neutre),
+           dont l'inversion sur un SHORT réel (+30 % → bien sorti). Bouton
+           absent sur une position ouverte, comme attendu.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

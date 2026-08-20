@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.92";
+const APP_VERSION = "v28.93";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9368,6 +9368,18 @@ function usdEurAt(date){
   for(var i=0;i<DD.length;i++){ if(DD[i][0]<=date){ best=DD[i][5]; bd=DD[i][0]; } else break; }
   return best||0.92;
 }
+// v28.93 - Bande de neutralite : un trade dont la performance tient dans
+// +/- BE_BAND % n'est ni un gain ni une perte, c'est un breakeven (BE).
+// Sans pourcentage exploitable, on retombe sur le signe du P&L.
+var BE_BAND = 2.5;
+function tradeOutcome(t){
+  var p = (t && t.pct!=null) ? t.pct : null;
+  if(p==null){ var v=(t&&t.pnlUSD)||0; return v>0?"win":(v<0?"loss":"be"); }
+  if(p>BE_BAND) return "win";
+  if(p<-BE_BAND) return "loss";
+  return "be";
+}
+function outcomeColor(o){ return o==="win"?C.green:(o==="loss"?C.red:C.text2); }
 function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const isFut = kind==="futures";
   const ticker = trade.ticker;
@@ -9394,14 +9406,22 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const [mapDraft,setMapDraft]=useState(ticker);
   const [mapSaved,setMapSaved]=useState(null);
   const ySym = mapSaved || ySymFor(ticker, src);
+  // v28.93 — prise de recul : le graphe peut courir jusqu'a aujourd'hui au lieu
+  // de s'arreter a la sortie, pour juger apres coup si le trade a ete bien
+  // solde. Yahoo renvoie deja les bougies jusqu'a ce jour (pickRange part de la
+  // date d'entree) : seule la fenetre de filtrage change, aucun appel de plus.
+  const todayISO = new Date().toISOString().slice(0,10);
+  const canExtend = !!exitDate && exitDate < todayISO;
+  const [extend,setExtend]=useState(false);
+  const chartEnd = (canExtend && extend) ? todayISO : exitOrNow;
   useEffect(function(){
     let alive=true; setHist(null); setErr(false);
-    fetchYahooHist(ySym, entryDate, exitOrNow).then(function(pts){
+    fetchYahooHist(ySym, entryDate, chartEnd).then(function(pts){
       if(!alive) return;
       if(!pts||!pts.length){ setErr(true); setHist([]); } else setHist(pts);
     }).catch(function(){ if(alive){ setErr(true); setHist([]); } });
     return function(){ alive=false; };
-  }, [ySym, entryDate, exitOrNow]);
+  }, [ySym, entryDate, chartEnd]);
 
   // fills -> markers
   const fills = isFut
@@ -9419,10 +9439,11 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
     });
   }
   var tradeFees = (fills||[]).reduce(function(a,fl){ return a+(fl.fee||0); }, 0);
-  let chartSeries=[], chartDates=[], markers=[];
+  let chartSeries=[], chartDates=[], markers=[], chartCloses=[];
   if(hist && hist.length){
     chartDates = hist.map(function(p){return p[0];});
     const closes = hist.map(function(p){return p[1];});
+    chartCloses = closes;
     chartSeries = [{vals:closes, color:C.blue, label:"Cours", area:true}];
     function nIdx(d){ for(var i=0;i<chartDates.length;i++){ if(chartDates[i]>=d) return i; } return chartDates.length-1; }
     const maxV = Math.max.apply(null, fills.map(function(fl){return fl.valueNat||0;}).concat([1]));
@@ -9435,6 +9456,20 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
         amtTxt:(val ? money(val,(fl.ccy==="EUR"?"€":"$")) : ""),
         priceTxt:(fl.price ? ("@ "+(fl.ccy==="EUR"?"":"$")+Number(fl.price).toLocaleString("fr-FR",{maximumFractionDigits:(fl.price<10?4:2)})+(fl.ccy==="EUR"?" €":"")) : "")};
     });
+  }
+  // v28.93 — variation du cours entre la sortie et aujourd'hui. Pour un LONG,
+  // une hausse signifie qu'on est sorti trop tot ; pour un SHORT, l'inverse.
+  // La bande de neutralite BE_BAND sert de seuil : en deca, le timing est bon.
+  var post=null;
+  if(canExtend && extend && chartCloses.length>1 && exitDate){
+    var _ei=-1; for(var _k=0;_k<chartDates.length;_k++){ if(chartDates[_k]<=exitDate) _ei=_k; }
+    if(_ei<0) _ei=0;
+    var _p0=chartCloses[_ei], _p1=chartCloses[chartCloses.length-1];
+    if(_p0 && _p1 && _ei<chartCloses.length-1){
+      var _m=(_p1/_p0-1)*100, _sg=(isFut && dir==="SHORT")?-1:1;
+      post={pct:_m, last:_p1, on:chartDates[chartDates.length-1],
+        verdict:(Math.abs(_m)<BE_BAND?"flat":(_m*_sg>0?"early":"good"))};
+    }
   }
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
   const fE = function(v){ return (v<0?"-":"")+Math.abs(Math.round(v)).toLocaleString("fr-FR")+" \u20ac"; };
@@ -9509,13 +9544,32 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
         )}
         {/* Graphique Yahoo */}
         <div style={{background:C.bg2,borderRadius:12,padding:"12px 12px 8px"}}>
-          <div style={{display:"flex",gap:16,marginBottom:6,paddingLeft:2,fontSize:11}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6,paddingLeft:2,fontSize:11}}>
             <span style={{color:C.blue,fontWeight:700}}>Cours Yahoo</span>
             <span style={{color:C.green,fontWeight:700}}>● Buy</span>
             <span style={{color:C.red,fontWeight:700}}>● Sell</span>
+            {/* v28.93 — prolonger le graphe jusqu'a aujourd'hui */}
+            {canExtend && (
+              <button onClick={function(){ setExtend(!extend); }}
+                title={extend?"Revenir à la fenêtre du trade":"Afficher le cours jusqu'à aujourd'hui"}
+                style={{marginLeft:"auto",flexShrink:0,background:extend?C.gold+"22":"transparent",
+                  border:"1px solid "+(extend?C.gold:C.border),borderRadius:7,padding:"3px 9px",
+                  color:extend?C.gold:C.text3,fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>
+                {extend?"Fenêtre du trade":"→ Aujourd'hui"}</button>
+            )}
           </div>
           {hist===null && <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:40}}>Chargement du cours {ySym}…</div>}
           {hist!==null && hist.length>0 && <LineChart series={chartSeries} dates={chartDates} h={180} unit={""} hideTF={true} defaultTF="ALL" markers={markers}/>}
+          {post && (
+            <div style={{marginTop:4,padding:"7px 9px",background:C.bg3,borderRadius:9,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,color:C.text3}}>Depuis la sortie ({fmtDate(exitDate)})</span>
+              <span style={{whiteSpace:"nowrap"}}>
+                <span style={{fontSize:13,fontWeight:800,color:post.pct>=0?C.green:C.red}}>{(post.pct>=0?"+":"")+post.pct.toFixed(1)+" %"}</span>
+                <span style={{fontSize:10,fontWeight:800,marginLeft:7,color:post.verdict==="early"?C.red:(post.verdict==="good"?C.green:C.text2)}}>
+                  {post.verdict==="early"?"sorti trop tôt":(post.verdict==="good"?"bien sorti":"timing neutre")}</span>
+              </span>
+            </div>
+          )}
           {hist!==null && hist.length===0 && (
             <div style={{padding:"16px 12px"}}>
               <div style={{textAlign:"center",color:C.text3,fontSize:12,marginBottom:12}}>Cours indisponible pour <b style={{color:C.text2}}>{ySym}</b>.</div>
@@ -9533,7 +9587,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
                       YF_MAP[ticker]=v;
                       try{ saveBase('gdb_yfmap', Object.assign({},YF_MAP)); }catch(_e){}
                       setMapSaved(v); setHist(null); setErr(false);
-                      fetchYahooHist(v, entryDate, exitOrNow).then(function(pts){
+                      fetchYahooHist(v, entryDate, chartEnd).then(function(pts){
                         if(!pts||!pts.length){ setErr(true); setHist([]); } else setHist(pts);
                       }).catch(function(){ setErr(true); setHist([]); });
                     }}
@@ -9583,11 +9637,44 @@ function PageLegend(
     return b.durationDays-a.durationDays;
   });
   const tot = statList.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
-  const wins = statList.filter(function(t){return t.pnlUSD>0;}).length;
+  // v28.93 - Gagnant / perdant / breakeven : la bande +/-2,5 % neutralise les
+  // trades sortis a plat, qui gonflaient artificiellement le win rate.
+  const winA  = statList.filter(function(t){return tradeOutcome(t)==="win";});
+  const lossA = statList.filter(function(t){return tradeOutcome(t)==="loss";});
+  const nWin=winA.length, nLoss=lossA.length, nBE=statList.length-nWin-nLoss;
+  const wins = nWin;
   const best = statList.length?Math.max.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
   const worst = statList.length?Math.min.apply(null,statList.map(function(t){return t.pnlUSD;})):0;
-  const winRate = statList.length?Math.round(wins/statList.length*100):0;
+  const winRate = (nWin+nLoss)?Math.round(nWin/(nWin+nLoss)*100):0;
+  const avgPnl = statList.length?tot/statList.length:0;
+  const avgWin = nWin?winA.reduce(function(a,t){return a+(t.pnlUSD||0);},0)/nWin:0;
+  const avgLoss = nLoss?lossA.reduce(function(a,t){return a+(t.pnlUSD||0);},0)/nLoss:0;
   const avgDur = statList.length?Math.round(statList.reduce(function(a,t){return a+(t.durationDays||0);},0)/statList.length):0;
+  // v28.93 - Frais reellement payes et dividendes reellement encaisses sur les
+  // trades du tableau. Spot : commissions des fills + annexe IBKR (les valeurs
+  // d'annexe sont en base EUR malgre leur nom, cf. TradeDetailModal).
+  const costs = React.useMemo(function(){
+    var fees=0, divs=0, funding=0;
+    statList.forEach(function(t){
+      if(board==="futures"){
+        fees += Math.abs((t.raw&&t.raw.tradingFeesUSD)||0);
+        funding += ((t.raw&&t.raw.fundingUSD)||0);
+        return;
+      }
+      var rate = usdEurAt(t.exitDate||t.entryDate)||0.92;      // USD -> EUR
+      var toUSD = (t.ccy==="EUR") ? (1/rate) : 1;
+      fees += (t.fills||[]).reduce(function(a,f){return a+Math.abs(f.fee||0);},0)*toUSD;
+      if(t.src==="ibkr"){
+        var lo=t.entryDate, hi=t.exitDate||new Date().toISOString().slice(0,10);
+        (liveIbkrAnnex||[]).forEach(function(a){
+          if(!a||a.ticker!==t.ticker||!(a.date>=lo&&a.date<=hi)) return;
+          if(/Dividend|Lieu/i.test(a.type)) divs += (a.valueUSD||0)/rate;
+          else fees += Math.abs(a.valueUSD||0)/rate;
+        });
+      }
+    });
+    return {fees:fees, divs:divs, funding:funding};
+  }, [statList, liveIbkrAnnex, board]);
   const fU = function(v){ return (v<0?"-$":"$")+Math.abs(Math.round(v)).toLocaleString("fr-FR"); };
   const Tab=function(props){ return (
     <button onClick={props.onClick} style={{flex:1,padding:"8px 0",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,
@@ -9596,6 +9683,14 @@ function PageLegend(
   const Sort=function(props){ return (
     <button onClick={props.onClick} style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${props.active?C.btc:C.border}`,cursor:"pointer",
       fontSize:11,fontWeight:700,background:props.active?C.btc+"22":"transparent",color:props.active?C.btc:C.text3}}>{props.label}</button>
+  );};
+  // v28.93 - pave compact : Meilleur / Pire et les nouvelles mesures tiennent
+  // sur trois colonnes au lieu d'occuper une demi-largeur chacune.
+  const Cell=function(props){ return (
+    <div style={{background:C.bg2,borderRadius:10,padding:"8px 9px",minWidth:0}}>
+      <div style={{fontSize:8,color:C.text3,textTransform:"uppercase",letterSpacing:.6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.k}</div>
+      <div style={{fontSize:13,fontWeight:800,color:props.c||C.text,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.v}</div>
+    </div>
   );};
   return (
     <div style={{padding:"8px 14px 96px"}}>
@@ -9606,27 +9701,40 @@ function PageLegend(
         <Tab label="Futures" active={board==="futures"} onClick={function(){setBoard("futures");}}/>
       </div>
       {/* Stats globales */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:7}}>
         <div style={{background:(tot>=0?C.green:C.red)+"15",border:`1px solid ${(tot>=0?C.green:C.red)}40`,borderRadius:12,padding:"11px 13px"}}>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>P&L total</div>
           <div style={{fontSize:19,fontWeight:900,color:tot>=0?C.green:C.red}}>{msk(fU(tot),hidden)}</div>
         </div>
         <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
           <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Win rate</div>
-          <div style={{fontSize:19,fontWeight:900,color:C.text}}>{winRate}% <span style={{fontSize:11,color:C.text3,fontWeight:600}}>({wins}/{statList.length})</span></div>
+          <div style={{fontSize:19,fontWeight:900,color:C.text}}>{winRate}%</div>
+          <div style={{fontSize:9,fontWeight:700,marginTop:2}}>
+            <span style={{color:C.green}}>{nWin}G</span>
+            <span style={{color:C.text3}}> · </span>
+            <span style={{color:C.red}}>{nLoss}P</span>
+            <span style={{color:C.text3}}> · {nBE}BE</span>
+          </div>
         </div>
-        <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
-          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Meilleur</div>
-          <div style={{fontSize:15,fontWeight:800,color:C.green}}>{msk(fU(best),hidden)}</div>
-        </div>
-        <div style={{background:C.bg2,borderRadius:12,padding:"11px 13px"}}>
-          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Pire</div>
-          <div style={{fontSize:15,fontWeight:800,color:C.red}}>{msk(fU(worst),hidden)}</div>
-        </div>
-        <div style={{gridColumn:"1 / -1",background:C.bg2,borderRadius:12,padding:"11px 13px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>Durée moyenne de trade</div>
-          <div style={{fontSize:16,fontWeight:800,color:C.text}}>{avgDur} jour{avgDur>1?"s":""}</div>
-        </div>
+      </div>
+      {/* v28.93 — moyennes : global, gagnants seuls, perdants seuls */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:7}}>
+        <Cell k="P&L moyen" v={statList.length?msk((avgPnl>=0?"+":"")+fU(avgPnl),hidden):"—"} c={avgPnl>=0?C.green:C.red}/>
+        <Cell k="Gagnant moyen" v={nWin?msk("+"+fU(avgWin),hidden):"—"} c={nWin?C.green:C.text3}/>
+        <Cell k="Perdant moyen" v={nLoss?msk(fU(avgLoss),hidden):"—"} c={nLoss?C.red:C.text3}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:7}}>
+        <Cell k="Meilleur" v={msk(fU(best),hidden)} c={C.green}/>
+        <Cell k="Pire" v={msk(fU(worst),hidden)} c={C.red}/>
+        <Cell k="Durée moy." v={avgDur+" j"}/>
+      </div>
+      {/* v28.93 — coûts et revenus annexes des trades du tableau */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:14}}>
+        <Cell k={board==="futures"?"Commissions payées":"Commissions / frais"}
+          v={costs.fees?msk("-"+fU(costs.fees),hidden):"—"} c={costs.fees?C.red:C.text3}/>
+        {board==="futures"
+          ? <Cell k="Funding net" v={costs.funding?msk((costs.funding>=0?"+":"")+fU(costs.funding),hidden):"—"} c={costs.funding>0?C.green:(costs.funding<0?C.red:C.text3)}/>
+          : <Cell k="Dividendes reçus" v={costs.divs?msk("+"+fU(costs.divs),hidden):"—"} c={costs.divs?C.green:C.text3}/>}
       </div>
       {/* v28.70 — Filtre ouvert / clôturé */}
       {board==="spot" && (
@@ -9658,6 +9766,8 @@ function PageLegend(
         {sorted.map(function(t,i){
           const up=t.pnlUSD>=0;
           const cls=assetClass(t.ticker,t.src,board==="futures");
+          const noPnl=t.isOpen && !(t.nSell>0);          // position sans rien de realise
+          const oc=tradeOutcome(t), ocC=outcomeColor(oc);
           return (
             <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
               <div style={{flex:1,minWidth:0}}>
@@ -9666,17 +9776,19 @@ function PageLegend(
                   <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:cls.color+"22",color:cls.color}}>{cls.label}</span>
                   {board==="futures" && <span style={{fontSize:10,fontWeight:700,color:t.dir==="LONG"?C.green:C.red}}>{t.dir} x{t.lev}</span>}
                   {t.isOpen && <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:C.gold+"22",color:C.gold}}>Ouvert</span>}
+                  {/* v28.93 — sortie a plat : ni gain ni perte */}
+                  {oc==="be" && !noPnl && <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:C.gray+"22",color:C.text2}}>BE</span>}
                 </div>
                 <div style={{fontSize:10,color:C.text3,marginTop:2}}>{t.isOpen
                   ? (t.entryDate+" \u2192 en cours \u00b7 "+t.durationDays+"j \u00b7 "+Number(t.qty||0).toLocaleString("fr-FR",{maximumFractionDigits:6})+" @ "+(t.entryPrice||0).toFixed((t.entryPrice||0)<10?4:2))
                   : (t.entryDate+" \u2192 "+t.exitDate+" \u00b7 "+t.durationDays+"j")}</div>
               </div>
               <div style={{textAlign:"right"}}>
-                {t.isOpen && !(t.nSell>0)
+                {noPnl
                   ? <div style={{fontSize:12,fontWeight:700,color:C.text3}}>Position en cours</div>
                   : (<>
-                      <div style={{fontSize:14,fontWeight:800,color:up?C.green:C.red}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
-                      <div style={{fontSize:11,fontWeight:700,color:up?C.green:C.red}}>{(t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%"))+(t.isOpen?" réalisé":"")}</div>
+                      <div style={{fontSize:14,fontWeight:800,color:ocC}}>{msk((up?"+":"")+fU(t.pnlUSD),hidden)}</div>
+                      <div style={{fontSize:11,fontWeight:700,color:ocC}}>{(t.pct==null?"—":((up?"+":"")+t.pct.toFixed(1)+"%"))+(t.isOpen?" réalisé":"")}</div>
                     </>)}
               </div>
               {board==="spot" && onExclude && (
@@ -12635,6 +12747,7 @@ function PageChangelog(){
     ["v28.88 \u2014 CBBI dans le tableau BTC", "Les 9 m\u00e9triques du Colin Talks Crypto Bitcoin Bull Run Index sont int\u00e9gr\u00e9es : 7 \u00e9taient d\u00e9j\u00e0 pr\u00e9sentes, Trolololo Trend Line et Woobull Top Cap vs CVDD sont ajout\u00e9es (22 indicateurs). Nouvelle \u00e9chelle CBBI \u00e0 c\u00f4t\u00e9 d'Historique et Adaptative : elle ne retient que ces 9 indicateurs, avec la normalisation du CBBI \u2014 chaque m\u00e9trique situ\u00e9e entre deux r\u00e9gressions ajust\u00e9es sur ses valeurs aux sommets et aux creux de cycle pass\u00e9s, donc des bornes qui d\u00e9rivent avec le march\u00e9. Rep\u00e8res de cycle cliquables sur le graphe : halving, sommet, creux."],
     ["v28.89 \u2014 Consignes par \u00e9chelle", "Chaque \u00e9chelle de score (Historique, Adaptative, CBBI) a d\u00e9sormais son propre jeu de consignes : les trois ne se lisent pas pareil, un m\u00eame score n'y a donc pas le m\u00eame sens. L'\u00e9diteur s'ouvre sur l'\u00e9chelle affich\u00e9e, signale celles r\u00e9gl\u00e9es diff\u00e9remment et sait recopier un r\u00e9glage sur les trois. Les consignes d\u00e9j\u00e0 en place sont reprises \u00e0 l'identique sur les trois \u00e9chelles."],
     ["v28.90 \u2014 Screener S&P 500", "L'onglet Suivi s'ouvre sur Opportunit\u00e9s : 15 crit\u00e8res cliquables, param\u00e9trables et cumulables (proximit\u00e9 MM200 et MM50 weekly, tendance MM30, MACD hebdo, RSI, divergence RSI, choppiness, compression des bandes de Bollinger, ATR, volume, repli 52 semaines, proximit\u00e9 du plus bas, performances 3 et 12 mois, secteur) filtrent les ~503 composants de l'indice, mesur\u00e9s chaque jour sur bougies hebdomadaires par le worker v162. Un appui ouvre le modal ticker du portefeuille ; les valeurs coch\u00e9es deviennent des id\u00e9es avec la th\u00e8se d\u00e9j\u00e0 r\u00e9dig\u00e9e \u2014 chaque crit\u00e8re retenu y figure avec sa mesure du jour et se transforme en catalyseur, r\u00e9\u00e9valu\u00e9 automatiquement quand il s'y pr\u00eate."],
+    ["v28.93 — Legend : breakeven et moyennes", "Un trade sorti entre −2,5 % et +2,5 % est un breakeven : pastille BE dans la liste, P&L en gris, et exclusion du win rate, qui se lit désormais gagnants / (gagnants + perdants) avec le détail G · P · BE. Nouvelles mesures : P&L moyen, gagnant moyen, perdant moyen, total des commissions et frais payés, total des dividendes reçus (funding net côté futures). Meilleur et Pire resserrés en pavés compacts, avec la durée moyenne. Dans le détail d'un trade, un bouton → Aujourd'hui prolonge la courbe jusqu'à ce jour et affiche la variation depuis la sortie, avec son verdict : sorti trop tôt, bien sorti ou timing neutre — inversé pour un SHORT."],
   ];
   return (
     <div style={{paddingBottom:40}}>

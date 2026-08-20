@@ -1059,6 +1059,35 @@ v28.94   Legend — le logo de la valeur à gauche du ticker
            n'est pas un défaut, la vérification a été faite en forçant le
            chargement.
 
+v28.95   Legend — logo dans l'en-tête du trade, tri par nom, sens du tri
+         ▸ EN-TÊTE DU MODAL. Le logo de la valeur passe à gauche du ticker, en
+           38 px, exactement comme dans la liste. Le monogramme de repli et la
+           garde crypto de la v28.94 sont factorisés dans un composant
+           TradeLogo, partagé par la liste et le modal — vérifié sur un
+           futures ETH, qui affiche bien le monogramme orange et non le logo
+           d'Ethan Allen, la société que ce ticker désigne sur le CDN boursier.
+         ▸ TRI PAR NOM. Cinquième critère, alphabétique sur le ticker
+           (localeCompare fr, insensible à la casse et aux accents).
+         ▸ SENS DU TRI. Un premier appui sur un critère trie en DÉCROISSANT et
+           affiche une flèche ↓ dans la pastille ; un second appui sur le même
+           critère bascule en CROISSANT, flèche ↑. Changer de critère repart en
+           décroissant. Les comparateurs restent écrits dans le sens
+           décroissant, le sens croissant les inverse par un simple facteur —
+           les deux ordres sont donc exactement symétriques par construction.
+           Un trade sans pourcentage exploitable reste en bas dans les deux
+           sens, au lieu de remonter en tête au premier passage en croissant.
+         ▸ La barre de tri passe à cinq pastilles : espacement et rembourrage
+           resserrés, retour à la ligne autorisé en secours. Mesurée à 375 px,
+           elle tient sur une seule ligne (25 px de haut).
+         ▸ Testé en navigateur : Nom ↓ donne XPEV, XLE, VRA, VIRTUAL … AL2SI,
+           AIA, AI16Z, AI, et Nom ↑ l'exact miroir. P&L ↓ puis ↑ symétriques
+           (+2 497 $ … −16 779 $, puis l'inverse). Durée ↓ strictement
+           décroissante sur les 67 lignes (1807 j → 0 j). % monotone dans les
+           deux sens. Changement de critère : la flèche ne subsiste que sur la
+           pastille active, et repart bien en décroissant. En-tête du modal
+           mesuré à 341 px de large sur 375, sans débordement, y compris avec
+           l'étiquette la plus longue (« Futures SHORT · x5.54 »).
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

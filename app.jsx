@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.94";
+const APP_VERSION = "v28.95";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9382,6 +9382,16 @@ function tradeOutcome(t){
   return "be";
 }
 function outcomeColor(o){ return o==="win"?C.green:(o==="loss"?C.red:C.text2); }
+/* v28.94 — Logo d'un trade, meme source que le portefeuille et le screener.
+   cat="Crypto" est imperatif sur les cryptos : sur le CDN boursier, ETH c'est
+   Ethan Allen. A defaut de logo, un monogramme aux couleurs de la classe
+   d'actif, plutot qu'un pave gris repetant le ticker ecrit juste a cote. */
+function TradeLogo({ ticker, cls, size=30 }){
+  const mono = <div style={{width:size,height:size,borderRadius:Math.round(size*0.3),flexShrink:0,display:"flex",
+    alignItems:"center",justifyContent:"center",background:cls.color+"1f",color:cls.color,
+    fontSize:Math.round(size*0.33),fontWeight:900,letterSpacing:.2}}>{String(ticker||"").slice(0,3)}</div>;
+  return <ScrLogo ticker={ticker} size={size} cat={cls.label==="Crypto"?"Crypto":"Action"} fallback={mono}/>;
+}
 function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const isFut = kind==="futures";
   const ticker = trade.ticker;
@@ -9477,6 +9487,7 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
   const fE = function(v){ return (v<0?"-":"")+Math.abs(Math.round(v)).toLocaleString("fr-FR")+" \u20ac"; };
   const fmtDate = function(d){ if(!d||String(d).length<10) return d||""; var p=String(d).slice(0,10).split("-"); return p.length===3?(p[2]+"-"+p[1]+"-"+p[0]):String(d); };
   const typeLabel = isFut ? ("Futures "+dir) : (src==="ibkr"?"Action (spot)":"Crypto (spot)");
+  const clsT = assetClass(ticker, src, isFut);
   const Info=function(props){ return (
     <div style={{background:C.bg2,borderRadius:10,padding:"9px 11px"}}>
       <div style={{fontSize:9,color:C.text3,textTransform:"uppercase",letterSpacing:1}}>{props.k}</div>
@@ -9495,11 +9506,15 @@ function TradeDetailModal({trade, kind, onClose, liveIbkrAnnex}){
       <div onClick={function(e){e.stopPropagation();}} style={{background:C.bg1,borderRadius:"20px 20px 0 0",padding:"20px 16px 30px",width:"100%",maxWidth:460,maxHeight:"90vh",overflowY:"auto",border:`1px solid ${C.border}`}}>
         {/* En-tete */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-          <div>
-            <div style={{fontSize:20,fontWeight:900,color:C.text}}>{ticker}</div>
-            <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3}}>
-              {(function(){var cl=assetClass(ticker,src,isFut);return <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:cl.color+"22",color:cl.color}}>{cl.label}</span>;})()}
-              <span style={{fontSize:11,fontWeight:700,color:isFut?(dir==="LONG"?C.green:C.red):C.text3}}>{typeLabel}{isFut?(" \u00b7 x"+trade.lev):""}</span>
+          {/* v28.95 — logo a gauche du ticker, comme dans la liste */}
+          <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+            <TradeLogo ticker={ticker} cls={clsT} size={38}/>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:20,fontWeight:900,color:C.text}}>{ticker}</div>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginTop:3,flexWrap:"wrap"}}>
+                <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:clsT.color+"22",color:clsT.color}}>{clsT.label}</span>
+                <span style={{fontSize:11,fontWeight:700,color:isFut?(dir==="LONG"?C.green:C.red):C.text3}}>{typeLabel}{isFut?(" \u00b7 x"+trade.lev):""}</span>
+              </div>
             </div>
           </div>
           <div style={{textAlign:"right"}}>
@@ -9610,6 +9625,13 @@ function PageLegend(
   const [board,setBoard]=useState("spot");
   const [sel,setSel]=useState(null);
   const [sortK,setSortK]=useState("date");
+  // v28.95 — sens du tri : un premier appui sur un critere trie en decroissant,
+  // un second appui sur le meme critere bascule en croissant.
+  const [sortDir,setSortDir]=useState("desc");
+  function pickSort(k){
+    if(k===sortK) setSortDir(sortDir==="desc"?"asc":"desc");
+    else { setSortK(k); setSortDir("desc"); }
+  }
   const [flt,setFlt]=useState("all");   // v28.70 — all | open | closed
   function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+(t.exitDate||"OPEN"); }
   const _cct = React.useMemo(function(){ return computeClosedTrades(txns||[]); }, [txns]);
@@ -9632,11 +9654,20 @@ function PageLegend(
     : fut;
   const statList = board==="spot" ? spot : fut;
   const nOpen = spotOpenVis.length, nClosed = spot.length;
+  // Les comparateurs sont ecrits en DECROISSANT ; le sens croissant les inverse.
+  const dirMul = (sortDir==="asc") ? -1 : 1;
   const sorted = list.slice().sort(function(a,b){
-    if(sortK==="pnl") return b.pnlUSD-a.pnlUSD;
-    if(sortK==="pct") return (b.pct==null?-1e12:b.pct)-(a.pct==null?-1e12:a.pct);
-    if(sortK==="date") return (b.exitDate||b.entryDate||"").localeCompare(a.exitDate||a.entryDate||"");
-    return b.durationDays-a.durationDays;
+    if(sortK==="name") return dirMul*String(b.ticker||"").localeCompare(String(a.ticker||""),"fr",{sensitivity:"base"});
+    if(sortK==="pnl") return dirMul*((b.pnlUSD||0)-(a.pnlUSD||0));
+    if(sortK==="pct"){
+      // Un trade sans % (position sans vente) reste en bas dans les deux sens.
+      if(a.pct==null && b.pct==null) return 0;
+      if(a.pct==null) return 1;
+      if(b.pct==null) return -1;
+      return dirMul*(b.pct-a.pct);
+    }
+    if(sortK==="date") return dirMul*String(b.exitDate||b.entryDate||"").localeCompare(String(a.exitDate||a.entryDate||""));
+    return dirMul*((b.durationDays||0)-(a.durationDays||0));
   });
   const tot = statList.reduce(function(a,t){return a+(t.pnlUSD||0);},0);
   // v28.93 - Gagnant / perdant / breakeven : la bande +/-2,5 % neutralise les
@@ -9683,8 +9714,12 @@ function PageLegend(
       background:props.active?C.btc:C.bg2, color:props.active?"#000":C.text2}}>{props.label}</button>
   );};
   const Sort=function(props){ return (
-    <button onClick={props.onClick} style={{padding:"5px 11px",borderRadius:8,border:`1px solid ${props.active?C.btc:C.border}`,cursor:"pointer",
-      fontSize:11,fontWeight:700,background:props.active?C.btc+"22":"transparent",color:props.active?C.btc:C.text3}}>{props.label}</button>
+    <button onClick={props.onClick} style={{padding:"5px 9px",borderRadius:8,border:`1px solid ${props.active?C.btc:C.border}`,cursor:"pointer",
+      fontSize:11,fontWeight:700,background:props.active?C.btc+"22":"transparent",color:props.active?C.btc:C.text3,
+      display:"inline-flex",alignItems:"center",gap:3,whiteSpace:"nowrap",flexShrink:0}}>
+      {props.label}
+      {props.active && <span style={{fontSize:10,lineHeight:1}}>{sortDir==="desc"?"↓":"↑"}</span>}
+    </button>
   );};
   // v28.93 - pave compact : Meilleur / Pire et les nouvelles mesures tiennent
   // sur trois colonnes au lieu d'occuper une demi-largeur chacune.
@@ -9750,12 +9785,13 @@ function PageLegend(
         </div>
       )}
       {/* Tri */}
-      <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
-        <span style={{fontSize:11,color:C.text3}}>Trier :</span>
-        <Sort label="P&L" active={sortK==="pnl"} onClick={function(){setSortK("pnl");}}/>
-        <Sort label="%" active={sortK==="pct"} onClick={function(){setSortK("pct");}}/>
-        <Sort label="Durée" active={sortK==="dur"} onClick={function(){setSortK("dur");}}/>
-        <Sort label="Date" active={sortK==="date"} onClick={function(){setSortK("date");}}/>
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
+        <span style={{fontSize:11,color:C.text3,flexShrink:0}}>Trier :</span>
+        <Sort label="P&L" active={sortK==="pnl"} onClick={function(){pickSort("pnl");}}/>
+        <Sort label="%" active={sortK==="pct"} onClick={function(){pickSort("pct");}}/>
+        <Sort label="Durée" active={sortK==="dur"} onClick={function(){pickSort("dur");}}/>
+        <Sort label="Date" active={sortK==="date"} onClick={function(){pickSort("date");}}/>
+        <Sort label="Nom" active={sortK==="name"} onClick={function(){pickSort("name");}}/>
       </div>
       {board==="spot" && (spotExcl||[]).length>0 && (
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg2,borderRadius:9,padding:"7px 11px",marginBottom:10}}>
@@ -9772,13 +9808,7 @@ function PageLegend(
           const oc=tradeOutcome(t), ocC=outcomeColor(oc);
           return (
             <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:9,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
-              {/* v28.94 — logo de la valeur, meme source que le screener et le
-                  portefeuille (getBestIcon). cat="Crypto" est imperatif sur les
-                  cryptos : sur le CDN boursier, ETH c'est Ethan Allen. */}
-              <ScrLogo ticker={t.ticker} size={30} cat={cls.label==="Crypto"?"Crypto":"Action"}
-                fallback={<div style={{width:30,height:30,borderRadius:9,flexShrink:0,display:"flex",alignItems:"center",
-                  justifyContent:"center",background:cls.color+"1f",color:cls.color,fontSize:10,fontWeight:900,letterSpacing:.2}}>
-                  {String(t.ticker||"").slice(0,3)}</div>}/>
+              <TradeLogo ticker={t.ticker} cls={cls} size={30}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                   <span>{t.ticker}</span>
@@ -12758,6 +12788,7 @@ function PageChangelog(){
     ["v28.90 \u2014 Screener S&P 500", "L'onglet Suivi s'ouvre sur Opportunit\u00e9s : 15 crit\u00e8res cliquables, param\u00e9trables et cumulables (proximit\u00e9 MM200 et MM50 weekly, tendance MM30, MACD hebdo, RSI, divergence RSI, choppiness, compression des bandes de Bollinger, ATR, volume, repli 52 semaines, proximit\u00e9 du plus bas, performances 3 et 12 mois, secteur) filtrent les ~503 composants de l'indice, mesur\u00e9s chaque jour sur bougies hebdomadaires par le worker v162. Un appui ouvre le modal ticker du portefeuille ; les valeurs coch\u00e9es deviennent des id\u00e9es avec la th\u00e8se d\u00e9j\u00e0 r\u00e9dig\u00e9e \u2014 chaque crit\u00e8re retenu y figure avec sa mesure du jour et se transforme en catalyseur, r\u00e9\u00e9valu\u00e9 automatiquement quand il s'y pr\u00eate."],
     ["v28.93 — Legend : breakeven et moyennes", "Un trade sorti entre −2,5 % et +2,5 % est un breakeven : pastille BE dans la liste, P&L en gris, et exclusion du win rate, qui se lit désormais gagnants / (gagnants + perdants) avec le détail G · P · BE. Nouvelles mesures : P&L moyen, gagnant moyen, perdant moyen, total des commissions et frais payés, total des dividendes reçus (funding net côté futures). Meilleur et Pire resserrés en pavés compacts, avec la durée moyenne. Dans le détail d'un trade, un bouton → Aujourd'hui prolonge la courbe jusqu'à ce jour et affiche la variation depuis la sortie, avec son verdict : sorti trop tôt, bien sorti ou timing neutre — inversé pour un SHORT."],
     ["v28.94 — Legend : logos des valeurs", "Chaque ligne du tableau porte l'icône de sa valeur, à gauche du ticker, prise à la même source que le portefeuille et le screener. Quand aucun logo n'existe — la crypto n'en a pas sur le CDN boursier — la place est tenue par un monogramme aux couleurs de la classe d'actif, plutôt que par un pavé gris répétant le ticker écrit juste à côté."],
+    ["v28.95 — Legend : tri et en-tête", "Le logo de la valeur apparaît aussi dans l'en-tête du détail d'un trade. Nouveau tri par nom (alphabétique). Chaque critère de tri porte désormais son sens : un premier appui trie en décroissant avec une flèche vers le bas, un second appui sur le même critère bascule en croissant avec une flèche vers le haut ; changer de critère repart en décroissant."],
   ];
   return (
     <div style={{paddingBottom:40}}>

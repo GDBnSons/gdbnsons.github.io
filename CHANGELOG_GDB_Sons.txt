@@ -1088,6 +1088,16 @@ v28.95   Legend — logo dans l'en-tête du trade, tri par nom, sens du tri
            mesuré à 341 px de large sur 375, sans débordement, y compris avec
            l'étiquette la plus longue (« Futures SHORT · x5.54 »).
 
+v28.96   Legend — le tri par nom part de A vers Z
+         Sur un critère alphabétique, c'est l'ordre attendu au premier appui.
+         La flèche suit le sens réel du tri, elle pointe donc vers le HAUT dès
+         le premier appui sur Nom, et le second appui donne Z→A avec la flèche
+         vers le bas. Les quatre autres critères (P&L, %, Durée, Date) partent
+         toujours en décroissant, flèche vers le bas.
+         ▸ Testé en navigateur : Nom → AI, AI16Z, AIA, AL2SI … VIRTUAL, VRA,
+           XLE, XPEV avec ↑ ; second appui, l'exact miroir avec ↓ ; P&L et Date
+           toujours en ↓ au premier appui.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

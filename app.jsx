@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.95";
+const APP_VERSION = "v28.96";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -9627,10 +9627,13 @@ function PageLegend(
   const [sortK,setSortK]=useState("date");
   // v28.95 — sens du tri : un premier appui sur un critere trie en decroissant,
   // un second appui sur le meme critere bascule en croissant.
+  // v28.96 — sauf le nom, qui part de A vers Z : sur un critere alphabetique
+  // c'est l'ordre attendu. La fleche suit le sens reel, donc elle pointe vers
+  // le haut des le premier appui sur Nom.
   const [sortDir,setSortDir]=useState("desc");
   function pickSort(k){
     if(k===sortK) setSortDir(sortDir==="desc"?"asc":"desc");
-    else { setSortK(k); setSortDir("desc"); }
+    else { setSortK(k); setSortDir(k==="name"?"asc":"desc"); }
   }
   const [flt,setFlt]=useState("all");   // v28.70 — all | open | closed
   function spotKey(t){ return t.ticker+"|"+t.entryDate+"|"+(t.exitDate||"OPEN"); }
@@ -12789,6 +12792,7 @@ function PageChangelog(){
     ["v28.93 — Legend : breakeven et moyennes", "Un trade sorti entre −2,5 % et +2,5 % est un breakeven : pastille BE dans la liste, P&L en gris, et exclusion du win rate, qui se lit désormais gagnants / (gagnants + perdants) avec le détail G · P · BE. Nouvelles mesures : P&L moyen, gagnant moyen, perdant moyen, total des commissions et frais payés, total des dividendes reçus (funding net côté futures). Meilleur et Pire resserrés en pavés compacts, avec la durée moyenne. Dans le détail d'un trade, un bouton → Aujourd'hui prolonge la courbe jusqu'à ce jour et affiche la variation depuis la sortie, avec son verdict : sorti trop tôt, bien sorti ou timing neutre — inversé pour un SHORT."],
     ["v28.94 — Legend : logos des valeurs", "Chaque ligne du tableau porte l'icône de sa valeur, à gauche du ticker, prise à la même source que le portefeuille et le screener. Quand aucun logo n'existe — la crypto n'en a pas sur le CDN boursier — la place est tenue par un monogramme aux couleurs de la classe d'actif, plutôt que par un pavé gris répétant le ticker écrit juste à côté."],
     ["v28.95 — Legend : tri et en-tête", "Le logo de la valeur apparaît aussi dans l'en-tête du détail d'un trade. Nouveau tri par nom (alphabétique). Chaque critère de tri porte désormais son sens : un premier appui trie en décroissant avec une flèche vers le bas, un second appui sur le même critère bascule en croissant avec une flèche vers le haut ; changer de critère repart en décroissant."],
+    ["v28.96 — Legend : Nom trie de A à Z", "Le tri par nom part de A vers Z au premier appui — l'ordre attendu sur un critère alphabétique — avec la flèche vers le haut, le second appui donnant Z→A. Les autres critères partent toujours en décroissant."],
   ];
   return (
     <div style={{paddingBottom:40}}>

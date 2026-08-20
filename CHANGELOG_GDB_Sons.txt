@@ -1032,6 +1032,33 @@ v28.93   Legend — breakeven, moyennes, et recul après la sortie
            dont l'inversion sur un SHORT réel (+30 % → bien sorti). Bouton
            absent sur une position ouverte, comme attendu.
 
+v28.94   Legend — le logo de la valeur à gauche du ticker
+         Chaque ligne du tableau porte désormais l'icône de sa valeur, prise à
+         la même source que le portefeuille et le screener (getBestIcon :
+         icône choisie à la main, puis logo enregistré, puis emoji de base,
+         puis logo déduit du ticker sur le CDN FMP). ScrLogo est réutilisé tel
+         quel, avec sa pastille dont le fond suit le ton du logo (v28.92).
+         ▸ cat="Crypto" est passé pour les lignes crypto, sinon le CDN
+           boursier répondrait avec la mauvaise société — sur ce CDN, ETH
+           c'est Ethan Allen, et les futures ne sont que de la crypto.
+         ▸ ScrLogo accepte un repli sur mesure (paramètre `fallback`, absent =
+           comportement d'origine, donc le Suivi est inchangé). La Legend s'en
+           sert pour un MONOGRAMME COLORÉ aux couleurs de la classe d'actif
+           plutôt que le pavé gris à trois lettres : sans lui, les 90 lignes
+           de l'onglet Futures auraient toutes affiché un « HYP » gris répétant
+           le ticker écrit juste à côté. Orange crypto, bleu actions.
+         ▸ Testé en navigateur : 67 lignes spot — 25 logos réellement chargés
+           (dont les pastilles ardoise sur BLK, XPEV, NKE, LMT, tirées de la
+           liste en dur des logos clairs), 13 emojis de base, monogramme bleu
+           sur AL2SI que le CDN ne connaît pas. 103 lignes futures — zéro appel
+           au CDN boursier (la garde crypto tient), 90 monogrammes orange, 13
+           emojis. Boîtes toutes à 30 px, donc lignes alignées, aucun
+           débordement horizontal à 375 px, aucune erreur JS.
+           Les logos ne se chargent qu'à l'affichage (loading="lazy") : dans un
+           panneau qui ne compose pas d'image, ils restent en attente — ce
+           n'est pas un défaut, la vérification a été faite en forçant le
+           chargement.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.93";
+const APP_VERSION = "v28.94";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -4271,11 +4271,13 @@ function LogoImg({ src, alt, style, fallback=null, chip=false, ...rest }){
 /* Pastille logo des listes du Suivi (screener S&P 500 + idées suivies).
    Fond blanc : beaucoup de logos sont noirs sur transparent, donc invisibles
    sur le thème sombre. Repli sur le début du ticker si le CDN ne l'a pas. */
-function ScrLogo({ ticker, size=28, cat="Action" }){
+function ScrLogo({ ticker, size=28, cat="Action", fallback=null }){
   const best = getBestIcon(ticker, cat);
   const box  = { width:size, height:size, borderRadius:size*0.28, flexShrink:0,
                  display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" };
-  const fb   = <div style={{...box, background:C.bg3, fontSize:size*0.33, fontWeight:800, color:C.text3}}>
+  // v28.94 — `fallback` permet a un appelant de choisir son propre repli
+  // (monogramme colore de la Legend) ; sans lui, le repli gris d'origine.
+  const fb   = fallback || <div style={{...box, background:C.bg3, fontSize:size*0.33, fontWeight:800, color:C.text3}}>
                  {String(ticker||"").slice(0,3)}</div>;
   if(best && best.type==="img")
     return <LogoImg src={best.value} alt={ticker} fallback={fb}
@@ -9769,7 +9771,14 @@ function PageLegend(
           const noPnl=t.isOpen && !(t.nSell>0);          // position sans rien de realise
           const oc=tradeOutcome(t), ocC=outcomeColor(oc);
           return (
-            <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
+            <div key={i} onClick={function(){setSel({trade:t,kind:board});}} style={{display:"flex",alignItems:"center",gap:9,padding:"10px 4px",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
+              {/* v28.94 — logo de la valeur, meme source que le screener et le
+                  portefeuille (getBestIcon). cat="Crypto" est imperatif sur les
+                  cryptos : sur le CDN boursier, ETH c'est Ethan Allen. */}
+              <ScrLogo ticker={t.ticker} size={30} cat={cls.label==="Crypto"?"Crypto":"Action"}
+                fallback={<div style={{width:30,height:30,borderRadius:9,flexShrink:0,display:"flex",alignItems:"center",
+                  justifyContent:"center",background:cls.color+"1f",color:cls.color,fontSize:10,fontWeight:900,letterSpacing:.2}}>
+                  {String(t.ticker||"").slice(0,3)}</div>}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                   <span>{t.ticker}</span>
@@ -12748,6 +12757,7 @@ function PageChangelog(){
     ["v28.89 \u2014 Consignes par \u00e9chelle", "Chaque \u00e9chelle de score (Historique, Adaptative, CBBI) a d\u00e9sormais son propre jeu de consignes : les trois ne se lisent pas pareil, un m\u00eame score n'y a donc pas le m\u00eame sens. L'\u00e9diteur s'ouvre sur l'\u00e9chelle affich\u00e9e, signale celles r\u00e9gl\u00e9es diff\u00e9remment et sait recopier un r\u00e9glage sur les trois. Les consignes d\u00e9j\u00e0 en place sont reprises \u00e0 l'identique sur les trois \u00e9chelles."],
     ["v28.90 \u2014 Screener S&P 500", "L'onglet Suivi s'ouvre sur Opportunit\u00e9s : 15 crit\u00e8res cliquables, param\u00e9trables et cumulables (proximit\u00e9 MM200 et MM50 weekly, tendance MM30, MACD hebdo, RSI, divergence RSI, choppiness, compression des bandes de Bollinger, ATR, volume, repli 52 semaines, proximit\u00e9 du plus bas, performances 3 et 12 mois, secteur) filtrent les ~503 composants de l'indice, mesur\u00e9s chaque jour sur bougies hebdomadaires par le worker v162. Un appui ouvre le modal ticker du portefeuille ; les valeurs coch\u00e9es deviennent des id\u00e9es avec la th\u00e8se d\u00e9j\u00e0 r\u00e9dig\u00e9e \u2014 chaque crit\u00e8re retenu y figure avec sa mesure du jour et se transforme en catalyseur, r\u00e9\u00e9valu\u00e9 automatiquement quand il s'y pr\u00eate."],
     ["v28.93 — Legend : breakeven et moyennes", "Un trade sorti entre −2,5 % et +2,5 % est un breakeven : pastille BE dans la liste, P&L en gris, et exclusion du win rate, qui se lit désormais gagnants / (gagnants + perdants) avec le détail G · P · BE. Nouvelles mesures : P&L moyen, gagnant moyen, perdant moyen, total des commissions et frais payés, total des dividendes reçus (funding net côté futures). Meilleur et Pire resserrés en pavés compacts, avec la durée moyenne. Dans le détail d'un trade, un bouton → Aujourd'hui prolonge la courbe jusqu'à ce jour et affiche la variation depuis la sortie, avec son verdict : sorti trop tôt, bien sorti ou timing neutre — inversé pour un SHORT."],
+    ["v28.94 — Legend : logos des valeurs", "Chaque ligne du tableau porte l'icône de sa valeur, à gauche du ticker, prise à la même source que le portefeuille et le screener. Quand aucun logo n'existe — la crypto n'en a pas sur le CDN boursier — la place est tenue par un monogramme aux couleurs de la classe d'actif, plutôt que par un pavé gris répétant le ticker écrit juste à côté."],
   ];
   return (
     <div style={{paddingBottom:40}}>

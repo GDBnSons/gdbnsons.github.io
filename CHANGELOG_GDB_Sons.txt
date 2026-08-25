@@ -1112,6 +1112,17 @@ v28.98   Portfolio — nombre de parts et PA lisibles
          (fontWeight 800). Les libellés "parts" et "PA" restent en gris.
 
 
+v28.99   Portfolio — le ticker prend la couleur de sa catégorie
+         Dans le détail d'une section, le nom du ticker n'est plus blanc mais
+         coloré avec la couleur de la catégorie : Crypto orange (#F7931A),
+         Indices ETF bleu (#4A90D9), Stock Picking violet (#7B68EE), Or
+         (#EAB308), Cash Dip vert, Cash Matelas gris. Le cours live, qui
+         portait déjà cette même couleur juste à côté, passe en C.text2 pour
+         garder la hiérarchie de lecture.
+         ⚠ Cash Matelas est en C.gray (#6B7280) : contraste ~4,1:1 sur le fond,
+         sous le seuil AA. À remonter si la lecture gêne.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

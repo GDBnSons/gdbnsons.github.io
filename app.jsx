@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.98";
+const APP_VERSION = "v28.99";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3469,9 +3469,9 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                     {/* Gauche : ticker/label + live */}
                     <div style={{minWidth:0}}>
                       <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
-                        <span style={{fontSize:13,fontWeight:700,color:C.text}}>{item.label||item.ticker}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:color}}>{item.label||item.ticker}</span>
                         {item.live!=null&&item.live!==false&&(
-                          <span style={{fontSize:11,fontWeight:700,color:color}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.text2}}>
                             {fmtLive(item.live)}
                           </span>
                         )}

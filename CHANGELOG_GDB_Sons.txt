@@ -1105,6 +1105,13 @@ v28.97   Market → Macro — le portefeuille sort de l'historique du baromètre
          change — la série est réaffichable en rétablissant `norm("port")`.
 
 
+v28.98   Portfolio — nombre de parts et PA lisibles
+         Sur chaque ligne du portefeuille, la quantité de parts et le PA
+         étaient écrits en C.text3 (#4B5563), quasi illisibles sur le fond
+         sombre. Les deux valeurs passent en C.text (#F1F5F9) et en gras
+         (fontWeight 800). Les libellés "parts" et "PA" restent en gris.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

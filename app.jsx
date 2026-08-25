@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.97";
+const APP_VERSION = "v28.98";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3481,12 +3481,12 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                         <div style={{display:"flex",gap:8,marginTop:2}}>
                           {item.qty!=null&&(
                             <span style={{fontSize:10,color:C.gray}}>
-                              <b style={{color:C.text3}}>{fmtQty(item.qty)}</b> parts
+                              <b style={{color:C.text,fontWeight:800}}>{fmtQty(item.qty)}</b> parts
                             </span>
                           )}
                           {item.pa!=null&&item.pa!==false&&(
                             <span style={{fontSize:10,color:C.gray}}>
-                              PA <b style={{color:C.text3}}>{fmtPA(item.pa)}</b>
+                              PA <b style={{color:C.text,fontWeight:800}}>{fmtPA(item.pa)}</b>
                             </span>
                           )}
                         </div>

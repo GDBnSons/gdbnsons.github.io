@@ -1151,6 +1151,20 @@ v29.01   Stats — montants et pourcentages cote a cote, et chart GDB
          neuf boutons.
 
 
+v29.02   Accueil — timeframes 3Y et 5Y sur le graphe GDB.C · GDB.S · Patrimoine
+         La barre du graphe d'accueil s'aligne sur celle de l'onglet GDB :
+         3Y et 5Y viennent s'ajouter apres 2Y, et la barre passe en 9 px avec
+         2 px de gouttiere pour loger les neuf boutons plus la bascule EUR/USD
+         a droite (verifie a 375 px : une seule ligne, pas de debordement).
+         ⚠ GDBS demarre au 19 aout 2025 : 1Y, 2Y, 3Y, 5Y et ALL affichent donc
+         aujourd'hui la meme fenetre sur ce graphe. Les deux nouveaux boutons
+         ne prendront leur sens qu'une fois l'historique plus profond.
+         La constante globale TFS (barre du composant LineChart generique,
+         utilise par les autres onglets) n'a PAS ete touchee : sliceByTF n'y
+         gere pas de cutoff 3Y/5Y et renverrait une tranche d'un seul point.
+         A traiter avant d'y ajouter ces timeframes.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

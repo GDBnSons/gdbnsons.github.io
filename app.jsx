@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.01";
+const APP_VERSION = "v29.02";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3572,7 +3572,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
     return d.toISOString().slice(0,10);
   };
   const today = todayNC();
-  const tfCut = { "1W":cutoff(7), "1M":cutoff(31), "MTD":today.slice(0,7)+"-01", "YTD":today.slice(0,4)+"-01-01", "1Y":cutoff(365), "2Y":cutoff(730), "ALL":"2020-01-01" };
+  const tfCut = { "1W":cutoff(7), "1M":cutoff(31), "MTD":today.slice(0,7)+"-01", "YTD":today.slice(0,4)+"-01-01", "1Y":cutoff(365), "2Y":cutoff(730), "3Y":cutoff(1095), "5Y":cutoff(1825), "ALL":"2020-01-01" };
   const cut = tfCut[tf] || "2020-01-01";
 
   // ── Séries enrichies avec le point live ──────────────────────────────────
@@ -3724,10 +3724,10 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
 
   /* ── Barre timeframe (rendue au-dessus du cadre en vue normale) ── */
   const tfBar = (
-    <div style={{display:"flex",gap:3,marginBottom:8,alignItems:"center"}}>
-      {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
+    <div style={{display:"flex",gap:2,marginBottom:8,alignItems:"center"}}>
+      {["1W","1M","MTD","YTD","1Y","2Y","3Y","5Y","ALL"].map(t=>(
         <button key={t} onClick={()=>{setTF(t);setHover(null);}} style={{
-          flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
+          flex:1,padding:"4px 0",borderRadius:6,fontSize:9,fontWeight:700,
           border:"none",cursor:"pointer",
           background:tf===t?C.btc:"transparent",
           color:tf===t?"#000":C.gray,

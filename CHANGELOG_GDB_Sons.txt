@@ -1165,6 +1165,13 @@ v29.02   Accueil — timeframes 3Y et 5Y sur le graphe GDB.C · GDB.S · Patrimo
          A traiter avant d'y ajouter ces timeframes.
 
 
+v29.03   Portfolio — le cours live en gras et aux couleurs de la catégorie
+         Le cours live de chaque ligne repasse à la couleur de sa catégorie
+         (il était en C.text2 depuis la v28.99) et gagne fontWeight 800.
+         Ticker et cours partagent donc de nouveau la même teinte ; la
+         hiérarchie tient par la taille — ticker 13 px, cours 11 px.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

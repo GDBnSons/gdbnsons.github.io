@@ -1172,6 +1172,50 @@ v29.03   Portfolio — le cours live en gras et aux couleurs de la catégorie
          hiérarchie tient par la taille — ticker 13 px, cours 11 px.
 
 
+v29.04   Paramètres — menu regroupé par thème, deux imports IBKR distincts
+         et « Affichage par défaut » des graphes
+         Le menu de l'engrenage est réorganisé en quatre sections :
+           Affichage        Thèmes · Devise · Montants
+           Bases de données Data · Importer les trades · Importer les
+                            positions · Exporter les bases · Restaurer une
+                            sauvegarde
+           Préférences      Composition des fonds · Affichage par défaut
+           Autres           Changelog · À propos
+         Le panneau passe de 230 à 248 px et devient défilant
+         (maxHeight calc(100vh - 96px)) : sur un écran de 640 px de haut il
+         se scrolle au lieu de déborder.
+
+         « Importer trades / positions IBKR » devient deux entrées. Chacune
+         ouvre le même modal, mais sur son onglet — IbkrImportModal reçoit
+         un initialTab. La barre d'onglets Trades / Positions reste dans le
+         modal : on peut toujours basculer sans ressortir. Le bouton
+         « Importer les trades IBKR » de l'écran Data ouvre lui aussi
+         l'onglet Trades.
+
+         Devise (€/$) et Montants (visibles/masqués) quittent le header et
+         rejoignent la section Affichage. Ce sont des bascules : elles
+         affichent leur état à droite et ne referment pas le menu. Le header
+         ne garde donc plus que ↺ · 📸 · 💵 à gauche et ⚙ à droite.
+
+         Nouvel écran « 📈 Affichage par défaut » (Préférences) : pour le
+         graphe de l'Accueil et celui de l'onglet GDB, il fixe la timeframe
+         ouverte au chargement et les courbes tracées d'entrée. Les défauts
+         historiques sont conservés à l'identique tant que rien n'est
+         enregistré — Accueil : YTD, Patrimoine total et Or masqués ;
+         GDB : YTD, BTC/MSCI/S&P/Or masqués.
+         Le réglage vit dans localStorage (gdb_chart_prefs_v1), comme les
+         tracés du graphe : c'est une préférence d'appareil, elle n'est ni
+         sauvegardée en KV ni reprise par une restauration.
+         « Enregistrer » incrémente chartPrefsVer, qui sert de key à
+         PageOverview et PageGDB : les deux graphes se remontent sur les
+         nouveaux défauts sans quitter l'app. Un garde-fou empêche de tout
+         masquer — la dernière courbe visible ne peut pas être décochée.
+         ⚠ Les défauts et les couleurs des deux légendes vivent maintenant
+         dans CHART_DEFS (haut de app.jsx). Ajouter une courbe à un graphe
+         demande de l'y déclarer aussi, sinon elle reste absente de l'écran
+         de réglage.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)
@@ -1226,6 +1270,8 @@ Caches du screener (worker v162, jamais sauvegardés — reconstructibles) :
 
 Non synchronisées en KV :
   gdb_drawings_v1    Tracés du graphe (localStorage uniquement)
+  gdb_chart_prefs_v1 Affichage par défaut des graphes Accueil / GDB — timeframe
+                     et courbes visibles (localStorage uniquement, v29.04)
   BENCH_IDX / CUSTOM_ICONS  ne sont pas repris automatiquement lors des
                      snapshots : mise à jour manuelle du code de base
 

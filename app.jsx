@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.03";
+const APP_VERSION = "v29.04";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1602,6 +1602,54 @@ const FS=({label,value,onChange,options})=>(
 const Btn=({label,onClick,color,full,outline})=>(
   <button onClick={onClick} style={{background:outline?"transparent":(color||C.btc),border:`1px solid ${color||C.btc}`,borderRadius:10,padding:"12px 20px",color:outline?(color||C.btc):"#000",fontWeight:800,fontSize:13,cursor:"pointer",width:full?"100%":"auto",marginBottom:full?8:0}}>{label}</button>
 );
+/* ═══════════════════════════════════════════════════════════
+   AFFICHAGE PAR DÉFAUT DES GRAPHES (v29.04)
+   Timeframe et courbes visibles au chargement, pour le graphe
+   d'accueil et celui de l'onglet GDB. localStorage uniquement :
+   c'est une préférence d'appareil, pas une donnée à sauvegarder.
+═══════════════════════════════════════════════════════════ */
+var CHART_TFS = ["1W","1M","MTD","YTD","1Y","2Y","3Y","5Y","ALL"];
+// Les couleurs reprennent celles des deux graphes : soit une clé du thème
+// courant (C.orange…), soit un hexa figé quand le graphe en code un en dur.
+var CHART_DEFS = {
+  home: {
+    icon:"🏠", name:"Accueil",
+    sub:"GDB.C · GDB.S · Patrimoine",
+    tf:"YTD",
+    hidden:{"Patrimoine total":1,"Or":1},
+    series:[["GDB.C","orange"],["GDB.S","blue"],["Patrimoine ex. Or","green"],["Patrimoine total","#15803D"],["Or","gold"]],
+  },
+  gdb: {
+    icon:"📊", name:"GDB",
+    sub:"comparaison base 100",
+    tf:"YTD",
+    hidden:{"BTC":1,"MSCI":1,"S&P":1,"Or":1},
+    series:[["GDB.C","#F7931A"],["GDB.S","#EF4444"],["BTC","#FBBF24"],["ETH","#1E40AF"],["Nasdaq","#10B981"],["MSCI","#EC4899"],["S&P","#6B7280"],["Or","gold"]],
+  },
+};
+function chartSeriesCol(v){ return (v&&v.charAt(0)==="#") ? v : (C[v]||C.gray); }
+var CHART_PREFS = (function(){ try{ return JSON.parse(localStorage.getItem("gdb_chart_prefs_v1")||"{}")||{}; }catch(e){ return {}; } })();
+function chartPref(id){
+  var d=CHART_DEFS[id]||{tf:"YTD",hidden:{}};
+  var p=CHART_PREFS[id]||{};
+  return {
+    tf: (CHART_TFS.indexOf(p.tf)>=0 ? p.tf : d.tf),
+    hidden: Object.assign({}, (p.hidden&&typeof p.hidden==="object") ? p.hidden : d.hidden),
+  };
+}
+// v29.04 — titre de l'écran plein page ouvert depuis le menu Paramètres
+var SETTINGS_PAGE_TITLES = {
+  data:"🗄️ Bases de données",
+  fundcomp:"🧮 Composition des fonds",
+  defaults:"📈 Affichage par défaut",
+  changelog:"📜 Changelog",
+  about:"ℹ️ À propos",
+};
+function saveChartPref(id,pref){
+  CHART_PREFS[id]={tf:pref.tf,hidden:pref.hidden||{}};
+  try{ localStorage.setItem("gdb_chart_prefs_v1", JSON.stringify(CHART_PREFS)); }catch(e){}
+}
+
 
 /* ═══════════════════════════════════════════════════════════
    TICKER MODAL — chart courbe + infos live via Cloudflare proxy
@@ -3546,7 +3594,7 @@ function GdbCompareChart({eur, setEur, EFF, tf, setTF, onSparkData, chartData, l
   const svgRef = useRef(null);
   const [hover, setHover] = useState(null);
   const [full, setFull] = useState(false);
-  const [hiddenSeries, setHiddenSeries] = useState({"Patrimoine total":true, "Or":true});
+  const [hiddenSeries, setHiddenSeries] = useState(function(){ return chartPref("home").hidden; });
   const win = useWindowSize();
   // tf et setTF viennent du parent (PageOverview) pour synchroniser avec le card
 
@@ -4693,7 +4741,7 @@ function buildSections(L){
 function PageOverview({chartData,onSnapshot,eur,setEur,hidden,setHidden,EFF,refreshing,handleRefresh,refreshedAt,refreshErr,fromSnapshot,gistSync,liveDD,liveCM,liveGDBS,liveGC,liveHomeHist,liveGoldHist,chosenSource,iconDbVersion=0,bumpIconDb}){
   const _DD_PO=liveDD||DD;
   const _CM_PO=liveCM||CRYPTO_MONTHLY;
-  const [chartTF, setChartTF] = useState("YTD");
+  const [chartTF, setChartTF] = useState(function(){ return chartPref("home").tf; });
   const [sparkData, setSparkData] = useState([]);
   const cur = eur ? "€" : "$";
   const inv = 94064 * (EFF||CURRENT).usdEur;
@@ -5993,11 +6041,11 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
    Benchmark dynamique sur la même période.
 ═══════════════════════════════════════════════════════════ */
 function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
-  const [tf, setTF]     = useState("YTD");
+  const [tf, setTF]     = useState(function(){ return chartPref("gdb").tf; });
   const [hover, setHover] = useState(null);
   const [full, setFull]   = useState(false);
-  // v29.01 — par defaut seuls GDB.C, GDB.S, Nasdaq et ETH sont traces
-  const [hiddenSeries, setHiddenSeries] = useState({"BTC":1,"MSCI":1,"S&P":1,"Or":1});
+  // v29.04 — defaut (GDB.C, GDB.S, Nasdaq, ETH) et TF par defaut : CHART_DEFS, reglable dans Parametres
+  const [hiddenSeries, setHiddenSeries] = useState(function(){ return chartPref("gdb").hidden; });
   const win = useWindowSize();
   const svgRef = useRef(null);
 
@@ -9887,8 +9935,8 @@ function exportBasesJSON(){
     .catch(function(e){ alert("Erreur export : "+((e&&e.message)||"")); });
 }
 
-function IbkrImportModal({ txns, setTxns, annex, setAnnex, eff, onReconcile, onClose }){
-  const [tab,setTab]=React.useState("trades");
+function IbkrImportModal({ initialTab, txns, setTxns, annex, setAnnex, eff, onReconcile, onClose }){
+  const [tab,setTab]=React.useState(initialTab==="positions"?"positions":"trades");
   const [phase,setPhase]=React.useState("loading");
   const [err,setErr]=React.useState("");
   const [data,setData]=React.useState(null);
@@ -12773,6 +12821,95 @@ function PageFundComp({EFF, comp, onSave, onClose}){
   );
 }
 
+/* ── Affichage par défaut des graphes (v29.04) ───────────────────────────
+   Un bloc par graphe : la timeframe ouverte au chargement et les courbes
+   tracées d'entrée. Les choix sont appliqués au moment du « Enregistrer »,
+   qui remonte les graphes concernés (onSaved). ─────────────────────────── */
+function PageChartDefaults({onSaved}){
+  const [prefs,setPrefs] = React.useState(function(){ return {home:chartPref("home"), gdb:chartPref("gdb")}; });
+  const [saved,setSaved] = React.useState(false);
+  const IDS = ["home","gdb"];
+
+  function patch(id,fn){ setPrefs(function(p){ var n=Object.assign({},p); n[id]=fn(p[id]); return n; }); setSaved(false); }
+  function pickTF(id,t){ patch(id,function(o){ return {tf:t,hidden:o.hidden}; }); }
+  function toggle(id,lbl){
+    patch(id,function(o){
+      var h=Object.assign({},o.hidden);
+      if(h[lbl]) delete h[lbl];
+      else {
+        // Au moins une courbe doit rester tracée, sinon le graphe s'ouvre vide.
+        var vis=CHART_DEFS[id].series.filter(function(s){ return !h[s[0]]; });
+        if(vis.length<=1) return o;
+        h[lbl]=1;
+      }
+      return {tf:o.tf,hidden:h};
+    });
+  }
+  function resetOne(id){ var d=CHART_DEFS[id]; patch(id,function(){ return {tf:d.tf,hidden:Object.assign({},d.hidden)}; }); }
+  function apply(){ IDS.forEach(function(id){ saveChartPref(id,prefs[id]); }); setSaved(true); onSaved&&onSaved(); }
+
+  return (
+    <div>
+      <div style={{fontSize:11,color:C.text3,lineHeight:1.5,marginBottom:14}}>
+        Timeframe ouverte au chargement et courbes tracées d'entrée. Les autres
+        courbes restent rappelables d'un tap sur la légende du graphe.
+      </div>
+
+      {IDS.map(function(id){
+        const d=CHART_DEFS[id], p=prefs[id];
+        return (
+          <div key={id} style={{background:C.bg1,border:"1px solid "+C.border,borderRadius:12,padding:"12px 13px",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8,marginBottom:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{d.icon+" "+d.name}</div>
+                <div style={{fontSize:10,color:C.gray,marginTop:1}}>{d.sub}</div>
+              </div>
+              <button onClick={function(){resetOne(id);}} style={{flexShrink:0,background:"transparent",border:"1px solid "+C.border,borderRadius:7,padding:"3px 9px",color:C.text3,fontSize:10,fontWeight:700,cursor:"pointer"}}>{"↺ Défaut"}</button>
+            </div>
+
+            <div style={{fontSize:9,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Timeframe</div>
+            <div style={{display:"flex",gap:2,marginBottom:12}}>
+              {CHART_TFS.map(function(t){
+                const on=p.tf===t;
+                return <button key={t} onClick={function(){pickTF(id,t);}} style={{
+                  flex:1,padding:"5px 0",borderRadius:6,fontSize:9,fontWeight:700,
+                  border:"none",cursor:"pointer",
+                  background:on?C.btc:C.bg2,color:on?"#000":C.gray,
+                }}>{t}</button>;
+              })}
+            </div>
+
+            <div style={{fontSize:9,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Courbes affichées</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {d.series.map(function(s){
+                const lbl=s[0], col=chartSeriesCol(s[1]), on=!p.hidden[lbl];
+                return <button key={lbl} onClick={function(){toggle(id,lbl);}} style={{
+                  display:"flex",alignItems:"center",gap:5,cursor:"pointer",
+                  background:on?col+"22":"transparent",border:"1px solid "+(on?col:C.border),
+                  borderRadius:20,padding:"5px 11px",opacity:on?1:.5,
+                }}>
+                  <div style={{width:11,height:2.5,background:on?col:C.border,borderRadius:1}}/>
+                  <span style={{fontSize:10.5,fontWeight:700,color:on?col:C.gray}}>{lbl}</span>
+                </button>;
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <button onClick={apply} style={{
+        width:"100%",padding:"12px 0",borderRadius:10,marginTop:2,
+        border:"none",cursor:"pointer",fontSize:13,fontWeight:800,
+        background:saved?C.green:C.btc,color:"#0a0a0a",
+      }}>{saved?"✓ Enregistré":"Enregistrer"}</button>
+      <div style={{fontSize:10,color:C.text3,marginTop:8,lineHeight:1.5}}>
+        Réglage propre à cet appareil (localStorage) : il n'est pas repris par
+        une sauvegarde ni synchronisé sur les autres appareils.
+      </div>
+    </div>
+  );
+}
+
 function PageChangelog(){
   var LOG = [
     ["Naissance (v1–v8)", "App React mobile issue du dashboard Excel v5.5. Onglets Overview/Allocation/Stats/GDB/Portfolio, thème dark, données crypto/actions/banque, historique DD, sparkline/donut/charts, toggle €/$. Onglet Transactions (PA moyen pondéré). Storage GitHub Gist multi-appareils."],
@@ -12994,6 +13131,8 @@ function App(){
   const[showSnap,setShowSnap]=useState(false);
   const[showTrade,setShowTrade]=useState(false);
   const[ibkrOpen,setIbkrOpen]=useState(false);
+  const[ibkrTab,setIbkrTab]=useState("trades");     // v29.04 — onglet ouvert par le bouton du menu
+  const[chartPrefsVer,setChartPrefsVer]=useState(0); // v29.04 — bump = remonte les graphes sur les nouveaux défauts
   const[eur,setEur]=useState(false);
   const[hidden,setHidden]=useState(false);
   const[live,setLive]=useState(()=>{
@@ -14394,23 +14533,8 @@ function App(){
           <span style={{fontSize:9,fontWeight:700,color:C.btc,opacity:.8,fontFamily:"monospace",letterSpacing:.5}}>{APP_VERSION}</span>
         </div>
 
-        {/* Droite : €/$ 👁 🎨 */}
+        {/* Droite : ⚙ — v29.04 : €/$ et 👁 sont passés dans le menu Paramètres */}
         <div style={{display:"flex",gap:9,alignItems:"center"}}>
-          <button onClick={()=>setEur(!eur)} title={eur?"Passer en dollars":"Passer en euros"} style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${eur ? C.green : C.gold}`,
-            background: eur ? C.green+"1A" : C.gold+"1A",
-            cursor:"pointer",fontSize:14,fontWeight:900,
-            color: eur ? C.green : C.gold,
-            display:"flex",alignItems:"center",justifyContent:"center",
-          }}>{eur?"$":"€"}</button>
-          <button onClick={()=>setHidden(!hidden)} title={hidden?"Afficher":"Masquer"} style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
-            border:`1.5px solid ${hidden?C.btc:C.purple}`,
-            background:hidden?C.btc+"1A":C.purple+"1A",
-            cursor:"pointer",fontSize:15,color:hidden?C.btc:C.purple,
-            display:"flex",alignItems:"center",justifyContent:"center",
-          }}>{hidden?"🙈":"👁"}</button>
           <button onClick={()=>setShowSettings(s=>!s)} title="Paramètres" style={{
             width:32,height:32,borderRadius:C.radiusSm||6,
             border:`1.5px solid ${showSettings?C.btc:C.border}`,background:C.purple+"1A",
@@ -14443,10 +14567,10 @@ function App(){
         </div>
       )}
       <div style={{padding:"0 16px"}}>
-        {tab===0 && <PageOverview chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist}/>}
+        {tab===0 && <PageOverview key={"ov"+chartPrefsVer} chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
-        {tab===3 && <PageGDB chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
+        {tab===3 && <PageGDB key={"gdb"+chartPrefsVer} chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad} btcReco={liveBtcReco} onSaveBtcReco={saveBtcReco}/>}
         {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
@@ -14496,7 +14620,7 @@ function App(){
         </div>
       )}
       {showTrade&&<TradeModal onClose={()=>setShowTrade(false)} onAdd={addTxn} onTradeApplied={applyTradeToEFF} EFF={EFF} holders={invHolders} onInvestApplied={applyInvestment}/>}
-      {ibkrOpen&&<IbkrImportModal txns={txns} setTxns={setTxns} annex={liveIbkrAnnex} setAnnex={setLiveIbkrAnnex} eff={EFF} onReconcile={reconcilePositions} onClose={()=>setIbkrOpen(false)}/>}
+      {ibkrOpen&&<IbkrImportModal initialTab={ibkrTab} txns={txns} setTxns={setTxns} annex={liveIbkrAnnex} setAnnex={setLiveIbkrAnnex} eff={EFF} onReconcile={reconcilePositions} onClose={()=>setIbkrOpen(false)}/>}
       {showGistDiag&&(
         <div style={{position:"fixed",inset:0,zIndex:600,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowGistDiag(false)}>
@@ -14622,24 +14746,48 @@ function App(){
       {showSettings&&(
         <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:460}}>
           <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:56,left:"50%",transform:"translateX(-50%)",width:430,maxWidth:"100%",display:"flex",justifyContent:"flex-end"}}>
-            <div style={{width:230,marginRight:14,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",boxShadow:"0 10px 30px rgba(0,0,0,.45)"}}>
+            {/* v29.04 — menu regroupé par thème. Un item = [icône, libellé, action, valeur]
+                ; « valeur » (optionnelle) affiche l'état à droite pour les bascules,
+                qui ne referment pas le menu. */}
+            <div style={{width:248,marginRight:14,background:C.bg1,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",overflowY:"auto",maxHeight:"calc(100vh - 96px)",boxShadow:"0 10px 30px rgba(0,0,0,.45)"}}>
               {[
-                ["🎨","Thèmes",function(){ setShowSettings(false); setShowTheme(true); }],
-                ["🗄️","Bases de données",function(){ setShowSettings(false); setDataRestore(false); setSettingsPage("data"); }],
-                ["🧮","Composition des fonds",function(){ setShowSettings(false); setSettingsPage("fundcomp"); }],
-                ["📥","Importer trades / positions IBKR",function(){ setShowSettings(false); setIbkrOpen(true); }],
-                ["📤","Exporter les bases",function(){ setShowSettings(false); exportBasesJSON(); }],
-                ["♻️","Restaurer une sauvegarde",function(){ setShowSettings(false); setDataRestore(true); setSettingsPage("data"); }],
-                ["📜","Changelog",function(){ setShowSettings(false); setSettingsPage("changelog"); }],
-                ["ℹ️","À propos",function(){ setShowSettings(false); setSettingsPage("about"); }],
-              ].map(function(it,i){
+                ["Affichage",[
+                  ["🎨","Thèmes",function(){ setShowSettings(false); setShowTheme(true); }],
+                  ["💱","Devise",function(){ setEur(!eur); }, eur?"€":"$"],
+                  [hidden?"🙈":"👁","Montants",function(){ setHidden(!hidden); }, hidden?"Masqués":"Visibles"],
+                ]],
+                ["Bases de données",[
+                  ["🗄️","Data",function(){ setShowSettings(false); setDataRestore(false); setSettingsPage("data"); }],
+                  ["📥","Importer les trades",function(){ setShowSettings(false); setIbkrTab("trades"); setIbkrOpen(true); }],
+                  ["📊","Importer les positions",function(){ setShowSettings(false); setIbkrTab("positions"); setIbkrOpen(true); }],
+                  ["📤","Exporter les bases",function(){ setShowSettings(false); exportBasesJSON(); }],
+                  ["♻️","Restaurer une sauvegarde",function(){ setShowSettings(false); setDataRestore(true); setSettingsPage("data"); }],
+                ]],
+                ["Préférences",[
+                  ["🧮","Composition des fonds",function(){ setShowSettings(false); setSettingsPage("fundcomp"); }],
+                  ["📈","Affichage par défaut",function(){ setShowSettings(false); setSettingsPage("defaults"); }],
+                ]],
+                ["Autres",[
+                  ["📜","Changelog",function(){ setShowSettings(false); setSettingsPage("changelog"); }],
+                  ["ℹ️","À propos",function(){ setShowSettings(false); setSettingsPage("about"); }],
+                ]],
+              ].map(function(grp,gi){
                 return (
-                  <button key={i} onClick={it[2]} style={{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"12px 14px",background:"none",border:"none",borderBottom:i<3?"1px solid "+C.border+"66":"none",cursor:"pointer",textAlign:"left"}}>
-                    <span style={{fontSize:16,width:20,textAlign:"center"}}>{it[0]}</span>
-                    <span style={{fontSize:13,fontWeight:700,color:C.text}}>{it[1]}</span>
-                  </button>
+                  <div key={grp[0]} style={{borderTop:gi>0?"1px solid "+C.border+"66":"none"}}>
+                    <div style={{padding:"9px 14px 4px",fontSize:9,fontWeight:800,color:C.gray,textTransform:"uppercase",letterSpacing:.7}}>{grp[0]}</div>
+                    {grp[1].map(function(it,i){
+                      return (
+                        <button key={i} onClick={it[2]} style={{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"9px 14px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+                          <span style={{fontSize:15,width:20,textAlign:"center"}}>{it[0]}</span>
+                          <span style={{flex:1,fontSize:13,fontWeight:700,color:C.text}}>{it[1]}</span>
+                          {it[3]!=null&&<span style={{fontSize:11,fontWeight:800,color:C.btc}}>{it[3]}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
+              <div style={{height:6}}/>
             </div>
           </div>
         </div>
@@ -14647,14 +14795,15 @@ function App(){
       {settingsPage&&(
         <div style={{position:"fixed",inset:0,zIndex:1200,background:C.bg,display:"flex",flexDirection:"column",width:430,maxWidth:"100%",left:"50%",transform:"translateX(-50%)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
-            <span style={{fontSize:15,fontWeight:800,color:C.text}}>{settingsPage==="data"?"🗄️ Bases de données":(settingsPage==="fundcomp"?"🧮 Composition des fonds":(settingsPage==="changelog"?"📜 Changelog":"ℹ️ À propos"))}</span>
+            <span style={{fontSize:15,fontWeight:800,color:C.text}}>{SETTINGS_PAGE_TITLES[settingsPage]||"⚙ Paramètres"}</span>
             <button onClick={()=>setSettingsPage(null)} style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.border,background:C.bg1,color:C.text2,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
             {settingsPage==="data" && <PageData EFF={EFF} hidden={hidden} txns={txns} chartData={chartData}
               liveDD={liveDD} liveGDBS={liveGDBS} liveGC={gcEff} liveGSB={liveGSB}
-              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist} liveQuad={liveQuad} onImportIbkr={()=>setIbkrOpen(true)} autoRestore={dataRestore}/>}
+              liveCM={liveCM} liveSM={liveSM} liveTM={liveTM} liveBench={benchWithGold} liveInv={liveInv} liveFutures={liveFutures} liveIbkrAnnex={liveIbkrAnnex} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist} liveQuad={liveQuad} onImportIbkr={()=>{setIbkrTab("trades"); setIbkrOpen(true);}} autoRestore={dataRestore}/>}
             {settingsPage==="fundcomp" && <PageFundComp EFF={EFF} comp={liveFundComp} onSave={function(nc){ saveFundComp(nc); }} onClose={function(){ setSettingsPage(null); }}/>}
+            {settingsPage==="defaults" && <PageChartDefaults onSaved={function(){ setChartPrefsVer(function(v){return v+1;}); }}/>}
             {settingsPage==="changelog" && <PageChangelog/>}
             {settingsPage==="about" && <PageAbout/>}
           </div>

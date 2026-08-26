@@ -833,7 +833,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v28.99";
+const APP_VERSION = "v29.01";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -5594,6 +5594,13 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
   const bestI  = realPct.reduce((bi,v,i)=>{if(v==null)return bi; return bi===-1||v>realPct[bi]?i:bi;}, -1);
   const worstI = realPct.reduce((wi,v,i)=>{if(v==null)return wi; return wi===-1||v<realPct[wi]?i:wi;}, -1);
 
+  // v29.00 - mesures complementaires affichees dans les paves du resume
+  const ttlAvgPnl = validPnlC.length ? ttlPnl/validPnlC.length : 0;
+  const _firstBomI = (data?.bom||[]).findIndex(v=>v!=null);
+  const ttlBOMc = _firstBomI>=0 ? cvtBOM(_firstBomI) : null;
+  const ttlInvC = (data?.m||[]).reduce((s,_,i)=>{const v=cvtINV(i); return v?s+v:s;},0);
+  const ttlPct = ttlBOMc ? ttlPnl/ttlBOMc : (ttlInvC ? ttlPnl/ttlInvC : 0);
+
   // ── v28.12 — Agrégation ANNUELLE (un point par année) ─────────────────────
   const pnlForYear = (md, year, i) => {
     const bom = md?.bom?.[i], eom = md?.eom?.[i];
@@ -5630,9 +5637,23 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
   const yAvgPct = yValidPct.length ? yValidPct.reduce((s,v)=>s+v,0)/yValidPct.length : 0;
   const yBestI = yPcts.reduce((bi,v,i)=>{ if(v==null)return bi; return bi===-1||v>yPcts[bi]?i:bi; }, -1);
   const yWorstI = yPcts.reduce((wi,v,i)=>{ if(v==null)return wi; return wi===-1||v<yPcts[wi]?i:wi; }, -1);
+  const yPnlRows = yearRows.filter(r=>r.pnl!=null);
+  const yAvgPnl = yPnlRows.length ? yTtlPnl/yPnlRows.length : 0;
+  const yBom0 = yearRows[0] && yearRows[0].bomStart;
+  const yTtlInv = yearRows.reduce((s,r)=>s+(r.inv||0),0);
+  const yTtlPct = yBom0 ? yTtlPnl/yBom0 : (yTtlInv ? yTtlPnl/yTtlInv : 0);
 
   // Colors for bars
   const bclr = v => v==null?"transparent":v>=0?C.green:C.red;
+  // v29.00 - montant signe pour les paves du resume
+  const fmtAmt = v => v==null?"—":cur+(v>=0?"+":"")+Math.round(v).toLocaleString("fr-FR");
+  // v29.00 - montant compact des barres, lisible maintenant qu'il est mis en avant
+  const fmtK = v => {
+    const sg = v>=0?"+":"-", a = Math.abs(v);
+    if(a>=10000) return sg+Math.round(a/1000)+"k";
+    if(a>=1000)  return sg+(a/1000).toFixed(1).replace(".",",")+"k";
+    return sg+Math.round(a);
+  };
 
   return(
     <div>
@@ -5673,14 +5694,15 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
       {period==="month" && data&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
           {[
-            ["Total P&L",cur+(ttlPnl>=0?"+":"")+Math.round(ttlPnl).toLocaleString("fr-FR"),ttlPnl>=0?C.green:C.red],
-            ["Moy./mois",fmtP(avgPct),avgPct>=0?C.green:C.red],
-            ["Meilleur",bestI>=0?data.m[bestI]+" "+fmtP(realPct[bestI]):"—",C.green],
-            ["Pire",worstI>=0?data.m[worstI]+" "+fmtP(realPct[worstI]):"—",C.red],
-          ].map(([l,v,c])=>(
+            ["Total P&L",cur+(ttlPnl>=0?"+":"")+Math.round(ttlPnl).toLocaleString("fr-FR"),ttlPnl>=0?C.green:C.red,fmtP(ttlPct)],
+            ["Moy./mois",fmtP(avgPct),avgPct>=0?C.green:C.red,fmtAmt(ttlAvgPnl)],
+            ["Meilleur",bestI>=0?data.m[bestI]+" "+fmtP(realPct[bestI]):"—",C.green,bestI>=0?fmtAmt(cvtPNL(bestI)):null],
+            ["Pire",worstI>=0?data.m[worstI]+" "+fmtP(realPct[worstI]):"—",C.red,worstI>=0?fmtAmt(cvtPNL(worstI)):null],
+          ].map(([l,v,c,sub])=>(
             <div key={l} style={{background:C.bg1,borderRadius:8,padding:"8px 6px",border:`1px solid ${C.border}`,textAlign:"center"}}>
               <div style={{fontSize:8,color:C.gray,marginBottom:3}}>{l}</div>
               <div style={{fontSize:11,fontWeight:800,color:c}}>{msk(v,hidden)}</div>
+              {sub&&<div style={{fontSize:9,fontWeight:700,color:c,opacity:.72,marginTop:2}}>{msk(sub,hidden)}</div>}
             </div>
           ))}
         </div>
@@ -5692,8 +5714,8 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         // P&L converti pour les labels des barres
         const pnlsC = data.m.map((_,i)=>cvtPNL(i));
         const mx = Math.max(...vals.filter(v=>v!=null).map(Math.abs), .01);
-        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, MIDLINE=HTOP;
-        const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
+        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, PADT=16, MIDLINE=PADT+HTOP;
+        const TOTAL_H = PADT + HTOP + HBOT + HLAB + HPNL + 4;
         const n12=data.m.length, barW=Math.floor((W-8)/n12)-2, gap=2;
         const bx=i=>4+i*(barW+gap);
         return(
@@ -5719,7 +5741,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                 const barY=isPos?MIDLINE-hpx:MIDLINE;
                 const barH=hpx;
                 const lblY=isPos?MIDLINE-hpx-3:MIDLINE+hpx+9;
-                const pnlY=isPos?MIDLINE-hpx-11:MIDLINE+hpx+18;
+                const pnlY=isPos?MIDLINE-hpx-13:MIDLINE+hpx+19;
                 return(
                   <g key={i}>
                     <rect x={bx(i)} y={barY} width={barW} height={barH}
@@ -5728,10 +5750,10 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                       fill={col} fontSize={8} fontWeight="800">
                       {fmtP(v,0)}
                     </text>
-                    {pnl!=null&&(
+                    {pnl!=null&&!hidden&&(
                       <text x={cx} y={pnlY} textAnchor="middle"
-                        fill={C.text3} fontSize={6.5}>
-                        {pnl>=0?"+":""}{Math.round(pnl/1000)}k
+                        fill={col} fontSize={8} fontWeight="800">
+                        {fmtK(pnl)}
                       </text>
                     )}
                     <text x={cx} y={TOTAL_H-3} textAnchor="middle"
@@ -5812,14 +5834,15 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
       {period==="year" && yearRows.length>0 && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
           {[
-            ["Total P&L",cur+(yTtlPnl>=0?"+":"")+Math.round(yTtlPnl).toLocaleString("fr-FR"),yTtlPnl>=0?C.green:C.red],
-            ["Moy./an",fmtP(yAvgPct),yAvgPct>=0?C.green:C.red],
-            ["Meilleure",yBestI>=0?yearRows[yBestI].year+" "+fmtP(yPcts[yBestI]):"\u2014",C.green],
-            ["Pire",yWorstI>=0?yearRows[yWorstI].year+" "+fmtP(yPcts[yWorstI]):"\u2014",C.red],
-          ].map(([l,v,c])=>(
+            ["Total P&L",cur+(yTtlPnl>=0?"+":"")+Math.round(yTtlPnl).toLocaleString("fr-FR"),yTtlPnl>=0?C.green:C.red,fmtP(yTtlPct)],
+            ["Moy./an",fmtP(yAvgPct),yAvgPct>=0?C.green:C.red,fmtAmt(yAvgPnl)],
+            ["Meilleure",yBestI>=0?yearRows[yBestI].year+" "+fmtP(yPcts[yBestI]):"\u2014",C.green,yBestI>=0?fmtAmt(yearRows[yBestI].pnl):null],
+            ["Pire",yWorstI>=0?yearRows[yWorstI].year+" "+fmtP(yPcts[yWorstI]):"\u2014",C.red,yWorstI>=0?fmtAmt(yearRows[yWorstI].pnl):null],
+          ].map(([l,v,c,sub])=>(
             <div key={l} style={{background:C.bg1,borderRadius:8,padding:"8px 6px",border:`1px solid ${C.border}`,textAlign:"center"}}>
               <div style={{fontSize:8,color:C.gray,marginBottom:3}}>{l}</div>
               <div style={{fontSize:11,fontWeight:800,color:c}}>{msk(v,hidden)}</div>
+              {sub&&<div style={{fontSize:9,fontWeight:700,color:c,opacity:.72,marginTop:2}}>{msk(sub,hidden)}</div>}
             </div>
           ))}
         </div>
@@ -5835,8 +5858,8 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
         const mxPos = Math.max(...vals.filter(v=>v!=null&&v>=0), .01);
         const mxNegAbs = Math.max(...vals.filter(v=>v!=null&&v<0).map(v=>Math.abs(v)), 0);
         const mxNeg = Math.max(1, mxNegAbs);
-        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, MIDLINE=HTOP;
-        const TOTAL_H = HTOP + HBOT + HLAB + HPNL + 4;
+        const W=320, HTOP=62, HBOT=62, HLAB=16, HPNL=12, PADT=16, MIDLINE=PADT+HTOP;
+        const TOTAL_H = PADT + HTOP + HBOT + HLAB + HPNL + 4;
         const nY=labels.length, barW=Math.floor((W-8)/Math.max(nY,1))-2, gap=2;
         const bx=i=>4+i*(barW+gap);
         return(
@@ -5861,14 +5884,14 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                 const col=bclr(v);
                 const barY=isPos?MIDLINE-hpx:MIDLINE;
                 const lblY=isPos?MIDLINE-hpx-3:MIDLINE+hpx+9;
-                const pnlY=isPos?MIDLINE-hpx-11:MIDLINE+hpx+18;
+                const pnlY=isPos?MIDLINE-hpx-13:MIDLINE+hpx+19;
                 return(
                   <g key={i}>
                     <rect x={bx(i)} y={barY} width={barW} height={hpx} fill={col} opacity={0.85} rx={2}/>
                     <text x={cx} y={lblY} textAnchor="middle" fill={col} fontSize={8} fontWeight="800">{fmtP(v,0)}</text>
-                    {pnl!=null&&(
-                      <text x={cx} y={pnlY} textAnchor="middle" fill={C.text3} fontSize={6.5}>
-                        {pnl>=0?"+":""}{Math.round(pnl/1000)}k
+                    {pnl!=null&&!hidden&&(
+                      <text x={cx} y={pnlY} textAnchor="middle" fill={col} fontSize={8} fontWeight="800">
+                        {fmtK(pnl)}
                       </text>
                     )}
                     <text x={cx} y={TOTAL_H-3} textAnchor="middle"
@@ -5913,7 +5936,7 @@ function PageStats({chartData, hidden=false, EFF, eur=false, liveDD, src, liveIn
                   <td style={{padding:"5px 6px",textAlign:"right",color:C.text,fontSize:9}}>{yearRows[yearRows.length-1]&&yearRows[yearRows.length-1].eomEnd!=null?msk(cur+Math.round(yearRows[yearRows.length-1].eomEnd).toLocaleString("fr-FR"),hidden):"\u2014"}</td>
                   <td style={{padding:"5px 6px",textAlign:"right",color:C.teal,fontSize:9}}>{(()=>{const t=yearRows.reduce((s,r)=>s+(r.inv||0),0);return t?msk((t>0?"+":"")+Math.round(t).toLocaleString("fr-FR")+cur,hidden):"\u2014";})()}</td>
                   <td style={{padding:"5px 6px",textAlign:"right",color:bclr(yTtlPnl),fontSize:9}}>{msk((yTtlPnl>=0?"+":"")+Math.round(yTtlPnl).toLocaleString("fr-FR"),hidden)}</td>
-                  <td style={{padding:"5px 6px",textAlign:"right",color:bclr(yearRows[0]&&yearRows[0].bomStart?yTtlPnl/yearRows[0].bomStart:0),fontSize:9,fontWeight:800}}>{(()=>{const b=yearRows[0]&&yearRows[0].bomStart;return fmtP(b?yTtlPnl/b:0);})()}</td>
+                  <td style={{padding:"5px 6px",textAlign:"right",color:bclr(yTtlPct),fontSize:9,fontWeight:800}}>{fmtP(yTtlPct)}</td>
                 </tr>
               </tbody>
             </table>
@@ -5973,7 +5996,8 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const [tf, setTF]     = useState("YTD");
   const [hover, setHover] = useState(null);
   const [full, setFull]   = useState(false);
-  const [hiddenSeries, setHiddenSeries] = useState({});
+  // v29.01 — par defaut seuls GDB.C, GDB.S, Nasdaq et ETH sont traces
+  const [hiddenSeries, setHiddenSeries] = useState({"BTC":1,"MSCI":1,"S&P":1,"Or":1});
   const win = useWindowSize();
   const svgRef = useRef(null);
 
@@ -5987,7 +6011,8 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
   const cutFn = days => { const d=new Date(new Date(lastGSB).getTime() - days*864e5); return d.toISOString().slice(0,10); };
   const TF_CUTS = {
     "1W": cutFn(7), "1M": cutFn(31), "MTD": lastGSB.slice(0,7)+"-01",
-    "YTD": lastGSB.slice(0,4)+"-01-01", "1Y": cutFn(365), "2Y": cutFn(730), "ALL": "2020-01-01",
+    "YTD": lastGSB.slice(0,4)+"-01-01", "1Y": cutFn(365), "2Y": cutFn(730),
+    "3Y": cutFn(1095), "5Y": cutFn(1825), "ALL": "2020-01-01",
   };
   const cut = TF_CUTS[tf] || "2023-01-01";
 
@@ -6083,10 +6108,10 @@ function GdbCompareChartGDB({onTFChange, liveGSB, liveGDBS, liveBench, liveGC}){
 
   /* ── Barre timeframe (au-dessus du cadre en vue normale) ── */
   const tfBar = (
-    <div style={{display:"flex",gap:3,marginBottom:8}}>
-      {["1W","1M","MTD","YTD","1Y","2Y","ALL"].map(t=>(
+    <div style={{display:"flex",gap:2,marginBottom:8}}>
+      {["1W","1M","MTD","YTD","1Y","2Y","3Y","5Y","ALL"].map(t=>(
         <button key={t} onClick={()=>handleTF(t)} style={{
-          flex:1,padding:"4px 0",borderRadius:6,fontSize:10,fontWeight:700,
+          flex:1,padding:"4px 0",borderRadius:6,fontSize:9,fontWeight:700,
           border:"none",cursor:"pointer",
           background:tf===t?C.btc:"transparent",color:tf===t?"#000":C.gray,
         }}>{t}</button>

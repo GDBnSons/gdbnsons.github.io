@@ -1123,6 +1123,34 @@ v28.99   Portfolio — le ticker prend la couleur de sa catégorie
          sous le seuil AA. À remonter si la lecture gêne.
 
 
+v29.01   Stats — montants et pourcentages cote a cote, et chart GDB
+         Stats : les quatre paves du resume portent desormais les deux
+         lectures. Total P&L ajoute le % total (P&L / BOM du premier mois,
+         a defaut / investi), Moy./mois et Moy./an ajoutent le montant moyen,
+         Meilleur et Pire ajoutent le montant du mois ou de l'annee. La
+         seconde ligne reprend la couleur de la premiere, en 9 px et a 72 %
+         d'opacite pour garder la hierarchie.
+         Dans les histogrammes mensuel et annuel, le montant de chaque barre
+         passe de gris 6,5 px a la couleur et a la police du % (8 px, 800) :
+         les deux etiquettes se lisent d'un coup d'oeil. Format compact revu
+         (+37k, -5,8k, +0) — l'ancien arrondi au millier affichait « 0k » sous
+         1 000. Une marge de 16 px au-dessus du cadre evite que la barre la
+         plus haute pousse son montant hors du SVG ; les barres gardent leur
+         hauteur. En mode masque (oeil barre), le montant des barres disparait
+         au lieu de s'afficher en gras — les % restent.
+         ⚠ Correction au passage : la ligne TOTAL du tableau annuel affichait
+         +0,0 %, car 2020 demarre a un BOM de 0 et le calcul divisait par la.
+         Il retombe maintenant sur le total investi, comme le fait deja le
+         mensuel — soit +37,5 % au lieu de +0,0 %. Le pave et le tableau
+         partagent le meme yTtlPct, ils ne peuvent plus diverger.
+
+         Chart GDB (meme livraison) : par defaut seuls GDB.C, GDB.S, Nasdaq
+         et ETH sont traces — BTC, MSCI, S&P et Or demarrent masques et
+         restent rappelables par la legende. Deux timeframes ajoutes, 3Y et
+         5Y ; la barre passe en 9 px avec 2 px de gouttiere pour loger les
+         neuf boutons.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

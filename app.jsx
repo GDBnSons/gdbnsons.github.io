@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.07";
+const APP_VERSION = "v29.08";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8169,7 +8169,7 @@ function warrenScore(r){
 ═══════════════════════════════════════════════════════════ */
 const SCR_COLS_DEF = ["sym","name","sec","px","d20","d30","d50","d200","rsi","chop","div","divAge",
                       "dd52","up52","p13","p26","p52","volx","macdH","macdX","bbw","bbwR","atr"];
-const SCR_GROUPS = ["Tendance","Momentum","Volatilité","Position","Contexte"];
+const SCR_GROUPS = ["Analyse de Warren","Tendance","Momentum","Volatilité","Position","Contexte"];
 
 function scrN(v, d){ return v==null ? "—" : (Math.round(v*Math.pow(10,d==null?1:d))/Math.pow(10,d==null?1:d)).toLocaleString("fr-FR"); }
 function scrSigned(v, d, suf){ return v==null ? "—" : ((v>=0?"+":"")+scrN(v,d)+(suf||"")); }
@@ -8297,6 +8297,31 @@ const SCR_CRIT = [
     text:function(p){ return "À moins de "+p.tol+" % au-dessus du plus bas 52 semaines"; },
     cond:null },
 
+  /* v29.08 — Le seul critere qui ne regarde pas les cours : il interroge les
+     fiches deja produites (WARREN_DB). Repli par defaut sur « analysee, quel
+     que soit le verdict » : c'est ce qu'on veut le plus souvent. */
+  { id:"warren", grp:"Analyse de Warren", label:"🎩 Analysée par Warren",
+    accent:true, multi:true,
+    def:{ min:0, verdicts:[] },
+    fields:[ {k:"min", label:"note au moins", type:"num", suf:"/5"} ],
+    test:function(r,p){
+      var a = warrenGet(r.sym);
+      if(!a) return false;
+      if(p.verdicts && p.verdicts.length && p.verdicts.indexOf(a.verdict) < 0) return false;
+      return (a.composite==null?0:a.composite) >= (+p.min||0);
+    },
+    val:function(r){
+      var a = warrenGet(r.sym);
+      if(!a) return "non analysée";
+      var v = warrenVerdict(a.verdict);
+      return v.mark+" "+v.lbl+(a.composite!=null?" "+(Math.round(a.composite*10)/10).toLocaleString("fr-FR")+"/5":"");
+    },
+    text:function(p){
+      var vs = (p.verdicts&&p.verdicts.length) ? p.verdicts.map(function(k){ return warrenVerdict(k).lbl; }).join(", ") : "tous verdicts";
+      return "Fiche d'Analyse de Warren — "+vs+(+p.min>0 ? ", note ≥ "+p.min+"/5" : "");
+    },
+    cond:null },
+
   { id:"sector", grp:"Contexte", label:"Secteur",
     def:{ sel:[] }, multi:true, fields:[],
     test:function(r,p){ return !p.sel || !p.sel.length || p.sel.indexOf(r.sec) >= 0; },
@@ -8308,6 +8333,8 @@ const SCR_BY_ID = {}; SCR_CRIT.forEach(function(c){ SCR_BY_ID[c.id]=c; });
 
 const SCR_SORTS = [
   ["fit",   "Pertinence"],
+  ["wDesc", "Note de Warren ↓"],
+  ["wAsc",  "Note de Warren ↑"],
   ["d200",  "Écart à la MM200w"],
   ["rsi",   "RSI croissant"],
   ["chop",  "Choppiness décroissant"],
@@ -8322,7 +8349,7 @@ const SCR_SORTS = [
 var SCR_CACHE = null;   // { data, at }
 const SCR_CACHE_TTL = 600000;
 
-function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
+function ScreenerPanel({ tracked, onAdd, onWarren, warrenDb, eur=false, usdEur=0.86 }){
   const [data, setData]   = useState(SCR_CACHE ? SCR_CACHE.data : null);   // {cols, rows, gen, ts, missing, total, stale}
   const [err, setErr]     = useState("");
   const [busy, setBusy]   = useState(null);     // {done, total} pendant la construction
@@ -8445,7 +8472,20 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
       if(y==null) return -1;
       return dir*(x-y);
     }; };
-    if(sort==="sym")       out.sort(function(a,b){ return String(a.sym).localeCompare(String(b.sym)); });
+    // Note de Warren : une valeur sans fiche n'a pas de note, elle va en fin de
+    // liste dans les DEUX sens — sinon le tri croissant remonterait les valeurs
+    // jamais analysées, qui sont justement celles qu'on ne veut pas voir ici.
+    var wNote = function(r){ var a = warrenGet(r.sym); return (a && a.composite!=null) ? a.composite : null; };
+    var cmpWarren = function(dir){ return function(a,b){
+      var x = wNote(a), y = wNote(b);
+      if(x==null && y==null) return 0;
+      if(x==null) return 1;
+      if(y==null) return -1;
+      return dir*(x-y);
+    }; };
+    if(sort==="wDesc")     out.sort(cmpWarren(-1));
+    else if(sort==="wAsc") out.sort(cmpWarren(1));
+    else if(sort==="sym")  out.sort(function(a,b){ return String(a.sym).localeCompare(String(b.sym)); });
     else if(sort==="rsi")  out.sort(cmpNum("rsi",1));
     else if(sort==="chop") out.sort(cmpNum("chop",-1));
     else if(sort==="dd52") out.sort(cmpNum("dd52",1));
@@ -8467,7 +8507,9 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
       out.sort(function(a,b){ return score(b)-score(a); });
     }
     return out;
-  }, [rows, crit, sort, q]);
+    // warrenDb est dans les dépendances : sans lui, le critère « Analysée par
+    // Warren » et le tri par note resteraient figés sur l'état d'avant analyse.
+  }, [rows, crit, sort, q, warrenDb]);
 
   const nSel = Object.keys(sel).filter(function(k){ return sel[k]; }).length;
 
@@ -8494,6 +8536,17 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
         if(c.id!==id) return c;
         var patch = {}; patch[k] = v;
         return { id:id, p:Object.assign({}, c.p, patch) };
+      });
+    });
+  }
+  function toggleVerdict(k){
+    setCrit(function(prev){
+      return prev.map(function(a){
+        if(a.id!=="warren") return a;
+        var cur = (a.p.verdicts||[]).slice();
+        var i = cur.indexOf(k);
+        if(i>=0) cur.splice(i,1); else cur.push(k);
+        return Object.assign({}, a, { p:Object.assign({}, a.p, { verdicts:cur }) });
       });
     });
   }
@@ -8581,10 +8634,11 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
             <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
               {list.map(function(c){
                 var on = isOn(c.id);
+                var acc = c.accent ? C.gold : C.btc;
                 return (
                   <button key={c.id} onClick={function(){ toggleCrit(c.id); }}
-                    style={{background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:7,
-                            color:on?C.btc:C.text2,fontSize:10,fontWeight:on?800:600,padding:"6px 9px",cursor:"pointer",textAlign:"left"}}>
+                    style={{background:on?acc+"22":(c.accent?acc+"0e":C.bg2),border:"1px solid "+(on?acc:(c.accent?acc+"66":C.border)),borderRadius:7,
+                            color:on?acc:(c.accent?acc:C.text2),fontSize:10,fontWeight:on?800:(c.accent?700:600),padding:"6px 9px",cursor:"pointer",textAlign:"left"}}>
                     {on?"☑ ":"☐ "}{c.label}
                   </button>
                 );
@@ -8631,6 +8685,18 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
                         </div>
                       );
                     })}
+                    {c.id==="warren" && (
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {["pass","cond","gray","reject"].map(function(k){
+                          var v = warrenVerdict(k), onV = (a.p.verdicts||[]).indexOf(k)>=0;
+                          return <button key={k} onClick={function(){ toggleVerdict(k); }}
+                            style={{background:onV?v.col+"26":C.bg3,border:"1px solid "+(onV?v.col:C.border),borderRadius:6,
+                                    color:onV?v.col:C.text3,fontSize:9,fontWeight:onV?800:600,padding:"3px 7px",cursor:"pointer"}}>
+                            {v.mark} {v.lbl}
+                          </button>;
+                        })}
+                      </div>
+                    )}
                     {c.id==="sector" && (
                       <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
                         {sectors.map(function(s){
@@ -8691,6 +8757,18 @@ function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
             <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={function(){ setMt({ticker:r.sym,cat:"Action"}); }}>
               <div style={{display:"flex",alignItems:"baseline",gap:7}}>
                 <span style={{fontSize:13,fontWeight:800,color:C.text}}>{r.sym}</span>
+                {(function(){
+                  var wa = warrenGet(r.sym);
+                  if(!wa) return null;
+                  var wv = warrenVerdict(wa.verdict);
+                  return (
+                    <span title={wv.lbl+" — analysée le "+warrenDate(wa.ts)}
+                      style={{fontSize:9,fontWeight:800,color:wv.col,background:wv.col+"1e",border:"1px solid "+wv.col+"55",
+                              borderRadius:5,padding:"1px 5px",flexShrink:0,whiteSpace:"nowrap"}}>
+                      🎩 {wa.composite!=null ? (Math.round(wa.composite*10)/10).toLocaleString("fr-FR") : "—"}
+                    </span>
+                  );
+                })()}
                 <span style={{fontSize:10,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name||""}</span>
               </div>
               <div style={{fontSize:9,color:C.text3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -9311,7 +9389,126 @@ function WarrenDetail({ an }){
   );
 }
 
-function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
+/* ── v29.08 — Onglet « Analyses » ────────────────────────────────────────────
+   La liste des fiches déjà produites, classable. WARREN_DB est un cache module
+   (comme ICON_DB) : la base arrive quand même en prop, pour que React sache
+   qu'il faut re-rendre quand une analyse s'ajoute. */
+const WARREN_ORDER = { pass:3, cond:2, gray:1, reject:0 };
+
+function WarrenListPanel({ warrenDb, onTicker }){
+  const [sortK, setSortK]     = useState("note");
+  const [sortDir, setSortDir] = useState("desc");
+  const [openSym, setOpenSym] = useState(null);
+  const [flt, setFlt]         = useState("all");
+  const [q, setQ]             = useState("");
+
+  // Un premier appui trie en décroissant, un second bascule — sauf le nom, qui
+  // part de A vers Z. Même convention que la liste des trades (v28.95/96).
+  function pick(k){
+    if(k===sortK) setSortDir(sortDir==="desc"?"asc":"desc");
+    else { setSortK(k); setSortDir(k==="name"?"asc":"desc"); }
+  }
+
+  const all = useMemo(function(){
+    var db = warrenDb || WARREN_DB || {};
+    return Object.keys(db).map(function(k){ return db[k]; }).filter(Boolean);
+  }, [warrenDb]);
+
+  const counts = useMemo(function(){
+    var c = { all:all.length, pass:0, cond:0, gray:0, reject:0 };
+    all.forEach(function(a){ if(c[a.verdict]!=null) c[a.verdict]++; });
+    return c;
+  }, [all]);
+
+  const list = useMemo(function(){
+    var ql = q.trim().toUpperCase();
+    var out = all.filter(function(a){
+      if(flt!=="all" && a.verdict!==flt) return false;
+      if(!ql) return true;
+      var nm = (a.data && a.data.name) || "";
+      return String(a.sym||"").indexOf(ql)>=0 || nm.toUpperCase().indexOf(ql)>=0;
+    });
+    var d = sortDir==="desc" ? 1 : -1;
+    out.sort(function(a,b){
+      if(sortK==="name"){
+        return -d*String(a.sym||"").localeCompare(String(b.sym||""),"fr",{sensitivity:"base"});
+      }
+      if(sortK==="date")    return d*((b.ts||0)-(a.ts||0));
+      if(sortK==="verdict") return d*((WARREN_ORDER[b.verdict]||0)-(WARREN_ORDER[a.verdict]||0));
+      var x = a.composite==null?-1:a.composite, y = b.composite==null?-1:b.composite;
+      return d*(y-x);
+    });
+    return out;
+  }, [all, sortK, sortDir, flt, q]);
+
+  const Sort = function(props){ return (
+    <button onClick={props.onClick} style={{padding:"5px 9px",borderRadius:8,border:"1px solid "+(props.active?C.btc:C.border),cursor:"pointer",
+      fontSize:11,fontWeight:700,background:props.active?C.btc+"22":"transparent",color:props.active?C.btc:C.text3,
+      display:"inline-flex",alignItems:"center",gap:3,whiteSpace:"nowrap",flexShrink:0}}>
+      {props.label}
+      {props.active && <span style={{fontSize:10,lineHeight:1}}>{sortDir==="desc"?"↓":"↑"}</span>}
+    </button>
+  );};
+
+  if(!all.length){
+    return (
+      <div style={{textAlign:"center",color:C.text3,fontSize:12,padding:"36px 14px",background:C.bg1,borderRadius:12,border:"1px solid "+C.border,lineHeight:1.6}}>
+        Aucune analyse produite pour l'instant.<br/>
+        <span style={{fontSize:11}}>Lancez « 🎩 Analyse de Warren » depuis l'onglet Opportunités.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Répartition des verdicts, cliquable */}
+      <div style={{display:"flex",gap:5,marginBottom:9}}>
+        {[["all","Toutes",C.text2],["pass",null,null],["cond",null,null],["gray",null,null],["reject",null,null]].map(function(f){
+          var k = f[0], on = flt===k;
+          var v = k==="all" ? null : warrenVerdict(k);
+          var col = v ? v.col : C.text2;
+          var lbl = v ? v.mark : "Toutes";
+          return (
+            <button key={k} onClick={function(){ setFlt(k); }}
+              style={{flex:1,background:on?col+"22":C.bg2,border:"1px solid "+(on?col:C.border),borderRadius:8,
+                      padding:"6px 3px",color:on?col:C.text3,fontSize:10,fontWeight:on?800:600,cursor:"pointer"}}>
+              {lbl} {counts[k]}
+            </button>
+          );
+        })}
+      </div>
+
+      <input value={q} onChange={function(e){ setQ(e.target.value); }} placeholder="Rechercher un ticker ou un nom…"
+        style={{width:"100%",boxSizing:"border-box",background:C.bg3,border:"1px solid "+C.border,borderRadius:8,
+                color:C.text,fontSize:12,padding:"8px 10px",outline:"none",marginBottom:9}}/>
+
+      <div style={{display:"flex",gap:5,marginBottom:10,overflowX:"auto",paddingBottom:2}}>
+        <span style={{fontSize:10,color:C.text3,alignSelf:"center",flexShrink:0,marginRight:2}}>Trier</span>
+        <Sort label="Note"    active={sortK==="note"}    onClick={function(){ pick("note"); }}/>
+        <Sort label="Date"    active={sortK==="date"}    onClick={function(){ pick("date"); }}/>
+        <Sort label="Verdict" active={sortK==="verdict"} onClick={function(){ pick("verdict"); }}/>
+        <Sort label="Nom"     active={sortK==="name"}    onClick={function(){ pick("name"); }}/>
+      </div>
+
+      <div style={{fontSize:9,color:C.text3,marginBottom:8}}>
+        {list.length} fiche{list.length>1?"s":""}{flt!=="all" ? " · "+warrenVerdict(flt).lbl : ""}
+      </div>
+
+      {list.map(function(an){
+        return <WarrenCard key={an.sym} an={an} open={openSym===an.sym}
+                  onToggle={function(){ setOpenSym(openSym===an.sym?null:an.sym); }}
+                  onTicker={onTicker}/>;
+      })}
+
+      <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginTop:12,paddingTop:10,borderTop:"1px solid "+C.border}}>
+        Les fiches sont conservées dans la base <span style={{color:C.text2}}>gdb_warren</span>, sauvegardée
+        avec le reste. La dernière analyse de chaque valeur est gardée en entier, les précédentes en résumé.
+      </div>
+    </div>
+  );
+}
+
+function PageWatchlist({ list, onSave, onSaveWarren, warrenDb, eur=false, usdEur=0.86 }){
   const [prices, setPrices]   = useState({});
   const [loading, setLoading] = useState(false);
   const [modal, setModal]     = useState(null);   // null | "add" | "edit"
@@ -9333,6 +9530,7 @@ function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
   // v29.05 — l'etat vit ici, pas dans ScreenerPanel : aller voir une idee puis
   // revenir ne doit pas jeter une analyse qui a coute deux minutes.
   const [warren, setWarren]   = useState(false);
+  const nWarren = Object.keys(warrenDb || WARREN_DB || {}).length;
 
   const items = Array.isArray(list) ? list : [];
 
@@ -9619,6 +9817,7 @@ function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
           <div style={{fontSize:19,fontWeight:800,color:C.text,letterSpacing:0.5}}>Suivi</div>
           <div style={{fontSize:10,color:C.text3,marginTop:2}}>
             {sub==="screen" ? "Repérer des opportunités dans le S&P 500"
+             : sub==="warren" ? (nWarren ? nWarren+" valeur"+(nWarren>1?"s":"")+" passée"+(nWarren>1?"s":"")+" au crible de Warren" : "Aucune analyse produite")
                             : (items.length+" idée"+(items.length>1?"s":"")+" suivie"+(items.length>1?"s":"")+(nAlert?" · "+nAlert+" en alerte":""))}
           </div>
         </div>
@@ -9632,7 +9831,7 @@ function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
 
       {/* Onglets de la page */}
       <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["screen","Opportunités"],["ideas","Mes idées ("+items.length+")"]].map(function(t){
+        {[["screen","Opportunités"],["warren","Analyses ("+nWarren+")"],["ideas","Mes idées ("+items.length+")"]].map(function(t){
           var on = sub===t[0];
           return <button key={t[0]} onClick={function(){ setSub(t[0]); }}
             style={{flex:1,background:on?C.btc+"22":C.bg2,border:"1px solid "+(on?C.btc:C.border),borderRadius:9,
@@ -9647,8 +9846,13 @@ function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
       {/* Les deux vues restent montées : aller voir une idée puis revenir au
           screener ne doit pas effacer les critères réglés ni la sélection. */}
       <div style={{display:sub==="screen"?"block":"none"}}>
-        <ScreenerPanel tracked={items} onAdd={addFromScreener} onWarren={function(){ setWarren(true); }} eur={eur} usdEur={usdEur}/>
+        <ScreenerPanel tracked={items} onAdd={addFromScreener} onWarren={function(){ setWarren(true); }}
+          warrenDb={warrenDb} eur={eur} usdEur={usdEur}/>
       </div>
+
+      {sub==="warren" && (
+        <WarrenListPanel warrenDb={warrenDb} onTicker={function(sym){ setMt({ ticker:sym, cat:"Action" }); }}/>
+      )}
 
       <div style={{display:sub==="ideas"?"block":"none"}}>
 
@@ -15479,7 +15683,7 @@ function App(){
         {tab===3 && <PageGDB key={"gdb"+chartPrefsVer} chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad} btcReco={liveBtcReco} onSaveBtcReco={saveBtcReco}/>}
-        {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} onSaveWarren={saveWarren} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
+        {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} onSaveWarren={saveWarren} warrenDb={liveWarren} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

@@ -1409,6 +1409,45 @@ v29.07   FMP — le 401 ouvert depuis la v28.85 est résolu : la clé portait un
          en v29.05, est supprimée : elle a rendu son verdict.
 
 
+v29.08   Suivi — onglet « Analyses », note de Warren dans les lignes du
+         screener, et filtre par verdict
+         Les fiches produites étaient conservées mais ne se consultaient que
+         valeur par valeur, depuis le modal titre. Trois ajouts les remettent
+         au centre de l'onglet Suivi.
+
+         ▸ Un troisième sous-onglet, « Analyses (n) », entre Opportunités et
+           Mes idées. La liste des fiches, classable par note, date, verdict
+           ou nom — un premier appui trie en décroissant, un second bascule,
+           sauf le nom qui part de A vers Z (même convention que la liste des
+           trades). Cinq compteurs cliquables en tête (Toutes / ✅ / ⚠️ / ❓ /
+           ❌) filtrent par verdict, et une recherche par ticker ou par nom.
+           Chaque ligne se déplie sur la fiche complète — c'est le même
+           composant WarrenCard que dans le modal d'analyse, pas une copie.
+           Appuyer sur le logo ouvre le graphe.
+
+         ▸ La note apparaît dans les cadres des valeurs de l'onglet
+           Opportunités, en pastille « 🎩 4,3 », dans la couleur du verdict :
+           vert pour Passe, orange pour Sous conditions, gris pour Zone grise,
+           rouge pour Rejet. Au survol, le verdict en toutes lettres et la date
+           d'analyse.
+
+         ▸ Un critère « 🎩 Analysée par Warren » dans les filtres, dans sa
+           propre famille placée en tête et dans sa propre couleur (l'or des
+           étoiles, pas l'orange des autres critères). Il ne laisse que les
+           valeurs ayant une fiche, et se règle par verdict — quatre puces aux
+           couleurs de leur verdict — et par note minimale. Deux tris viennent
+           avec : « Note de Warren ↓ » et « ↑ ».
+
+         ⚠ Une valeur sans fiche n'a pas de note : elle est renvoyée en fin de
+           liste dans les DEUX sens de tri. Trier par note croissante doit
+           remonter les moins bien notées, pas les jamais analysées.
+
+         Détail qui comptait : WARREN_DB est un cache module, comme ICON_DB.
+         La base descend maintenant en prop jusqu'à ScreenerPanel et figure
+         dans les dépendances du useMemo de filtrage — sans quoi le critère et
+         les tris seraient restés figés sur l'état d'avant analyse.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

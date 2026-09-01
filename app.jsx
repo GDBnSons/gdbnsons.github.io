@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.05";
+const APP_VERSION = "v29.06";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8743,6 +8743,7 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
   const [aiErr, setAiErr] = useState("");
   const [openSym, setOpenSym] = useState(null);
   const [showFail, setShowFail] = useState(false);
+  const [deepBusy, setDeepBusy] = useState(null);   // {done, total} pendant l'etage 3
   const [saved, setSaved] = useState("");
   const building = useRef(false);
 
@@ -8883,17 +8884,62 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
   }
 
   // ── Étage 3 : la checklist par Claude ───────────────────────────────────
+  const WARREN_BATCH = 4;   // doit rester <= au plafond du worker
   function runDeep(){
     var syms = Object.keys(sel).filter(function(k){ return sel[k]; }).slice(0,10);
     if(!syms.length) return;
     var quotes = {};
     rows.forEach(function(r){ if(sel[r.sym] && r.px != null) quotes[r.sym] = r.px; });
     setStep("deep"); setAiErr(""); setRes(null);
-    cfPost("/warren/analyze", { tickers:syms, quotes:quotes, deep:true }, { timeout:180000 })
-      .then(function(r){ return r.json(); })
+
+    // Les valeurs partent par lots de quatre, enchainés : une requete qui
+    // analyse dix societes d'un coup depasse le delai de Cloudflare.
+    var groups = [];
+    for(var i=0;i<syms.length;i+=WARREN_BATCH) groups.push(syms.slice(i,i+WARREN_BATCH));
+    setDeepBusy({ done:0, total:groups.length });
+
+    var all = [], parts = [], fails = [], done = 0;
+    var chain = groups.reduce(function(p, g){
+      return p.then(function(){
+        return cfPost("/warren/analyze", { tickers:g, quotes:quotes, deep:true }, { timeout:150000 })
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if(d && d.ok && Array.isArray(d.analyses)){ d.analyses.forEach(function(a){ all.push(a); }); parts.push(d); }
+            else fails.push({ g:g, d:d });
+          })
+          .catch(function(e){ fails.push({ g:g, d:{ error:(e && e.message) || String(e) } }); })
+          .then(function(){ done++; setDeepBusy({ done:done, total:groups.length }); });
+      });
+    }, Promise.resolve());
+
+    chain.then(function(){
+      setDeepBusy(null);
+      var d;
+      if(all.length){
+        var u = { input_tokens:0, output_tokens:0 };
+        parts.forEach(function(p){ if(p.usage){ u.input_tokens+=p.usage.input_tokens||0; u.output_tokens+=p.usage.output_tokens||0; } });
+        d = { ok:true, ai:true, ts:Date.now(), gen:(parts[0]||{}).gen, model:(parts[0]||{}).model,
+              usage:u, analyses:all };
+        if(fails.length) d.partial = fails.map(function(f){ return { syms:f.g, error:(f.d&&f.d.error)||"echec" }; });
+      } else {
+        d = { ok:false, error:(fails[0] && fails[0].d && fails[0].d.error) || "analyse indisponible",
+              detail:(fails[0] && fails[0].d && fails[0].d.detail) || (fails[0] ? [{ syms:fails[0].g }] : null) };
+      }
+      return d;
+    })
       .then(function(d){
         if(!d || !d.ok || !Array.isArray(d.analyses)){
-          setAiErr((d && d.error) || "analyse indisponible");
+          // Dire ce qui s'est passe, pas « indisponible » : stop_reason distingue
+          // une sortie coupee d'un refus, et le statut HTTP d'une panne de cle.
+          var msg = (d && d.error) || "analyse indisponible";
+          var dt = d && d.detail && d.detail[0];
+          if(dt){
+            if(dt.status) msg += " (HTTP "+dt.status+")";
+            if(dt.stop_reason==='max_tokens') msg += " — réponse coupée par la limite de jetons";
+            else if(dt.stop_reason) msg += " — arrêt : "+dt.stop_reason;
+            if(dt.syms && dt.syms.length) msg += " · "+dt.syms.join(", ");
+          }
+          setAiErr(msg);
           setStep("shortlist"); return;
         }
         setRes(d);
@@ -9099,8 +9145,14 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
             <div style={{fontSize:12,color:C.text,fontWeight:700}}>Analyse en cours…</div>
             <div style={{fontSize:10,color:C.text3,marginTop:8,lineHeight:1.6}}>
               {nSel} société{nSel>1?"s":""} — six portes, quatre regards, trois scénarios de prix.<br/>
-              Compter une à deux minutes.
+              {deepBusy ? ("Lot "+Math.min(deepBusy.done+1,deepBusy.total)+" sur "+deepBusy.total+" — compter une minute par lot.")
+                        : "Compter une à deux minutes."}
             </div>
+            {deepBusy && (
+              <div style={{height:3,background:C.bg2,borderRadius:2,overflow:"hidden",margin:"14px auto 0",maxWidth:220}}>
+                <div style={{height:"100%",width:(deepBusy.total?Math.round(deepBusy.done/deepBusy.total*100):0)+"%",background:C.btc,transition:"width .3s"}}/>
+              </div>
+            )}
           </div>
         )}
 
@@ -9110,7 +9162,14 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
             <div style={{fontSize:10,color:C.text3,margin:"6px 0 10px"}}>
               {res.analyses.length} fiche{res.analyses.length>1?"s":""} · {warrenDate(res.ts)}
               {res.usage ? " · "+((res.usage.input_tokens||0)+(res.usage.output_tokens||0)).toLocaleString("fr-FR")+" jetons" : ""}
+              {res.model ? " · "+res.model : ""}
             </div>
+            {!!(res.partial && res.partial.length) && (
+              <div style={{fontSize:10,color:C.orange,background:C.orange+"11",border:"1px solid "+C.orange+"44",borderRadius:8,padding:"8px 10px",marginBottom:10,lineHeight:1.5}}>
+                Un lot n'a pas abouti : {res.partial.map(function(p){ return (p.syms||[]).join(", "); }).join(" · ")}.
+                Les autres fiches sont complètes — relancez pour ces valeurs seules.
+              </div>
+            )}
             {saved && <div style={{fontSize:11,color:C.green,background:C.green+"14",border:"1px solid "+C.green+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>✓ {saved}</div>}
             {res.analyses.map(function(an){
               return <WarrenCard key={an.sym} an={an} open={openSym===an.sym}

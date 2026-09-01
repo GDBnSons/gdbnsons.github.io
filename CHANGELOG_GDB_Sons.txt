@@ -1332,6 +1332,41 @@ v29.05   Suivi — « Analyse de Warren » : l'entonnoir de Berkshire, et une
          d'IP ou un quota épuisé donneraient plutôt 403 ou 429.
 
 
+v29.06   Suivi — Analyse de Warren : réponse illisible corrigée (sorties
+         structurées, lots de 4) et diagnostic FMP accessible
+         L'étage 3 de la v29.05 échouait avec « l'IA renvoie un résultat
+         illisible ». Ce n'était pas le modèle : dix sociétés en un seul appel
+         saturaient max_tokens, la réponse était coupée en plein JSON, et la
+         relecture échouait. Trois corrections :
+
+         ▸ Sorties structurées. L'appel passe désormais un json_schema dans
+           output_config.format : le modèle est CONTRAINT de rendre la forme
+           attendue, au lieu qu'on la lui demande en prose. Pas d'en-tête beta.
+           Le découpage accolade-à-accolade reste en second rideau.
+         ▸ Lots de quatre. C'est l'app qui découpe et enchaîne les appels, avec
+           barre de progression, comme elle le fait déjà pour la base du
+           screener. Le worker plafonne à 4 valeurs par requête : dix d'un coup
+           dépassaient aussi le délai de Cloudflare et seraient revenues en 524.
+           Un lot en échec n'emporte plus les autres — les fiches abouties sont
+           affichées et le lot manquant est nommé, avec ses tickers.
+         ▸ max_tokens passe de 8 000 à 16 000, et nlClaude remonte stop_reason.
+           Sans lui, une sortie tronquée était indiscernable d'un modèle qui
+           répond mal. Le modal affiche maintenant le motif exact : « réponse
+           coupée par la limite de jetons », le statut HTTP, et les valeurs
+           concernées.
+
+         Le modèle passe à claude-opus-5 (surchargeable par le champ `model` du
+         corps de requête). Le nom du modèle et le nombre de jetons consommés
+         s'affichent en tête des fiches.
+
+         ⚠ La route de diagnostic /fmp-debug est déplacée AVANT la barrière
+           d'authentification globale et accepte ?key=, comme les routes
+           /newsletter/*. Elle reste protégée — la clé est vérifiée — mais elle
+           devient ouvrable depuis un navigateur, ce qui évite d'avoir à
+           composer un appel avec un en-tête. Toujours à supprimer une fois le
+           verdict FMP rendu.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

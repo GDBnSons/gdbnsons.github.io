@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.06";
+const APP_VERSION = "v29.07";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -3057,7 +3057,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 {warrenOpen && (
                   <div style={{background:C.bg1,border:`1px solid ${C.border}`,borderRadius:10,paddingTop:2}}>
                     <div style={{fontSize:9,color:C.text3,padding:"8px 11px 0"}}>
-                      Analysée le {warrenDate(wan.ts)} · {wan.src==="fmp10" ? (wan.yrs||10)+" ans · FMP" : (wan.yrs||"?")+" ans · Yahoo"} · information {wan.info||"?"}
+                      Analysée le {warrenDate(wan.ts)} · {(wan.yrs||"?")+" ans · Yahoo"} · information {wan.info||"?"}
                     </div>
                     <WarrenDetail an={wan}/>
                     <div style={{fontSize:8,color:C.text3,lineHeight:1.5,padding:"0 11px 10px"}}>
@@ -9193,7 +9193,7 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
    Même composant dans le modal d'analyse et dans l'accordéon du modal ticker. */
 function WarrenCard({ an, open, onToggle, onTicker, compact=false }){
   var v = warrenVerdict(an.verdict);
-  var srcTxt = an.src==="fmp10" ? (an.yrs||10)+" ans · FMP" : (an.yrs||"?")+" ans · Yahoo";
+  var srcTxt = (an.yrs||"?")+" ans · Yahoo";
   return (
     <div style={{background:C.bg1,border:"1px solid "+(open?v.col+"66":C.border),borderRadius:11,marginBottom:7,overflow:"hidden"}}>
       <div onClick={onToggle} style={{display:"flex",alignItems:"center",gap:9,padding:"10px 11px",cursor:"pointer"}}>
@@ -9413,7 +9413,7 @@ function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
         thesis: "Analyse de Warren du " + today + " — " + v.mark + " " + v.lbl
               + (an.composite!=null ? " " + (Math.round(an.composite*10)/10).toLocaleString("fr-FR") + "/5" : "")
               + " · information " + (an.info||"?")
-              + " · " + (an.src==="fmp10" ? (an.yrs||10)+" ans (FMP)" : (an.yrs||"?")+" ans (Yahoo)")
+              + " · " + (an.yrs||"?") + " ans (Yahoo)"
               + (an.thesis ? "\n\n"+an.thesis : "")
               + (lines.length ? "\n\nLes six portes :\n"+lines.join("\n") : "")
               + (an.mirror ? "\n\nTest du miroir : "+an.mirror : ""),

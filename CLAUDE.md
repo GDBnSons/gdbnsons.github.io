@@ -91,17 +91,37 @@ réaffiche la saisie, donc changer le secret ne peut jamais bloquer un appareil.
 Personne d'autre que l'utilisateur ne connaît cette phrase — elle n'est pas
 récupérable. En cas de perte, en reposer une nouvelle sur Cloudflare.
 
-## Points ouverts
+## FMP — le 401 est résolu (v29.07, worker v163)
 
-- **FMP répond 401 aux appels du worker** alors que la même clé fonctionne
-  depuis un poste local, pour tous les tickers. Antérieur à la v28.85, ce n'est
-  pas une régression. Pistes : blocage des IP de datacenter, ou quota de
-  250 appels/jour épuisé par le cron horaire. Attention : `_fmpDebug.hasKey`
-  est un `false` écrit en dur avec le commentaire « FMP désactivé » — un
-  vestige, pas un diagnostic.
-  Les **logos ne dépendent plus de cette route** depuis la v28.91 :
-  `tickerLogoUrl()` construit l'URL à partir du seul ticker sur le CDN public
+Le secret `FMP_API_KEY` porte **un caractère blanc parasite** : 33 caractères
+bruts pour 32 utiles. Sans `trim()`, FMP répond « Invalid API KEY » à *tous*
+les appels. Mesuré côté worker : la clé brute donne 401, la même clé passée à
+`trim()` donne 200 avec les données. Ce n'était donc ni un blocage d'IP de
+datacenter, ni le quota — les deux pistes notées jusqu'ici étaient fausses.
+
+`fmpGet()` applique désormais `trim()`. Le secret lui-même reste sale : le
+reposer proprement (`wrangler secret put FMP_API_KEY`) est facultatif.
+
+- Les endpoints **`/api/v3/` sont morts** : 403 « Legacy Endpoint » depuis le
+  31 août 2025, sauf abonnement antérieur. Le repli v3 de `fmpGet` a été
+  supprimé — il ne pouvait que coûter une sous-requête et masquer l'erreur.
+  **N'écrire que des chemins `/stable/`.**
+- **Ce que le plan sert, mesuré** (sonde `/fmp-debug`, supprimée depuis) :
+  `quote` → 200. En revanche `ratios`, `key-metrics`, `income-statement` et
+  `cash-flow-statement` refusent `limit > 5` (402), et `sp500-constituent` est
+  un **endpoint restreint** (402). Quota 250 appels/jour.
+- **Il n'y a donc pas d'historique long à aller chercher chez FMP.** Yahoo sert
+  déjà 4 exercices ; le plafond de 5 ne vaut pas la dépendance. L'Analyse de
+  Warren tourne entièrement sur Yahoo — ne pas retenter l'enrichissement sans
+  un plan payant. La liste des composants du S&P 500 vient de `scrUniverse()`
+  (CSV datahub, gratuit), pas de FMP.
+- FMP ne sert plus que `/stable/quote`, pour `/market/movers`.
+- Attention : `_fmpDebug.hasKey` est un `false` écrit en dur avec le
+  commentaire « FMP désactivé » — un vestige, pas un diagnostic.
+- Les **logos ne dépendent pas de FMP** : depuis la v28.91 `tickerLogoUrl()`
+  construit l'URL à partir du seul ticker sur le CDN public
   `images.financialmodelingprep.com/symbol/<SYM>.png`, qui n'exige pas de clé.
+  L'appel `/stable/profile` a quitté `/yahoo-chart` en v29.05.
 
 ## Conventions
 

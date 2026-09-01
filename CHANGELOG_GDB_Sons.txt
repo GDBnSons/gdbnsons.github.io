@@ -1367,6 +1367,48 @@ v29.06   Suivi — Analyse de Warren : réponse illisible corrigée (sorties
            verdict FMP rendu.
 
 
+
+
+v29.07   FMP — le 401 ouvert depuis la v28.85 est résolu : la clé portait un
+         espace. Mais le plan gratuit ne donne pas l'historique long
+         La route de diagnostic a tranché deux questions d'un coup.
+
+         ▸ Le 401. Le secret FMP_API_KEY fait 33 caractères pour 32 utiles :
+           un caractère blanc en tête. Sans trim(), FMP répond « Invalid API
+           KEY » à TOUS les appels. Mesuré côté worker : clé brute → 401, même
+           clé passée à trim() → 200 avec les données. Ce n'était donc ni un
+           blocage des IP de datacenter, ni le quota horaire — les deux pistes
+           inscrites dans CLAUDE.md depuis des mois étaient fausses.
+           fmpGet() applique désormais trim(). Le secret lui-même reste sale ;
+           le reposer proprement est facultatif.
+         ▸ Les endpoints /api/v3/ sont morts : 403 « Legacy Endpoint » depuis
+           le 31 août 2025, sauf abonnement antérieur. Le repli v3 de fmpGet
+           est supprimé — il ne pouvait que coûter une sous-requête pour rien
+           et masquer la vraie erreur. N'écrire que des chemins /stable/.
+
+         ⚠ L'enrichissement 10 ans de l'Analyse de Warren est RETIRÉ, et c'est
+           la conclusion qui compte : sur ce plan, ratios, key-metrics,
+           income-statement et cash-flow-statement répondent tous 402 « les
+           valeurs de limit doivent être entre 0 et 5 ». Yahoo en sert déjà 4.
+           Le gain maximal était donc d'UN exercice, contre une dépendance au
+           quota de 250 appels/jour, de la latence et un mode de panne de
+           plus. Mauvais échange. L'étage 2 tourne sur les 4 exercices Yahoo,
+           et le dit. Seul un plan payant débloquerait les 10 ans.
+
+         Deux réparations au passage, tombées du même diagnostic :
+         · /market/movers était cassé par la même clé sale depuis des mois,
+           sans que rien ne le signale — fmpGet renvoyait un tableau vide en
+           silence. Il retient maintenant la vraie erreur.
+         · /stable/sp500-constituent est un endpoint RESTREINT (402) sur ce
+           plan. La liste des composants vient désormais de scrUniverse(),
+           que le screener construit gratuitement depuis le CSV datahub :
+           même univers, aucun appel FMP, aucun quota consommé.
+
+         FMP ne sert plus que /stable/quote (vérifié 200), pour les variations
+         du jour de /market/movers. La route de diagnostic /fmp-debug, posée
+         en v29.05, est supprimée : elle a rendu son verdict.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

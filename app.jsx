@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.08";
+const APP_VERSION = "v29.09";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8301,7 +8301,7 @@ const SCR_CRIT = [
      fiches deja produites (WARREN_DB). Repli par defaut sur « analysee, quel
      que soit le verdict » : c'est ce qu'on veut le plus souvent. */
   { id:"warren", grp:"Analyse de Warren", label:"🎩 Analysée par Warren",
-    accent:true, multi:true,
+    accent:true, multi:true, noMetric:true,
     def:{ min:0, verdicts:[] },
     fields:[ {k:"min", label:"note au moins", type:"num", suf:"/5"} ],
     test:function(r,p){
@@ -8745,8 +8745,15 @@ function ScreenerPanel({ tracked, onAdd, onWarren, warrenDb, eur=false, usdEur=0
       )}
       {shown.slice(0,150).map(function(r){
         var isTracked = !!trackedSet[r.sym], picked = !!sel[r.sym];
-        var metrics = crit.length ? crit.map(function(a){ return SCR_BY_ID[a.id] ? SCR_BY_ID[a.id].val(r) : null; }).filter(Boolean)
-                                  : [scrSigned(r.d200,1,"% MM200w"), "RSI "+scrN(r.rsi,1), "CHOP "+scrN(r.chop,1)];
+        // Les critères marqués noMetric ne s'écrivent pas ici : la note de Warren
+        // est déjà dans sa pastille, la répéter en toutes lettres fait doublon.
+        var metrics = crit.length ? crit.map(function(a){
+                                      var mc = SCR_BY_ID[a.id];
+                                      return (mc && !mc.noMetric) ? mc.val(r) : null;
+                                    }).filter(Boolean) : [];
+        // Si Warren était le seul critère actif, on retombe sur les repères
+        // habituels plutôt que de laisser la ligne vide.
+        if(!metrics.length) metrics = [scrSigned(r.d200,1,"% MM200w"), "RSI "+scrN(r.rsi,1), "CHOP "+scrN(r.chop,1)];
         return (
           <div key={r.sym} style={{display:"flex",alignItems:"center",gap:9,background:C.bg1,
                 border:"1px solid "+(picked?C.btc+"88":C.border),borderRadius:10,padding:"9px 11px",marginBottom:6}}>
@@ -8772,7 +8779,7 @@ function ScreenerPanel({ tracked, onAdd, onWarren, warrenDb, eur=false, usdEur=0
                 <span style={{fontSize:10,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name||""}</span>
               </div>
               <div style={{fontSize:9,color:C.text3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {(r.sec?r.sec+" · ":"")+metrics.join(" · ")}
+                {[r.sec].concat(metrics).filter(Boolean).join(" · ")}
               </div>
               {isTracked && <div style={{fontSize:8,color:C.green,marginTop:2}}>déjà dans mes idées</div>}
             </div>

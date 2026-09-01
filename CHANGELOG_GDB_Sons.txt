@@ -1448,6 +1448,24 @@ v29.08   Suivi — onglet « Analyses », note de Warren dans les lignes du
          les tris seraient restés figés sur l'état d'avant analyse.
 
 
+v29.09   Opportunités — la note de Warren ne s'écrit plus qu'une fois
+         Quand le critère « Analysée par Warren » était actif, la ligne
+         portait deux fois la même information : la pastille « 🎩 4,3 » à côté
+         du ticker, et « ✅ Passe 4,3/5 » dans le texte des mesures, juste en
+         dessous. Seule la pastille reste.
+
+         Le critère porte désormais un drapeau noMetric : sa mesure sort de la
+         ligne de texte, mais val() est inchangé — la thèse rédigée par
+         addFromScreener continue donc de consigner le verdict et la note du
+         jour du repérage, ce qui est le seul endroit où l'écrire en toutes
+         lettres a du sens.
+
+         Deux corollaires : si Warren est le seul critère actif, la ligne
+         retombe sur les repères habituels (MM200w, RSI, choppiness) au lieu
+         de rester vide ; et le secteur ne traîne plus de séparateur orphelin
+         quand aucune mesure ne le suit.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

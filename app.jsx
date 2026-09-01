@@ -290,6 +290,63 @@ let ICON_DB = {};
 // Compatibilité : CUSTOM_ICONS = alias en lecture seule sur ICON_DB.user
 // (pour le Proxy TICKER_ICONS existant)
 let CUSTOM_ICONS = {}; // maintenu en sync avec ICON_DB via syncCustomIcons()
+/* ── v29.05 — Analyses « Analyse de Warren », conservées par ticker ─────────
+   { SYM: { ts, gen, src, yrs, verdict, composite, info, gates[], masters{},
+            moat, risks[], scenarios{}, mirror, thesis, data{},
+            prev:[{ts, verdict, composite}] } }
+   Cache module hydraté depuis la base gdb_warren, sur le modèle d'ICON_DB : le
+   modal ticker peut ainsi retrouver l'analyse d'une valeur sans qu'on fasse
+   passer une prop par ses huit sites d'appel.
+   La base part dans chaque sauvegarde quotidienne — d'où les bornes : la fiche
+   complète n'est gardée que pour la DERNIÈRE analyse de chaque ticker, les
+   précédentes sont réduites à trois champs, et au-delà de 100 tickers on évince
+   les plus anciennes. */
+let WARREN_DB = {};
+const WARREN_MAX_TICKERS = 100;
+const WARREN_MAX_PREV    = 5;
+function warrenGet(ticker){ return WARREN_DB[String(ticker||"").toUpperCase()] || null; }
+function warrenPut(an){
+  var sym = String(an && an.sym || "").toUpperCase();
+  if(!sym) return;
+  var old = WARREN_DB[sym];
+  var prev = (old && old.prev) ? old.prev.slice() : [];
+  if(old && old.ts && old.ts !== an.ts){
+    prev.unshift({ ts:old.ts, verdict:old.verdict, composite:old.composite });
+    prev = prev.slice(0, WARREN_MAX_PREV);
+  }
+  WARREN_DB[sym] = Object.assign({}, an, { sym:sym, prev:prev });
+  var keys = Object.keys(WARREN_DB);
+  if(keys.length > WARREN_MAX_TICKERS){
+    keys.sort(function(a,b){ return (WARREN_DB[a].ts||0) - (WARREN_DB[b].ts||0); });
+    keys.slice(0, keys.length - WARREN_MAX_TICKERS).forEach(function(k){ delete WARREN_DB[k]; });
+  }
+}
+function loadWarrenDb(obj){
+  WARREN_DB = {};
+  if(!obj || typeof obj !== "object") return;
+  Object.keys(obj).forEach(function(k){
+    var v = obj[k];
+    if(v && typeof v === "object") WARREN_DB[String(k).toUpperCase()] = v;
+  });
+}
+function warrenDate(ts){
+  if(!ts) return "—";
+  try{ return new Date(ts).toLocaleDateString("fr-FR"); }catch(e){ return "—"; }
+}
+// Verdicts : libellé, couleur et pastille, partagés par le modal d'analyse et
+// par l'accordéon du modal ticker.
+const WARREN_VERDICTS = {
+  pass:   { lbl:"Passe",           mark:"✅", col:"#22C55E" },
+  cond:   { lbl:"Sous conditions", mark:"⚠️", col:"#F59E0B" },
+  gray:   { lbl:"Zone grise",      mark:"❓", col:"#6B7280" },
+  reject: { lbl:"Rejet",           mark:"❌", col:"#EF4444" },
+};
+function warrenVerdict(v){ return WARREN_VERDICTS[v] || WARREN_VERDICTS.gray; }
+function warrenStars(n){
+  var k = Math.max(0, Math.min(5, Math.round(+n || 0)));
+  return "★★★★★".slice(0, k) + "☆☆☆☆☆".slice(0, 5-k);
+}
+
 // Tickers EU dont le prix est en € → à convertir en $ après fetch
 const EUR_YAHOO_TICKERS_SET = new Set(["AVIO","AI","GOLD"]);
 
@@ -833,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.04";
+const APP_VERSION = "v29.05";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -962,7 +1019,7 @@ const LSV9_KEYS = [
   "gdb_portfolio","gdb_crypto","gdb_stocks","gdb_bank",
   "gdb_yfmap","gdb_icons",
   "gdb_inv",
-  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants","gdb_watchlist","gdb_btc_reco",
+  "gdb_futures","gdb_ibkr_annex","gdb_spot_excl","gdb_alloc_targets","gdb_hf_read","gdb_fund_comp","gdb_home_hist","gdb_gold_hist","gdb_quadrants","gdb_watchlist","gdb_btc_reco","gdb_warren",
 ];
 function lsv9ReadAll(){ try{ const v=localStorage.getItem(LS_V9_KEY); return v?JSON.parse(v):{}; }catch{ return {}; } }
 function lsv9WriteAll(obj){ try{ localStorage.setItem(LS_V9_KEY, JSON.stringify(obj)); return true; }catch{ return false; } }
@@ -1985,6 +2042,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
   const [holdingsOpen, setHoldingsOpen] = useState(false);
   const [ratioInfo, setRatioInfo] = useState(null); // ratio dont la bulle est ouverte
   const [ratioOpen, setRatioOpen] = useState(false);
+  const [warrenOpen, setWarrenOpen] = useState(false); // v29.05 — fiche Analyse de Warren
   const [ins, setIns] = useState(null);
   const [insL, setInsL] = useState(false);
   const [insOpen, setInsOpen] = useState(false);
@@ -2973,6 +3031,40 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                     }
                   </div>
                 ))}
+              </div>
+            );
+          })()}
+
+          {/* v29.05 — Analyse de Warren : la fiche conservée pour cette valeur.
+              Le bloc n'existe que si l'analyse existe — pas de bouton mort pour
+              une valeur jamais passée par l'entonnoir. */}
+          {(function(){
+            const wan = warrenGet(ticker);
+            if(!wan) return null;
+            const wv = warrenVerdict(wan.verdict);
+            const wsc = wan.composite!=null ? (Math.round(wan.composite*10)/10).toLocaleString("fr-FR")+"/5" : "";
+            return (
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setWarrenOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:warrenOpen?C.btc+"15":C.bg3,border:`1px solid ${warrenOpen?C.btc+"88":C.border}`,borderRadius:8,cursor:"pointer",padding:"8px 12px",textAlign:"left",marginBottom:warrenOpen?8:0}}>
+                  <span style={{fontSize:11,color:warrenOpen?C.btc:C.text,fontWeight:700,letterSpacing:0.3}}>🎩 Analyse de Warren</span>
+                  <span style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+                    <span style={{fontSize:10,fontWeight:700,color:wv.col}}>{wv.mark} {wv.lbl}</span>
+                    {wsc && <span style={{fontSize:10,fontWeight:700,color:warrenOpen?C.btc:C.text2}}>{wsc}</span>}
+                    <span style={{fontSize:9,color:C.text3}}>{warrenDate(wan.ts)}</span>
+                    <span style={{fontSize:11,color:warrenOpen?C.btc:C.text2,display:"inline-block",transform:warrenOpen?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s",fontWeight:700}}>▸</span>
+                  </span>
+                </button>
+                {warrenOpen && (
+                  <div style={{background:C.bg1,border:`1px solid ${C.border}`,borderRadius:10,paddingTop:2}}>
+                    <div style={{fontSize:9,color:C.text3,padding:"8px 11px 0"}}>
+                      Analysée le {warrenDate(wan.ts)} · {wan.src==="fmp10" ? (wan.yrs||10)+" ans · FMP" : (wan.yrs||"?")+" ans · Yahoo"} · information {wan.info||"?"}
+                    </div>
+                    <WarrenDetail an={wan}/>
+                    <div style={{fontSize:8,color:C.text3,lineHeight:1.5,padding:"0 11px 10px"}}>
+                      Méthode reprise de github.com/xbtlin/ai-berkshire (MIT). Outil de recherche à but éducatif : ceci n'est pas un conseil en investissement.
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -7904,6 +7996,164 @@ function wlDecode(str){
 }
 
 /* ═══════════════════════════════════════════════════════════
+   ANALYSE DE WARREN — v29.05
+   Entonnoir en trois étages repris de github.com/xbtlin/ai-berkshire (MIT), qui
+   met en code la méthode de Berkshire Hathaway :
+
+     étage 1  7 filtres durs chiffrés, calculés ICI, sur les ~503 valeurs
+     étage 2  l'utilisateur retient jusqu'à 10 candidates
+     étage 3  Claude franchit les 6 portes de la checklist sur ces 10-là
+
+   Le principe du dépôt gouverne tout l'étage 1 : « ne jamais éliminer par erreur
+   une entreprise de premier ordre, mais écarter à coup sûr celles qui n'en sont
+   pas ». D'où deux règles qui ne sont PAS des tolérances :
+     · une mesure absente n'élimine pas — elle est signalée « non mesurée » et
+       fait baisser la qualité de l'information ;
+     · une mesure qui n'a pas de sens pour le secteur n'élimine pas non plus.
+       Une banque n'a ni marge brute, ni EBIT, ni flux de trésorerie libre au
+       sens industriel : lui appliquer les portes 2, 3 et 5 éliminerait toute la
+       finance, ce qui est exactement l'erreur que la méthode interdit.
+
+   Deux écarts assumés au dépôt, faute de données mesurables — ils sont affichés
+   dans le modal, pas cachés :
+     · les seuils portent sur 4 exercices (le plafond de Yahoo), pas 10 ni 5 ;
+     · l'exemption A du dépôt vise les sociétés « de moins de 10 ans » ; l'âge
+       n'est nulle part dans les données, il est remplacé par le signal
+       mesurable qui l'accompagne : forte croissance et trésorerie
+       d'exploitation positive, soit une phase d'investissement.
+═══════════════════════════════════════════════════════════ */
+const WARREN_NA_FIN = { "Finance":1 };   // secteur FR du screener
+
+function wPct(v, d){ return v==null ? "—" : (Math.round(v*Math.pow(10,d==null?1:d))/Math.pow(10,d==null?1:d)).toLocaleString("fr-FR")+" %"; }
+function wNum(v, d, suf){ return v==null ? "—" : (Math.round(v*Math.pow(10,d==null?1:d))/Math.pow(10,d==null?1:d)).toLocaleString("fr-FR")+(suf||""); }
+// Marge nette du dernier exercice — sert la clause B (redressement récent).
+function wNetLast(r){ return (r.niLast!=null && r.revLast>0) ? r.niLast/r.revLast*100 : null; }
+
+const WARREN_GATES = [
+  { id:"roe", label:"Rentabilité des fonds propres", seuil:"ROE moyen ≥ 8 %",
+    get:function(r){ return r.roeAvg; },
+    ok:function(r){ return r.roeAvg >= 8; },
+    val:function(r){ return wPct(r.roeAvg,1); },
+    why:"Sous 8 %, le capital des actionnaires travaille moins bien qu'un placement sans risque." },
+
+  { id:"fcf", label:"Flux de trésorerie libre cumulé", seuil:"cumul ≥ 0",
+    get:function(r){ return r.fcfCum; },
+    na:function(r){ return WARREN_NA_FIN[r.sec] ? "une banque finance son bilan : son FCF est négatif par construction" : null; },
+    ok:function(r){ return r.fcfCum >= 0; },
+    val:function(r){ return wNum(r.fcfCum,2," Md$"); },
+    why:"Un bénéfice qui ne se transforme jamais en trésorerie n'est pas un bénéfice." },
+
+  { id:"int", label:"Couverture des intérêts", seuil:"EBIT / intérêts ≥ 2×",
+    get:function(r){ return r.intCov; },
+    na:function(r){ return WARREN_NA_FIN[r.sec] ? "les intérêts sont un coût d'exploitation pour une banque, pas une charge de dette" : null; },
+    ok:function(r){ return r.intCov >= 2; },
+    val:function(r){ return r.intCov==null ? "—" : (r.intCov>=999 ? "pas de charge d'intérêts" : wNum(r.intCov,1,"×")); },
+    why:"En dessous de 2×, une mauvaise année suffit à mettre la dette en défaut." },
+
+  { id:"gm", label:"Marge brute", seuil:"≥ 15 %",
+    get:function(r){ return r.grossM; },
+    ok:function(r){ return r.grossM >= 15; },
+    val:function(r){ return wPct(r.grossM,1); },
+    why:"La marge brute mesure le pouvoir de fixer ses prix. Sous 15 %, on vend un produit banalisé." },
+
+  { id:"ocf", label:"Qualité du résultat", seuil:"trésorerie d'exploitation / résultat net ≥ 0,7",
+    get:function(r){ return r.ocfNi; },
+    na:function(r){ return WARREN_NA_FIN[r.sec] ? "le flux d'exploitation d'une banque suit la croissance de son bilan" : null; },
+    ok:function(r){ return r.ocfNi >= 0.7; },
+    val:function(r){ return wNum(r.ocfNi,2,"×"); },
+    why:"Un écart durable entre le résultat comptable et la trésorerie encaissée est un signal d'alerte." },
+
+  { id:"nm", label:"Marge nette", seuil:"≥ 5 %",
+    get:function(r){ return r.netM; },
+    ok:function(r){ return r.netM >= 5; },
+    val:function(r){ return wPct(r.netM,1); },
+    why:"La marge nette est le coussin qui absorbe un retournement du chiffre d'affaires." },
+
+  { id:"dil", label:"Dilution du capital", seuil:"≤ 20 %",
+    get:function(r){ return r.dilut; },
+    ok:function(r){ return r.dilut <= 20; },
+    val:function(r){ return r.dilut==null ? "—" : ((r.dilut>=0?"+":"")+wPct(r.dilut,1)); },
+    why:"Un actionnaire dilué de plus de 20 % a financé la croissance de sa propre poche." },
+];
+
+/* Les trois clauses d'exemption du dépôt. Sans elles, la méthode élimine
+   Amazon, Costco et Meituan — des sociétés de premier ordre dont les ratios
+   sortent des clous par choix stratégique, pas par faiblesse. */
+const WARREN_EXEMPT = [
+  { id:"A", gates:["roe"],
+    label:"Phase d'investissement",
+    test:function(r){ return r.grossM > 30 && r.revG > 15 && r.ocfNi != null && r.ocfNi > 0; },
+    text:"marge brute > 30 %, croissance > 15 %/an et trésorerie d'exploitation positive" },
+  { id:"B", gates:["nm"],
+    label:"Marge nette en redressement",
+    test:function(r){ var nl = wNetLast(r); return r.grossM > 30 && nl != null && nl >= 5; },
+    text:"marge brute > 30 % et marge nette du dernier exercice déjà revenue au-dessus de 5 %" },
+  { id:"C", gates:["gm","nm"],
+    label:"Volume élevé, marge mince",
+    test:function(r){ return r.roeAvg > 20 && r.ocfNi != null && r.ocfNi > 1.0; },
+    text:"ROE > 20 % et trésorerie d'exploitation supérieure au résultat net — le modèle des distributeurs et des plateformes" },
+];
+
+/* Évalue une valeur. Renvoie :
+     status  "pass" | "exempt" | "fail" | "thin"  (thin = trop peu de données)
+     gates[] { g, state:"ok"|"fail"|"na"|"unmeasured"|"exempt", val, note }
+     failed[] portes réellement éliminatoires
+     exempts[] clauses invoquées
+     info    A / B / C selon le nombre de mesures obtenues */
+function warrenEval(r){
+  // Première passe, sans aucune clause : chaque porte dit simplement si elle est
+  // franchie, non mesurable, ou en échec.
+  var gates = WARREN_GATES.map(function(g){
+    var naR = g.na ? g.na(r) : null;
+    if(naR)              return { g:g, state:"na",         val:g.val(r), note:naR };
+    if(g.get(r) == null) return { g:g, state:"unmeasured", val:"—",      note:"non publié par la source" };
+    if(g.ok(r))          return { g:g, state:"ok",         val:g.val(r), note:null };
+    return { g:g, state:"fail", val:g.val(r), note:null };
+  });
+
+  // Seconde passe : une clause n'est INVOQUÉE que si elle sauve réellement une
+  // porte en échec. Sans cette condition, Microsoft — qui franchit tout — serait
+  // étiquetée « exemptée » au seul motif qu'elle remplit par ailleurs les
+  // conditions d'une clause dont elle n'a aucun besoin.
+  var used = {};
+  WARREN_EXEMPT.forEach(function(e){
+    if(!e.test(r)) return;
+    gates.forEach(function(x){
+      if(x.state === "fail" && e.gates.indexOf(x.g.id) >= 0){
+        x.state = "exempt"; x.note = e.label + " — " + e.text;
+        used[e.id] = e;
+      }
+    });
+  });
+  var exempts = WARREN_EXEMPT.filter(function(e){ return used[e.id]; });
+
+  var failed  = gates.filter(function(x){ return x.state === "fail"; });
+  var mesured = gates.filter(function(x){ return x.state === "ok" || x.state === "fail" || x.state === "exempt"; }).length;
+  var info = mesured >= 6 ? "A" : (mesured >= 4 ? "B" : "C");
+
+  var status;
+  if((r.yrs || 0) < 2)          status = "thin";
+  else if(failed.length)        status = "fail";
+  else if(exempts.length)       status = "exempt";
+  else                          status = "pass";
+
+  return { sym:r.sym, status:status, gates:gates, failed:failed, exempts:exempts, info:info, mesured:mesured };
+}
+
+/* Score de pré-tri de la short-list — il ne juge rien, il ordonne. Quatre
+   mesures normalisées à parts égales : rentabilité, pouvoir de fixer les prix,
+   qualité du résultat, et ce que la trésorerie rapporte au cours du jour. */
+function warrenScore(r){
+  var s = 0, n = 0;
+  function add(v, lo, hi){ if(v == null) return; s += Math.max(0, Math.min(1, (v-lo)/(hi-lo))); n++; }
+  add(r.roeAvg, 8, 35);
+  add(r.grossM, 15, 65);
+  add(r.ocfNi, 0.7, 1.6);
+  add(r.fcfYld, 0, 8);
+  return n ? s/n : 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
    SCREENER S&P 500 — v28.90
    Le worker (v162) mesure une trentaine d'indicateurs HEBDOMADAIRES sur les
    ~503 composants de l'indice et sert le tout en un bloc compact (~60 Ko).
@@ -8072,7 +8322,7 @@ const SCR_SORTS = [
 var SCR_CACHE = null;   // { data, at }
 const SCR_CACHE_TTL = 600000;
 
-function ScreenerPanel({ tracked, onAdd, eur=false, usdEur=0.86 }){
+function ScreenerPanel({ tracked, onAdd, onWarren, eur=false, usdEur=0.86 }){
   const [data, setData]   = useState(SCR_CACHE ? SCR_CACHE.data : null);   // {cols, rows, gen, ts, missing, total, stale}
   const [err, setErr]     = useState("");
   const [busy, setBusy]   = useState(null);     // {done, total} pendant la construction
@@ -8311,6 +8561,13 @@ function ScreenerPanel({ tracked, onAdd, eur=false, usdEur=0.86 }){
           <div style={{height:"100%",width:(busy.total?Math.round(busy.done/busy.total*100):0)+"%",background:C.btc,transition:"width .3s"}}/>
         </div>
       )}
+
+      {/* v29.05 — l'autre facon de chercher : par les comptes, pas par les cours. */}
+      <button onClick={onWarren}
+        style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:C.btc,border:"none",borderRadius:10,padding:"11px 13px",cursor:"pointer",marginBottom:12,textAlign:"left"}}>
+        <span style={{fontSize:13,fontWeight:800,color:"#000"}}>🎩 Analyse de Warren</span>
+        <span style={{fontSize:9,fontWeight:700,color:"#000",opacity:.62}}>méthode Berkshire · 3 étages</span>
+      </button>
       {err && <div style={{fontSize:11,color:C.red,background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>{err}</div>}
 
       {/* Critères cliquables */}
@@ -8470,7 +8727,532 @@ function ScreenerPanel({ tracked, onAdd, eur=false, usdEur=0.86 }){
   );
 }
 
-function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
+/* La base fondamentale survit au démontage du modal, comme SCR_CACHE pour le
+   screener : rouvrir « Analyse de Warren » ne doit pas retélécharger 80 Ko.
+   Elle est hebdomadaire côté worker — une heure de cache local suffit. */
+var FND_CACHE = null;   // { data, at }
+const FND_CACHE_TTL = 3600000;
+
+function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86, onClose }){
+  const [step, setStep]   = useState("intro");   // intro | quant | shortlist | deep | done
+  const [data, setData]   = useState(FND_CACHE ? FND_CACHE.data : null);
+  const [busy, setBusy]   = useState(null);      // {done, total, retry}
+  const [err, setErr]     = useState("");
+  const [sel, setSel]     = useState({});
+  const [res, setRes]     = useState(null);      // réponse de /warren/analyze
+  const [aiErr, setAiErr] = useState("");
+  const [openSym, setOpenSym] = useState(null);
+  const [showFail, setShowFail] = useState(false);
+  const [saved, setSaved] = useState("");
+  const building = useRef(false);
+
+  // ── Chargement de la base fondamentale (même mécanique que le screener) ──
+  const mergeRows = function(rows, gen){
+    setData(function(prev){
+      var by = {};
+      ((prev && prev.rows) || []).forEach(function(r){ by[r[0]] = r; });
+      (rows||[]).forEach(function(r){ by[r[0]] = r; });
+      var out = [];
+      for(var k in by) if(by.hasOwnProperty(k)) out.push(by[k]);
+      return Object.assign({}, prev||{}, { rows:out, gen:gen });
+    });
+  };
+  const runQueue = function(gen, todo, onStep){
+    var queue = todo.slice(), failed = [];
+    function next(){
+      if(!queue.length) return Promise.resolve();
+      var i = queue.shift();
+      return cfGet("/fundamentals/chunk?gen="+gen+"&i="+i, { timeout:90000 })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if(d && d.rows) mergeRows(d.rows, gen);
+          if(!d || (d.failed && d.failed.length)) failed.push(i);
+        })
+        .catch(function(){ failed.push(i); })
+        .then(function(){ onStep(); return next(); });
+    }
+    return Promise.all([next(), next(), next()]).then(function(){ return failed; });
+  };
+  const build = function(gen, todo){
+    if(building.current || !todo || !todo.length) return;
+    building.current = true;
+    var done = 0, total = todo.length;
+    setBusy({ done:0, total:total });
+    var stepFn = function(){ done++; setBusy({ done:done, total:total }); };
+    runQueue(gen, todo, stepFn).then(function(failed){
+      if(!failed.length) return [];
+      done = 0; total = failed.length;
+      setBusy({ done:0, total:total, retry:true });
+      return runQueue(gen, failed, stepFn);
+    }).then(function(){
+      building.current = false; setBusy(null);
+      setData(function(p){ return p ? Object.assign({}, p, { stale:false, gen:gen, ts:Date.now() }) : p; });
+    }).catch(function(){ building.current = false; setBusy(null); });
+  };
+  const load = useCallback(function(force){
+    if(!force && FND_CACHE && FND_CACHE.data && (FND_CACHE.data.rows||[]).length
+       && (Date.now() - FND_CACHE.at) < FND_CACHE_TTL){ setData(FND_CACHE.data); return; }
+    setErr("");
+    cfGet("/fundamentals", { timeout:30000 })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || d.error){ setErr((d && d.error) || "base indisponible"); return; }
+        setData(d);
+        var gen = d.current || d.gen;
+        if(d.missing && d.missing.length) build(gen, d.missing);
+      })
+      .catch(function(e){ setErr("worker injoignable ("+(e && e.message || e)+")"); });
+  }, []);
+  useEffect(function(){ if(data && (data.rows||[]).length) FND_CACHE = { data:data, at:Date.now() }; }, [data]);
+
+  function startQuant(){ setStep("quant"); load(false); }
+
+  // ── Lignes → objets, enrichies du cours du jour ──────────────────────────
+  //    Les ratios dépendant du prix ne sont PAS stockés côté worker (la base a
+  //    deux semaines) : on les calcule ici avec les cours du screener technique.
+  const rows = useMemo(function(){
+    if(!data || !data.rows) return [];
+    var cols = data.cols || [];
+    var px = {};
+    try{
+      var sc = SCR_CACHE && SCR_CACHE.data;
+      var sci = sc && sc.cols ? sc.cols.indexOf("px") : -1;
+      if(sc && sci >= 0) (sc.rows||[]).forEach(function(r){ px[r[0]] = r[sci]; });
+    }catch(e){}
+    return data.rows.map(function(a){
+      var o = {};
+      for(var i=0;i<cols.length;i++) o[cols[i]] = a[i];
+      var p = px[o.sym];
+      if(p && o.shares){
+        var mcap = p * o.shares / 1000;               // titres en millions → capitalisation en Md$
+        o.px = p; o.mcap = Math.round(mcap*100)/100;
+        o.pe  = o.niLast > 0 ? Math.round(mcap/o.niLast*10)/10 : null;
+        o.pb  = o.eqLast > 0 ? Math.round(mcap/o.eqLast*100)/100 : null;
+        o.fcfYld = (o.fcfLast != null && mcap > 0) ? Math.round(o.fcfLast/mcap*10000)/100 : null;
+      }
+      return o;
+    });
+  }, [data]);
+
+  const evald = useMemo(function(){
+    return rows.map(function(r){ return { r:r, e:warrenEval(r) }; });
+  }, [rows]);
+
+  const passed = useMemo(function(){
+    return evald.filter(function(x){ return x.e.status==="pass" || x.e.status==="exempt"; })
+                .sort(function(a,b){ return warrenScore(b.r) - warrenScore(a.r); });
+  }, [evald]);
+  const failedL = useMemo(function(){
+    return evald.filter(function(x){ return x.e.status==="fail"; })
+                .sort(function(a,b){ return a.e.failed.length - b.e.failed.length; });
+  }, [evald]);
+  const thinL = useMemo(function(){ return evald.filter(function(x){ return x.e.status==="thin"; }); }, [evald]);
+
+  // Taux de passage par secteur — le « quality tiering » du mode batch du dépôt.
+  const bySector = useMemo(function(){
+    var m = {};
+    evald.forEach(function(x){
+      var s = x.r.sec || "—";
+      if(!m[s]) m[s] = { n:0, ok:0 };
+      m[s].n++;
+      if(x.e.status==="pass" || x.e.status==="exempt") m[s].ok++;
+    });
+    return Object.keys(m).sort(function(a,b){ return (m[b].ok/m[b].n) - (m[a].ok/m[a].n); })
+                         .map(function(k){ return { sec:k, n:m[k].n, ok:m[k].ok }; });
+  }, [evald]);
+
+  // Pré-cochage des 10 meilleures dès que l'étage 1 est complet.
+  useEffect(function(){
+    if(step !== "quant" || busy || !passed.length) return;
+    setSel(function(p){
+      if(Object.keys(p).length) return p;
+      var n = {};
+      passed.slice(0,10).forEach(function(x){ n[x.r.sym] = true; });
+      return n;
+    });
+  }, [step, busy, passed.length]);
+
+  const nSel = Object.keys(sel).filter(function(k){ return sel[k]; }).length;
+  function toggleSel(sym){
+    setSel(function(p){
+      var n = Object.assign({}, p);
+      if(n[sym]) delete n[sym];
+      else { if(Object.keys(n).length >= 10) return p; n[sym] = true; }
+      return n;
+    });
+  }
+
+  // ── Étage 3 : la checklist par Claude ───────────────────────────────────
+  function runDeep(){
+    var syms = Object.keys(sel).filter(function(k){ return sel[k]; }).slice(0,10);
+    if(!syms.length) return;
+    var quotes = {};
+    rows.forEach(function(r){ if(sel[r.sym] && r.px != null) quotes[r.sym] = r.px; });
+    setStep("deep"); setAiErr(""); setRes(null);
+    cfPost("/warren/analyze", { tickers:syms, quotes:quotes, deep:true }, { timeout:180000 })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok || !Array.isArray(d.analyses)){
+          setAiErr((d && d.error) || "analyse indisponible");
+          setStep("shortlist"); return;
+        }
+        setRes(d);
+        // Conservation : chaque fiche rejoint WARREN_DB, l'ancienne bascule en
+        // historique. La base remonte ensuite au parent, qui la persiste.
+        d.analyses.forEach(function(an){
+          warrenPut(Object.assign({}, an, { ts:d.ts || Date.now(), gen:d.gen }));
+        });
+        if(onSaved) onSaved(Object.assign({}, WARREN_DB));
+        setStep("done");
+      })
+      .catch(function(e){
+        setAiErr("worker injoignable ("+(e && e.message || e)+")");
+        setStep("shortlist");
+      });
+  }
+
+  function addAll(){
+    if(!res || !res.analyses) return;
+    var keep = res.analyses.filter(function(a){ return a.verdict !== "reject"; });
+    if(!keep.length){ setSaved("Aucune valeur retenue à enregistrer."); return; }
+    onAdd(keep);
+    setSaved(keep.length + " idée" + (keep.length>1?"s":"") + " enregistrée" + (keep.length>1?"s":"") + " — onglet « Mes idées »");
+  }
+
+  const yrs = useMemo(function(){
+    var m = 0;
+    rows.forEach(function(r){ if(r.yrs > m) m = r.yrs; });
+    return m;
+  }, [rows]);
+
+  const sheet = { width:"100%", maxWidth:560, background:C.bg0, borderRadius:"18px 18px 0 0",
+                  padding:"18px 18px 28px", maxHeight:"92vh", overflowY:"auto" };
+  const secTitle = { fontSize:9, fontWeight:800, color:C.text3, letterSpacing:1, margin:"14px 0 6px" };
+  const card = { background:C.bg1, border:"1px solid "+C.border, borderRadius:10, padding:"9px 11px", marginBottom:7 };
+  const disclaimer = (
+    <div style={{fontSize:9,color:C.text3,lineHeight:1.5,marginTop:12,paddingTop:10,borderTop:"1px solid "+C.border}}>
+      Méthode reprise de <span style={{color:C.text2}}>github.com/xbtlin/ai-berkshire</span> (licence MIT).
+      Outil de recherche à but éducatif : ceci n'est pas un conseil en investissement.
+    </div>
+  );
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:99999,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div onClick={function(e){ e.stopPropagation(); }} style={sheet}>
+
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+          <div style={{fontSize:16,fontWeight:800,color:C.text}}>🎩 Analyse de Warren</div>
+          <button onClick={onClose} style={{background:C.bg2,border:"1px solid "+C.border,borderRadius:8,width:30,height:30,color:C.text2,fontSize:17,cursor:"pointer"}}>×</button>
+        </div>
+
+        {/* ── Écran d'accueil ── */}
+        {step==="intro" && (
+          <div>
+            <div style={{fontSize:11,color:C.text2,lineHeight:1.6,marginTop:8}}>
+              La méthode de sélection de Berkshire Hathaway, en trois étages.
+            </div>
+            {[["1","Sept filtres durs","Les ~503 valeurs du S&P 500 passent sept seuils chiffrés — rentabilité, trésorerie, dette, marges, qualité du résultat, dilution. Calcul local et instantané."],
+              ["2","Vous retenez dix valeurs","Le tri propose les dix meilleures, vous ajustez."],
+              ["3","Les six portes","Claude franchit la checklist de Buffett sur ces dix-là, sous quatre regards qui se contredisent : Buffett, Munger, Duan Yongping, Li Lu."]].map(function(s){
+              return (
+                <div key={s[0]} style={card}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                    <span style={{width:18,height:18,borderRadius:"50%",background:C.btc,color:"#000",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{s[0]}</span>
+                    <span style={{fontSize:12,fontWeight:800,color:C.text}}>{s[1]}</span>
+                  </div>
+                  <div style={{fontSize:10,color:C.text3,lineHeight:1.5}}>{s[2]}</div>
+                </div>
+              );
+            })}
+            <div style={{fontSize:10,color:C.orange,background:C.orange+"11",border:"1px solid "+C.orange+"44",borderRadius:8,padding:"8px 10px",marginTop:6,lineHeight:1.5}}>
+              Deux écarts assumés à la méthode d'origine : les seuils portent sur les
+              <b> 4 exercices</b> que publie la source, pas sur 10 ans ; et une mesure absente ou
+              dépourvue de sens pour le secteur <b>n'élimine jamais</b> une valeur — mieux vaut en
+              laisser passer une que d'en écarter une bonne.
+            </div>
+            <button onClick={startQuant} style={{width:"100%",background:C.btc,border:"none",borderRadius:11,padding:"13px",color:"#000",fontSize:13,fontWeight:800,cursor:"pointer",marginTop:12}}>
+              Lancer l'analyse
+            </button>
+            {disclaimer}
+          </div>
+        )}
+
+        {/* ── Étage 1 ── */}
+        {step==="quant" && (
+          <div>
+            <div style={{fontSize:10,color:busy?C.btc:C.text3,marginTop:6}}>
+              {busy ? ((busy.retry?"Rattrapage ":"Construction ")+busy.done+"/"+busy.total+" lots — états financiers annuels")
+                    : (rows.length ? (rows.length+" valeurs mesurées sur "+yrs+" exercices") : "Chargement de la base…")}
+            </div>
+            {busy && (
+              <div style={{height:3,background:C.bg2,borderRadius:2,overflow:"hidden",margin:"8px 0"}}>
+                <div style={{height:"100%",width:(busy.total?Math.round(busy.done/busy.total*100):0)+"%",background:C.btc,transition:"width .3s"}}/>
+              </div>
+            )}
+            {err && <div style={{fontSize:11,color:C.red,background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:8,padding:"8px 10px",margin:"8px 0"}}>{err}</div>}
+
+            {!!rows.length && (
+              <div>
+                <div style={{display:"flex",gap:6,margin:"10px 0"}}>
+                  {[["Passent",passed.length,C.green],["Éliminées",failedL.length,C.red],["Sans historique",thinL.length,C.text3]].map(function(t){
+                    return (
+                      <div key={t[0]} style={{flex:1,background:C.bg1,border:"1px solid "+C.border,borderRadius:9,padding:"8px 6px",textAlign:"center"}}>
+                        <div style={{fontSize:16,fontWeight:800,color:t[2]}}>{t[1]}</div>
+                        <div style={{fontSize:8,color:C.text3,marginTop:2}}>{t[0]}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={secTitle}>TAUX DE PASSAGE PAR SECTEUR</div>
+                {bySector.map(function(s){
+                  var pct = s.n ? Math.round(s.ok/s.n*100) : 0;
+                  return (
+                    <div key={s.sec} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:9,color:C.text2,width:110,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.sec}</span>
+                      <span style={{flex:1,height:5,background:C.bg2,borderRadius:3,overflow:"hidden"}}>
+                        <span style={{display:"block",height:"100%",width:pct+"%",background:pct>=40?C.green:(pct>=15?C.orange:C.red)}}/>
+                      </span>
+                      <span style={{fontSize:9,color:C.text3,width:52,textAlign:"right",flexShrink:0}}>{s.ok+"/"+s.n}</span>
+                    </div>
+                  );
+                })}
+
+                <div style={secTitle}>ÉLIMINÉES — LE MOTIF EN CLAIR</div>
+                <button onClick={function(){ setShowFail(!showFail); }} style={{width:"100%",background:C.bg2,border:"1px solid "+C.border,borderRadius:8,padding:"7px 10px",color:C.text2,fontSize:10,cursor:"pointer",textAlign:"left"}}>
+                  {showFail ? "▾ Masquer" : "▸ Voir"} les {failedL.length} valeurs écartées et la porte qui les a arrêtées
+                </button>
+                {showFail && (
+                  <div style={{marginTop:6,maxHeight:260,overflowY:"auto"}}>
+                    {failedL.slice(0,120).map(function(x){
+                      return (
+                        <div key={x.r.sym} style={{display:"flex",alignItems:"baseline",gap:7,padding:"5px 2px",borderBottom:"1px solid "+C.border}}>
+                          <span style={{fontSize:10,fontWeight:800,color:C.text,width:52,flexShrink:0}}>{x.r.sym}</span>
+                          <span style={{fontSize:9,color:C.text3,flex:1}}>
+                            {x.e.failed.map(function(f){ return f.g.label+" "+f.val; }).join(" · ")}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {failedL.length>120 && <div style={{fontSize:9,color:C.text3,padding:"6px 2px"}}>… et {failedL.length-120} autres.</div>}
+                  </div>
+                )}
+
+                <button onClick={function(){ setStep("shortlist"); }} disabled={!passed.length}
+                  style={{width:"100%",background:passed.length?C.btc:C.bg2,border:"none",borderRadius:11,padding:"13px",color:passed.length?"#000":C.text3,fontSize:13,fontWeight:800,cursor:passed.length?"pointer":"default",marginTop:14}}>
+                  Choisir parmi les {passed.length} retenues →
+                </button>
+              </div>
+            )}
+            {disclaimer}
+          </div>
+        )}
+
+        {/* ── Étage 2 ── */}
+        {step==="shortlist" && (
+          <div>
+            <div style={{fontSize:10,color:C.text3,margin:"6px 0 10px"}}>
+              Jusqu'à dix valeurs. Les dix mieux classées sont déjà cochées — {nSel} sélectionnée{nSel>1?"s":""}.
+            </div>
+            {aiErr && <div style={{fontSize:11,color:C.red,background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>{aiErr}</div>}
+            <div style={{maxHeight:"46vh",overflowY:"auto"}}>
+              {passed.map(function(x){
+                var on = !!sel[x.r.sym], ex = x.e.exempts.length;
+                return (
+                  <div key={x.r.sym} onClick={function(){ toggleSel(x.r.sym); }}
+                    style={{display:"flex",alignItems:"center",gap:9,background:on?C.btc+"14":C.bg1,border:"1px solid "+(on?C.btc:C.border),borderRadius:10,padding:"8px 10px",marginBottom:6,cursor:"pointer"}}>
+                    <span style={{fontSize:12,color:on?C.btc:C.text3,flexShrink:0}}>{on?"☑":"☐"}</span>
+                    <ScrLogo ticker={x.r.sym} cat="Action" size={26}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                        <span style={{fontSize:12,fontWeight:800,color:C.text}}>{x.r.sym}</span>
+                        {ex ? <span style={{fontSize:9,color:C.orange,fontWeight:700}}>🟡 clause {x.e.exempts.map(function(e){ return e.id; }).join("+")}</span> : null}
+                        <span style={{fontSize:9,color:C.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{x.r.name}</span>
+                      </div>
+                      <div style={{fontSize:9,color:C.text3,marginTop:2}}>
+                        ROE {wPct(x.r.roeAvg,0)} · marge brute {wPct(x.r.grossM,0)} · marge nette {wPct(x.r.netM,0)}
+                        {x.r.fcfYld!=null ? " · FCF "+wPct(x.r.fcfYld,1) : ""}
+                      </div>
+                      {ex ? <div style={{fontSize:8,color:C.orange,marginTop:2,lineHeight:1.4}}>
+                        {x.e.exempts.map(function(e){ return e.label; }).join(" · ")} — {x.e.gates.filter(function(y){ return y.state==="exempt"; }).map(function(y){ return y.g.label.toLowerCase()+" "+y.val; }).join(", ")}
+                      </div> : null}
+                    </div>
+                    <span style={{fontSize:9,color:C.text3,flexShrink:0}}>{x.e.info}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <button onClick={function(){ setStep("quant"); }} style={{flex:1,background:"transparent",border:"1px solid "+C.border,borderRadius:11,padding:"12px",color:C.text2,fontSize:12,fontWeight:700,cursor:"pointer"}}>← Retour</button>
+              <button onClick={runDeep} disabled={!nSel} style={{flex:2,background:nSel?C.btc:C.bg2,border:"none",borderRadius:11,padding:"12px",color:nSel?"#000":C.text3,fontSize:13,fontWeight:800,cursor:nSel?"pointer":"default"}}>
+                Analyser {nSel} valeur{nSel>1?"s":""} →
+              </button>
+            </div>
+            {disclaimer}
+          </div>
+        )}
+
+        {/* ── Étage 3 en cours ── */}
+        {step==="deep" && (
+          <div style={{textAlign:"center",padding:"46px 16px"}}>
+            <div style={{fontSize:26,marginBottom:12}}>🎩</div>
+            <div style={{fontSize:12,color:C.text,fontWeight:700}}>Analyse en cours…</div>
+            <div style={{fontSize:10,color:C.text3,marginTop:8,lineHeight:1.6}}>
+              {nSel} société{nSel>1?"s":""} — six portes, quatre regards, trois scénarios de prix.<br/>
+              Compter une à deux minutes.
+            </div>
+          </div>
+        )}
+
+        {/* ── Fiches ── */}
+        {step==="done" && res && (
+          <div>
+            <div style={{fontSize:10,color:C.text3,margin:"6px 0 10px"}}>
+              {res.analyses.length} fiche{res.analyses.length>1?"s":""} · {warrenDate(res.ts)}
+              {res.usage ? " · "+((res.usage.input_tokens||0)+(res.usage.output_tokens||0)).toLocaleString("fr-FR")+" jetons" : ""}
+            </div>
+            {saved && <div style={{fontSize:11,color:C.green,background:C.green+"14",border:"1px solid "+C.green+"44",borderRadius:8,padding:"8px 10px",marginBottom:10}}>✓ {saved}</div>}
+            {res.analyses.map(function(an){
+              return <WarrenCard key={an.sym} an={an} open={openSym===an.sym}
+                        onToggle={function(){ setOpenSym(openSym===an.sym?null:an.sym); }}
+                        onTicker={onTicker}/>;
+            })}
+            <button onClick={addAll} style={{width:"100%",background:C.btc,border:"none",borderRadius:11,padding:"13px",color:"#000",fontSize:13,fontWeight:800,cursor:"pointer",marginTop:10}}>
+              ＋ Enregistrer dans mes idées
+            </button>
+            {disclaimer}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+/* Fiche d'une valeur — repliée : verdict, score, source ; dépliée : les six
+   portes, les quatre maîtres, les risques, les trois scénarios, le miroir.
+   Même composant dans le modal d'analyse et dans l'accordéon du modal ticker. */
+function WarrenCard({ an, open, onToggle, onTicker, compact=false }){
+  var v = warrenVerdict(an.verdict);
+  var srcTxt = an.src==="fmp10" ? (an.yrs||10)+" ans · FMP" : (an.yrs||"?")+" ans · Yahoo";
+  return (
+    <div style={{background:C.bg1,border:"1px solid "+(open?v.col+"66":C.border),borderRadius:11,marginBottom:7,overflow:"hidden"}}>
+      <div onClick={onToggle} style={{display:"flex",alignItems:"center",gap:9,padding:"10px 11px",cursor:"pointer"}}>
+        {!compact && (
+          <span onClick={function(e){ e.stopPropagation(); if(onTicker) onTicker(an.sym); }}>
+            <ScrLogo ticker={an.sym} cat="Action" size={28}/>
+          </span>
+        )}
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:7}}>
+            {!compact && <span style={{fontSize:13,fontWeight:800,color:C.text}}>{an.sym}</span>}
+            <span style={{fontSize:11,fontWeight:800,color:v.col}}>{v.mark} {v.lbl}</span>
+            <span style={{fontSize:11,fontWeight:800,color:C.text}}>{an.composite!=null?(Math.round(an.composite*10)/10).toLocaleString("fr-FR")+"/5":""}</span>
+          </div>
+          <div style={{fontSize:9,color:C.text3,marginTop:2}}>
+            {srcTxt} · information {an.info || "?"} · {warrenDate(an.ts)}
+          </div>
+        </div>
+        <span style={{fontSize:11,color:C.text3,transform:open?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s"}}>▸</span>
+      </div>
+
+      {open && <div style={{borderTop:"1px solid "+C.border}}><WarrenDetail an={an}/></div>}
+    </div>
+  );
+}
+
+/* Le corps d'une fiche, sans en-tete : servi tel quel par WarrenCard dans le
+   modal d'analyse, et par l'accordeon « Analyse de Warren » du modal ticker. */
+function WarrenDetail({ an }){
+  var d = an.data || {};
+  return (
+    <div style={{padding:"0 11px 12px"}}>
+          <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,margin:"10px 0 6px"}}>LES SIX PORTES</div>
+          {(an.gates||[]).map(function(g,i){
+            return (
+              <div key={i} style={{display:"flex",gap:8,alignItems:"baseline",marginBottom:5}}>
+                <span style={{fontSize:10,color:C.gold,letterSpacing:1,flexShrink:0,fontFamily:"monospace"}}>{warrenStars(g.stars)}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.text}}>{g.label}</div>
+                  {g.note && <div style={{fontSize:9,color:C.text3,lineHeight:1.45,marginTop:1}}>{g.note}</div>}
+                </div>
+              </div>
+            );
+          })}
+
+          {an.masters && (
+            <div>
+              <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,margin:"12px 0 6px"}}>QUATRE REGARDS</div>
+              {[["buffett","Buffett"],["munger","Munger"],["duan","Duan Yongping"],["lilu","Li Lu"]].map(function(m){
+                if(!an.masters[m[0]]) return null;
+                return (
+                  <div key={m[0]} style={{background:C.bg2,borderRadius:8,padding:"7px 9px",marginBottom:5}}>
+                    <div style={{fontSize:9,fontWeight:800,color:C.btc,marginBottom:2}}>{m[1]}</div>
+                    <div style={{fontSize:10,color:C.text2,lineHeight:1.5}}>{an.masters[m[0]]}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {an.moat && (
+            <div style={{marginTop:10}}>
+              <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>DOUVE</div>
+              <div style={{fontSize:10,color:C.text2,lineHeight:1.5}}>{an.moat}</div>
+            </div>
+          )}
+
+          {!!(an.risks && an.risks.length) && (
+            <div style={{marginTop:10}}>
+              <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>RISQUES</div>
+              {an.risks.map(function(r,i){
+                return <div key={i} style={{fontSize:10,color:C.text2,lineHeight:1.5,marginBottom:3}}>· {r}</div>;
+              })}
+            </div>
+          )}
+
+          {an.scenarios && (
+            <div style={{marginTop:10}}>
+              <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>TROIS SCÉNARIOS</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                {[["bear","Pessimiste",C.red],["base","Central",C.text2],["bull","Optimiste",C.green]].map(function(s){
+                  var val = an.scenarios[s[0]];
+                  return (
+                    <div key={s[0]} style={{background:C.bg2,borderRadius:8,padding:"7px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:8,color:C.text3}}>{s[1]}</div>
+                      <div style={{fontSize:12,fontWeight:800,color:s[2],marginTop:2}}>{val!=null?"$"+Number(val).toLocaleString("fr-FR"):"—"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {d.px!=null && <div style={{fontSize:9,color:C.text3,marginTop:4,textAlign:"center"}}>cours retenu : ${Number(d.px).toLocaleString("fr-FR")}</div>}
+            </div>
+          )}
+
+          {an.mirror && (
+            <div style={{marginTop:10,background:C.bg3,borderLeft:"2px solid "+C.btc,borderRadius:"0 8px 8px 0",padding:"8px 10px"}}>
+              <div style={{fontSize:8,color:C.text3,marginBottom:3}}>TEST DU MIROIR</div>
+              <div style={{fontSize:10,color:C.text2,lineHeight:1.5,fontStyle:"italic"}}>{an.mirror}</div>
+            </div>
+          )}
+
+          {an.thesis && (
+            <div style={{marginTop:10}}>
+              <div style={{fontSize:9,fontWeight:800,color:C.text3,letterSpacing:1,marginBottom:4}}>THÈSE</div>
+              <div style={{fontSize:10,color:C.text2,lineHeight:1.55}}>{an.thesis}</div>
+            </div>
+          )}
+
+          {!!(an.prev && an.prev.length) && (
+            <div style={{marginTop:10,fontSize:9,color:C.text3}}>
+              Analyse précédente : {warrenVerdict(an.prev[0].verdict).mark} {an.prev[0].composite!=null?(Math.round(an.prev[0].composite*10)/10).toLocaleString("fr-FR")+"/5":"—"} le {warrenDate(an.prev[0].ts)}
+            </div>
+      )}
+    </div>
+  );
+}
+
+function PageWatchlist({ list, onSave, onSaveWarren, eur=false, usdEur=0.86 }){
   const [prices, setPrices]   = useState({});
   const [loading, setLoading] = useState(false);
   const [modal, setModal]     = useState(null);   // null | "add" | "edit"
@@ -8489,6 +9271,9 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
   // v28.90 — deux onglets : le screener (repérage) et les idées retenues (suivi).
   const [sub, setSub]         = useState("screen");
   const [added, setAdded]     = useState("");
+  // v29.05 — l'etat vit ici, pas dans ScreenerPanel : aller voir une idee puis
+  // revenir ne doit pas jeter une analyse qui a coute deux minutes.
+  const [warren, setWarren]   = useState(false);
 
   const items = Array.isArray(list) ? list : [];
 
@@ -8534,6 +9319,55 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
     persist(items.concat(adds));
     setAdded(adds.length + " idée" + (adds.length>1?"s":"") + " enregistrée" + (adds.length>1?"s":"") + " — onglet « Mes idées »");
   }
+  /* v29.05 — Une fiche d'Analyse de Warren devient une idée de trade. Même
+     principe que addFromScreener : ce qui a été mesuré le jour du repérage est
+     consigné en toutes lettres dans la thèse.
+     Les six portes n'ont pas d'équivalent technique réévaluable — pas de
+     templateId, donc pas de faux automatisme : elles deviennent des catalyseurs
+     FONDAMENTAUX cochés le jour de l'analyse, à charge pour l'utilisateur de
+     dire quand ils ne sont plus vrais. C'est exactement ce que fait déjà
+     addFromScreener pour les critères dépourvus de cond(). */
+  function addFromWarren(analyses){
+    var today = new Date().toISOString().slice(0,10);
+    var seen = {};
+    items.forEach(function(e){ seen[String(e.ticker).toUpperCase()] = true; });
+    var adds = [];
+    (analyses||[]).forEach(function(an){
+      var sym = String(an.sym||"").toUpperCase();
+      if(!sym || seen[sym]) return;
+      var d = an.data || {}, sc = an.scenarios || {}, v = warrenVerdict(an.verdict);
+      var lines = (an.gates||[]).map(function(g){ return "· "+g.label+" "+warrenStars(g.stars)+(g.note?" — "+g.note:""); });
+      var conds = (an.gates||[]).filter(function(g){ return (g.stars||0) >= 4; }).map(function(g){
+        return { id:condUid(), cat:"fondamental", templateId:null, params:null,
+                 text:g.label+" "+warrenStars(g.stars), validated:true, auto:false };
+      });
+      adds.push({
+        id: wlUid(), ticker:sym, name:d.name||"", sym:sym, cat:"Action", domain:d.sec||"",
+        fav:false,
+        conviction: Math.max(1, Math.min(5, Math.round(an.composite||3))),
+        horizon:"Long terme",
+        buyLow:  sc.bear!=null ? +sc.bear : null,
+        buyHigh: sc.base!=null ? +sc.base : null,
+        alertBuy:null, alertSell:null,
+        targets: sc.bull!=null ? [{ price:+sc.bull, note:"cible haute (Analyse de Warren)" }] : [],
+        conditions: conds,
+        thesis: "Analyse de Warren du " + today + " — " + v.mark + " " + v.lbl
+              + (an.composite!=null ? " " + (Math.round(an.composite*10)/10).toLocaleString("fr-FR") + "/5" : "")
+              + " · information " + (an.info||"?")
+              + " · " + (an.src==="fmp10" ? (an.yrs||10)+" ans (FMP)" : (an.yrs||"?")+" ans (Yahoo)")
+              + (an.thesis ? "\n\n"+an.thesis : "")
+              + (lines.length ? "\n\nLes six portes :\n"+lines.join("\n") : "")
+              + (an.mirror ? "\n\nTest du miroir : "+an.mirror : ""),
+        risks: (an.risks||[]).join("\n"),
+        createdAt:today, updatedAt:today, author:"Analyse de Warren"
+      });
+      seen[sym] = true;
+    });
+    if(!adds.length){ setAdded("Ces valeurs sont déjà suivies."); return; }
+    persist(items.concat(adds));
+    setAdded(adds.length + " idée" + (adds.length>1?"s":"") + " enregistrée" + (adds.length>1?"s":"") + " — onglet « Mes idées »");
+  }
+
   useEffect(function(){
     if(!added) return;
     var t = setTimeout(function(){ setAdded(""); }, 4000);
@@ -8754,7 +9588,7 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
       {/* Les deux vues restent montées : aller voir une idée puis revenir au
           screener ne doit pas effacer les critères réglés ni la sélection. */}
       <div style={{display:sub==="screen"?"block":"none"}}>
-        <ScreenerPanel tracked={items} onAdd={addFromScreener} eur={eur} usdEur={usdEur}/>
+        <ScreenerPanel tracked={items} onAdd={addFromScreener} onWarren={function(){ setWarren(true); }} eur={eur} usdEur={usdEur}/>
       </div>
 
       <div style={{display:sub==="ideas"?"block":"none"}}>
@@ -9144,6 +9978,13 @@ function PageWatchlist({ list, onSave, eur=false, usdEur=0.86 }){
             {!impList && <div style={{marginTop:8}}><Btn label="Fermer" onClick={()=>setImp(false)} color={C.text3} outline full/></div>}
           </div>
         </div>
+      )}
+
+      {warren && (
+        <WarrenModal tracked={items} onAdd={addFromWarren} onSaveWarren={onSaveWarren}
+          onSaved={function(db){ if(onSaveWarren) onSaveWarren(db); }}
+          onTicker={function(sym){ setMt({ ticker:sym, cat:"Action" }); }}
+          eur={eur} usdEur={usdEur} onClose={function(){ setWarren(false); }}/>
       )}
 
       {mt && <TickerModal ticker={mt.ticker} cat={mt.cat} eur={eur} usdEur={usdEur} onClose={function(){ setMt(null); }}/>}
@@ -13102,6 +13943,11 @@ function App(){
   const[liveBtcReco,setLiveBtcReco]=useState(function(){ try{ var v=lsv9Get('gdb_btc_reco'); return _btcRecoOk(v)?v:null; }catch(e){ return null; } });
   const saveBtcReco=function(r){ setLiveBtcReco(r); saveBase('gdb_btc_reco', r); };
   const saveWatchlist=function(nl){ setLiveWatchlist(nl); saveBase('gdb_watchlist', nl); };
+  // v29.05 — fiches « Analyse de Warren », conservées par ticker. WARREN_DB (cache
+  // module) est resynchronisé a chaque changement : c'est lui que lit TickerModal.
+  const[liveWarren,setLiveWarren]=useState(function(){ try{ var v=lsv9Get('gdb_warren'); return (v&&typeof v==="object"&&!Array.isArray(v))?v:{}; }catch(e){ return {}; } });
+  useEffect(function(){ loadWarrenDb(liveWarren); }, [liveWarren]);
+  const saveWarren=function(db){ setLiveWarren(db); saveBase('gdb_warren', db); };
   const recordGoldHist = useCallback(function(d, price){ if(!d||price==null) return; setLiveGoldHist(function(prev){ var arr=Array.isArray(prev)?prev.slice():[]; var i=arr.findIndex(function(x){return x[0]===d;}); if(i>=0) arr[i]=[d,price]; else arr.push([d,price]); arr.sort(function(a,b){return (a[0]||"").localeCompare(b[0]||"");}); saveBase('gdb_gold_hist', arr); return arr; }); },[]);
   // BENCH_IDX enrichi de la colonne Or (7e) depuis l'historique dédié — robuste aux fusions
   const benchWithGold = React.useMemo(function(){
@@ -13435,6 +14281,7 @@ function App(){
       if(Array.isArray(kv.gdb_gold_hist)) setLiveGoldHist(kv.gdb_gold_hist);
       if(Array.isArray(kv.gdb_quadrants) && kv.gdb_quadrants.length) setLiveQuad(kv.gdb_quadrants);
       if(Array.isArray(kv.gdb_watchlist)) setLiveWatchlist(kv.gdb_watchlist);
+      if(kv.gdb_warren && typeof kv.gdb_warren==="object" && !Array.isArray(kv.gdb_warren)) setLiveWarren(kv.gdb_warren);
       if(_btcRecoOk(kv.gdb_btc_reco)) setLiveBtcReco(kv.gdb_btc_reco);
       if(kv.gdb_bench) setLiveBench(_mergeArrays(BENCH_IDX, kv.gdb_bench));
       if(kv.gdb_yfmap&&typeof kv.gdb_yfmap==="object"){ if(Object.keys(kv.gdb_yfmap).length>=10) Object.keys(YF_MAP).forEach(function(k){delete YF_MAP[k];}); Object.assign(YF_MAP,kv.gdb_yfmap); }
@@ -14573,7 +15420,7 @@ function App(){
         {tab===3 && <PageGDB key={"gdb"+chartPrefsVer} chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveGSB={liveGSB} liveGDBS={liveGDBS} liveBench={benchWithGold} liveGC={gcEff} liveDD={liveDD} liveInv={liveInv}/>}
         {tab===5 && <PageLegend txns={txns} liveFutures={liveFutures} hidden={hidden} eur={eur} EFF={EFF} liveIbkrAnnex={liveIbkrAnnex} spotExcl={liveSpotExcl} onExclude={excludeSpotTrade} onRestore={restoreSpotTrades}/>}
         {tab===6 && <PageMarket eur={eur} hfRead={liveHfRead} onHfRead={markHfRead} quadRows={liveQuad} btcReco={liveBtcReco} onSaveBtcReco={saveBtcReco}/>}
-        {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
+        {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} onSaveWarren={saveWarren} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>

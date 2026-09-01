@@ -1216,6 +1216,122 @@ v29.04   Paramètres — menu regroupé par thème, deux imports IBKR distincts
          de réglage.
 
 
+v29.05   Suivi — « Analyse de Warren » : l'entonnoir de Berkshire, et une
+         fiche d'analyse conservée par valeur (worker v163)
+         L'onglet Opportunités ne savait chercher que par les cours : ses 23
+         mesures hebdomadaires sont toutes techniques. Un bouton « 🎩 Analyse
+         de Warren », sous la carte d'état de la base, ouvre l'autre façon de
+         chercher — par les comptes. La méthode est reprise du dépôt
+         github.com/xbtlin/ai-berkshire (MIT), qui met en code le processus de
+         sélection de Berkshire Hathaway. Trois étages :
+
+         ▸ Étage 1 — sept filtres durs, calculés dans l'app, sur les ~503
+           valeurs de l'indice : ROE moyen ≥ 8 %, flux de trésorerie libre
+           cumulé ≥ 0, couverture des intérêts ≥ 2×, marge brute ≥ 15 %,
+           trésorerie d'exploitation / résultat net ≥ 0,7, marge nette ≥ 5 %,
+           dilution ≤ 20 %. Chaque éliminée affiche la porte qui l'a arrêtée
+           et la mesure en clair. Taux de passage par secteur en prime.
+         ▸ Étage 2 — les dix mieux classées sont pré-cochées, ajustables.
+         ▸ Étage 3 — Claude (Sonnet, via le worker) franchit les six portes de
+           la checklist de Buffett, notées ★1-5, sous quatre regards qui se
+           contredisent : Buffett, Munger, Duan Yongping, Li Lu. Sortie en
+           JSON strict : verdict, score composite, douve, risques, valorisation
+           à trois scénarios, test du miroir, thèse.
+
+         Le principe du dépôt gouverne l'étage 1 : « ne jamais éliminer par
+         erreur une entreprise de premier ordre ». Deux règles en découlent,
+         qui ne sont pas des tolérances mais le cœur de la méthode :
+           · une mesure absente n'élimine pas — elle est signalée « non
+             mesurée » et fait baisser la note de qualité d'information ;
+           · une mesure sans objet pour le secteur n'élimine pas non plus.
+             Une banque n'a ni marge brute, ni EBIT, ni flux de trésorerie
+             libre au sens industriel : lui appliquer les portes 2, 3 et 5
+             éliminerait toute la finance. Vérifié sur JPM, BAC et BRK-B, qui
+             passent désormais toutes les trois.
+         Les trois clauses d'exemption du dépôt sont en place (phase
+         d'investissement, marge nette en redressement, volume élevé à marge
+         mince). Une clause n'est invoquée que si elle sauve réellement une
+         porte en échec — sans quoi Microsoft, qui franchit tout, serait
+         étiquetée « exemptée » au seul motif qu'elle en remplit par ailleurs
+         les conditions. Sur l'échantillon de test, seule Costco l'est, par la
+         clause C, et le motif chiffré est affiché.
+
+         ⚠ Deux écarts assumés à la méthode d'origine, affichés dans le modal
+           et non masqués. Les seuils du dépôt portent sur 10 ans (ROE) et
+           5 ans (le reste) ; l'API « fundamentals-timeseries » de Yahoo
+           plafonne à 4 exercices, mesuré sur AAPL, KO, XOM, JPM et NVDA. La
+           profondeur réellement obtenue voyage dans la colonne yrs et
+           s'affiche telle quelle — jamais « 10 ans » sur 4 ans de données.
+           Et la clause A du dépôt vise les sociétés « de moins de 10 ans » :
+           l'âge n'est nulle part dans les données, il est remplacé par le
+           signal mesurable qui l'accompagne (croissance > 15 %/an et
+           trésorerie d'exploitation positive).
+
+         Les valeurs retenues s'enregistrent en idées comme celles du
+         screener : zone d'achat = scénario pessimiste → central, objectif =
+         scénario optimiste, conviction = score composite arrondi, thèse
+         rédigée avec le détail des six portes. Les portes deviennent des
+         catalyseurs FONDAMENTAUX cochés, sans templateId : elles n'ont pas
+         d'équivalent technique réévaluable, autant ne pas faire semblant.
+
+         Nouvelle base gdb_warren : la dernière fiche de chaque valeur, plus
+         les cinq précédentes réduites à {date, verdict, score}. Le préfixe
+         gdb_ suffit à la faire entrer dans la sauvegarde automatique. Elle est
+         bornée à 100 tickers, les plus anciens étant évincés — elle part dans
+         chaque sauvegarde quotidienne, elle ne doit pas enfler.
+
+         Dans le modal titre, un accordéon « 🎩 Analyse de Warren » apparaît
+         au-dessus de « 📊 Ratios financiers », et seulement pour une valeur
+         déjà analysée : verdict, score et date sur la ligne repliée ; les six
+         portes, les quatre regards, les risques, les trois scénarios et le
+         test du miroir au dépli, avec la date d'analyse et la profondeur de
+         l'historique. Quand une analyse antérieure existe, une ligne la
+         rappelle — l'équivalent du thesis-drift du dépôt.
+
+         ── Worker v163 ──────────────────────────────────────────────
+         GET /fundamentals et /fundamentals/chunk décalquent le pipeline du
+         screener technique : lots de 15 valeurs en KV, base fusionnée figée,
+         repli sur la génération précédente. Un seul appel Yahoo par valeur,
+         sans cookie ni crumb. La génération est hebdomadaire et les lots
+         vivent 14 jours : les comptes annuels ne bougent qu'au trimestre.
+         Aucun ratio dépendant du cours n'est stocké — le PE d'une base
+         vieille de deux semaines serait faux ; l'app les calcule avec le prix
+         du jour du screener.
+
+         La réserve laissée ouverte en v28.90 est traitée ici : une société
+         sans historique exploitable renvoie une ligne yrs<2, qui est
+         conservée et ne repart pas en rattrapage. Seul un échec réseau le
+         fait. Le screener technique, lui, garde son comportement.
+
+         POST /warren/analyze relit les fondamentaux dans la base (le client
+         n'apporte que le cours), tente un enrichissement FMP sur 10 exercices
+         pour la short-list seule, puis appelle nlClaude. Celui-ci accepte
+         désormais un modèle par appel : la newsletter garde son défaut, cette
+         route demande Sonnet. Réponse cachée 24 h.
+
+         ⚠ Même réparé, FMP ne peut pas servir l'étage 1 : 250 appels/jour
+           contre ~1 500 nécessaires pour 503 valeurs sur trois endpoints.
+           Son intérêt est la short-list de dix valeurs (~10 appels), et
+           uniquement là. L'enrichissement est séquentiel et s'arrête au
+           premier refus, pour ne pas brûler vingt sous-requêtes pour rien.
+
+         L'appel FMP /stable/profile disparaît de /yahoo-chart. Il ne servait
+         qu'à renseigner logoUrl, et il répondait 401 : l'app se rabattait
+         donc déjà sur le CDN public, que tickerLogoUrl() construit à partir
+         du seul ticker depuis la v28.91. C'était un fetch perdu à chaque
+         chargement de graphe, dans une route au budget contraint. Le champ
+         logoUrl reste dans la réponse, à null.
+
+         GET /fmp-debug est une route de diagnostic TEMPORAIRE, à supprimer
+         une fois le verdict rendu. Elle n'imprime jamais la clé : seulement
+         sa longueur avant et après trim, et le corps d'erreur de FMP, qui
+         s'explique toujours en clair. L'hypothèse de tête est un retour à la
+         ligne collé en fin de secret par « echo … | wrangler secret put » —
+         cela expliquerait qu'une même clé fonctionne depuis un poste local et
+         échoue depuis le worker, pour tous les tickers, toujours. Un blocage
+         d'IP ou un quota épuisé donneraient plutôt 403 ou 429.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)
@@ -1234,7 +1350,7 @@ Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 Validation avant chaque livraison :
   esbuild → node --check → parse Babel → bump du cache-buster index.html
 
-BASES KV (27 clés)
+BASES KV (28 clés)
   gdb_snapshots      Snapshots journaliers {d, ao, ao_usd, eur, gdbs, gdbc}
   gdb_txns           Transactions [{id, date, side, ticker, qty, price, cat}]
   gdb_dd             DD [[date, cryptoEUR, totalEUR, btc$, gdbS$, usdEur]]
@@ -1262,11 +1378,17 @@ BASES KV (27 clés)
   gdb_gold_hist      Historique du cours de l'or
   gdb_quadrants      Quadrants macro
   gdb_watchlist      Suivi — idées de trade (v28.65)
+  gdb_warren         Analyses de Warren {TICKER: fiche + prev[5]} (v29.05)
+                     bornée à 100 tickers — elle part dans chaque sauvegarde
 
-Caches du screener (worker v162, jamais sauvegardés — reconstructibles) :
+Caches du screener (worker v163, jamais sauvegardés — reconstructibles) :
   scr_univ_v1        Univers S&P 500 [[symbole, nom, secteur]] — TTL 7 jours
   scr_p_<gen>_<i>    Lot de 20 valeurs mesurées (gen = date NC) — TTL 3 jours
   scr_all_<gen>      Base du jour recollée, figée dès qu'elle est complète
+  fnd_p_<gen>_<i>    Lot de 15 valeurs, fondamentaux (gen = lundi NC) — 14 j
+  fnd_all_<gen>      Base fondamentale de la semaine, recollée — 14 j
+  fmp10_<SYM>        10 exercices FMP pour une valeur — TTL 30 jours
+  warren_<gen>_<h>   Réponse d'analyse déjà calculée — TTL 24 h
 
 Non synchronisées en KV :
   gdb_drawings_v1    Tracés du graphe (localStorage uniquement)

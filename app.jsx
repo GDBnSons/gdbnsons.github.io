@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.09";
+const APP_VERSION = "v29.10";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -8969,7 +8969,7 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
   }
 
   // ── Étage 3 : la checklist par Claude ───────────────────────────────────
-  const WARREN_BATCH = 4;   // doit rester <= au plafond du worker
+  const WARREN_BATCH = 3;   // doit rester <= au plafond du worker
   function runDeep(){
     var syms = Object.keys(sel).filter(function(k){ return sel[k]; }).slice(0,10);
     if(!syms.length) return;
@@ -8986,8 +8986,18 @@ function WarrenModal({ tracked, onAdd, onSaved, onTicker, eur=false, usdEur=0.86
     var all = [], parts = [], fails = [], done = 0;
     var chain = groups.reduce(function(p, g){
       return p.then(function(){
-        return cfPost("/warren/analyze", { tickers:g, quotes:quotes, deep:true }, { timeout:150000 })
-          .then(function(r){ return r.json(); })
+        return cfPost("/warren/analyze", { tickers:g, quotes:quotes, deep:true }, { timeout:300000 })
+          .then(function(r){
+            // Une coupure Cloudflare (524) renvoie du TEXTE brut, pas du JSON :
+            // r.json() levait alors « Unexpected token 'e' », illisible pour
+            // l'utilisateur. On lit le corps et on rend le motif en clair.
+            if(!r.ok) return r.text().then(function(t){
+              var m = String(t||"").match(/error code:\s*(\d+)/i);
+              if(m && m[1]==="524") throw new Error("Cloudflare a coupé la requête (524) — le modèle a mis trop longtemps");
+              throw new Error(m ? ("Cloudflare : code "+m[1]) : ("HTTP "+r.status));
+            });
+            return r.json();
+          })
           .then(function(d){
             if(d && d.ok && Array.isArray(d.analyses)){ d.analyses.forEach(function(a){ all.push(a); }); parts.push(d); }
             else fails.push({ g:g, d:d });

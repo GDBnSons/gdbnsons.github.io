@@ -1466,6 +1466,38 @@ v29.09   Opportunités — la note de Warren ne s'écrit plus qu'une fois
          quand aucune mesure ne le suit.
 
 
+v29.10   Analyse de Warren — le worker répond en flux : fin des coupures
+         Cloudflare (524)
+         Premier lancement en conditions réelles : la base fondamentale s'est
+         construite sans faute (500 valeurs sur 503), puis l'étage 3 a rendu
+         « Unexpected token 'e', "error code: 524 " is not valid JSON ».
+
+         Ce n'était pas le modèle. Cloudflare coupe à ~100 secondes toute
+         requête dont l'origine n'a pas encore renvoyé le moindre octet, et
+         rend « error code: 524 » — du TEXTE brut, que r.json() ne pouvait que
+         refuser, d'où le message incompréhensible. Un lot de quatre valeurs
+         dépassait ce délai.
+
+         ▸ Réduire les lots ne suffisait pas : c'est le temps de réflexion du
+           modèle qui domine, pas leur taille. POST /warren/analyze ouvre
+           désormais sa réponse immédiatement et y écrit un espace toutes les
+           cinq secondes en attendant. Un espace en tête de document est du
+           JSON parfaitement valide : r.json() les ignore côté app, et le
+           compteur de Cloudflare ne démarre jamais. Vérifié : espaces puis
+           JSON, relu par Response.json(), rend bien l'objet attendu.
+         ▸ Les lots passent de 4 à 3 valeurs — progression plus fine et dégât
+           moindre si l'un échoue —, et le délai côté app monte à 300 s,
+           puisque la connexion est maintenant tenue ouverte.
+         ▸ Une réponse non-JSON est enfin lisible : l'app lit le corps et
+           affiche « Cloudflare a coupé la requête (524) — le modèle a mis
+           trop longtemps », au lieu de l'erreur de parsing brute.
+
+         ⚠ Le modèle et son niveau d'effort restent inchangés (claude-opus-5,
+           effort par défaut). Baisser l'un ou l'autre aurait raccourci les
+           temps mais dégradé une analyse en six portes : le flux règle le
+           problème sans toucher à la qualité.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

@@ -890,7 +890,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.10";
+const APP_VERSION = "v29.11";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -2487,7 +2487,7 @@ function TickerModal({ ticker, cat="", eur=false, usdEur=0.86, onClose }) {
                 if(logoSrc) return(
                   <LogoImg chip src={logoSrc} alt={ticker}
                     style={{width:28,height:28,borderRadius:6,objectFit:"contain",padding:2,
-                      boxSizing:"border-box",border:`1px solid ${C.border}`,flexShrink:0}}/>
+                      boxSizing:"border-box",flexShrink:0}}/>
                 );
                 return null;
               })()}
@@ -3579,7 +3579,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                   const Logo = item.iconComponent && SVG_ONLY.includes(item.ticker)
                     ? BankLogo[item.iconComponent] : null;
                   if(Logo) return(
-                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:LOGO_CHIP_BG,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
                       <Logo/>
                     </div>
                   );
@@ -3597,7 +3597,7 @@ function SectionRow({section, open, onToggle, hidden=false, eur=false, usdEur=0.
                     );
                   }
                   return(
-                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                    <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:LOGO_CHIP_BG,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
                       {item.icon||item.ticker?.slice(0,4)}
                     </div>
                   );
@@ -4336,93 +4336,114 @@ function getBestIcon(ticker, cat){
   if(cdn)       return { type:"img",   value: cdn };
   return null;
 }
-/* ── v28.92 — le fond de la pastille dépend du logo ───────────────────────────
-   Environ un logo sur douze est un glyphe BLANC sur fond transparent (UBER,
-   QQQ, ANET, NKE, V, DIS, IBM…) : posé sur la pastille blanche de la v28.91,
-   il disparaissait — l'« icône toute blanche ». Les autres sont à l'encre
-   sombre (PLTR, NVDA, IBKR…) et disparaîtraient sur un fond sombre. C'est
-   donc le ton du logo qui choisit le fond.
-   Les logos clairs du S&P 500 et du portefeuille sont écrits EN DUR : rien à
-   mesurer ni à recharger pour eux. Pour un ticker hors de cette liste, le ton
-   est déduit une fois de l'image déjà affichée (le CDN autorise CORS, donc le
-   canvas est lisible) et gardé en mémoire — aucune requête supplémentaire.
-   Mesure : part des pixels opaques plus sombres que 200 de luminance. Sur les
-   526 logos mesurés, les clairs sont sous 2 % (42 à 0,00 % pile, MCD à 1,95 %
-   avec ses arches jaunes) et les suivants à 3,3 % et plus : seuil à 2,5 %. */
-const LOGO_PALE = new Set(("ABBV ADI ADSK AIG ALB ALL AMP ANET APP AVB AWK AXON BA BAX BLK "+
-  "CEG CSX CTAS DHI DIS FAST HSY IBM KR LMT MCD MRVL NKE NTAP OIH ON QQQ RCL REGN STT UBER "+
-  "ULTA UNH V VRTX WSM WYNN XPEV").split(" "));
-const LOGO_CHIP = { ink:"#ffffff", pale:"#252a33" };
-const LOGO_TONE = {};          // url → "pale" | "ink", mémoire de session
+/* ── v29.11 — pastille NOIRE partout, et les logos trop sombres relevés ───────
+   Toutes les icônes de ticker sont posées sur du noir : les pastilles blanches
+   de la v28.92 tranchaient trop sur le thème.
+   Un fond unique redevient tenable parce que la quasi-totalité des logos sont
+   soit clairs, soit d'une couleur franche. Mesuré sur les 527 valeurs du
+   S&P 500 et du portefeuille : 360 des 382 logos transparents ressortent
+   nettement sur noir. Ce qui compte n'est pas leur luminance mais leur canal
+   le plus fort — le rouge de XOM ou TXN a une luminance de 55 mais un canal
+   rouge à 227 : sur noir, il claque.
+   Restent 22 logos trop sombres, redressés par un filtre CSS :
+     · 19 sont noirs ou quasi (PLTR, GS, SYK, INTC, MAR…) → invert(1), le
+       traitement « mode sombre » habituel : le glyphe noir devient blanc.
+       Deux d'entre eux (FE, TRV) gardent un petit élément coloré dont
+       l'inversion change la teinte : à 26 px, le voir mal vaut mieux que ne
+       pas le voir du tout — brightness ne leur fait rien (0 × 1,9 = 0).
+     · 3 sont d'une couleur sombre (PSKY, KDP, EOG) → brightness, qui les
+       éclaircit sans toucher à la teinte — les inverser la détruirait.
+   Les 142 logos OPAQUES portent leur propre fond cuit dans le PNG : la
+   pastille ne se voit pas derrière eux, il n'y a rien à y faire.
+   Hors de ces listes, la mesure se refait une fois sur l'image déjà affichée. */
+const LOGO_CHIP_BG = "#000000";
+const LOGO_INVERT = new Set(("ALGN BX CMI COHR DLR ESS FE GDDY GS INTC ISRG MAR PCAR PLTR "+
+  "Q SPG SYK TRV VICI").split(" "));
+const LOGO_LIFT   = new Set("EOG KDP PSKY".split(" "));
+const LOGO_FIX = {};           // url → "invert" | "lift" | "", mémoire de session
 function logoSymOf(url){
   return (typeof url==="string" && url.indexOf(LOGO_CDN)===0)
     ? url.slice(LOGO_CDN.length).replace(/\.png$/,"") : null;
 }
-// Ton connu d'avance : liste en dur, puis mesures de la session. Sinon "ink",
-// le cas de loin le plus fréquent — et le repli sûr.
-function logoTone(url){
-  if(!url) return "ink";
+// Filtre à appliquer : listes en dur d'abord, puis mesures de la session.
+// Sinon aucun filtre — le cas de loin le plus fréquent, et le repli sûr.
+function logoFilter(url){
+  if(!url) return "";
   const sym = logoSymOf(url);
-  if(sym && LOGO_PALE.has(sym)) return "pale";
-  return LOGO_TONE[url] || "ink";
+  if(sym && LOGO_INVERT.has(sym)) return "invert";
+  if(sym && LOGO_LIFT.has(sym))   return "lift";
+  return LOGO_FIX[url] || "";
 }
-function logoToneKnown(url){
+function logoFixKnown(url){
   const sym = logoSymOf(url);
-  return !!url && (!!LOGO_TONE[url] || !!(sym && LOGO_PALE.has(sym)));
+  return !!url && (LOGO_FIX[url] !== undefined
+                   || !!(sym && (LOGO_INVERT.has(sym) || LOGO_LIFT.has(sym))));
 }
-// Mesure le ton sur l'image DÉJÀ chargée. Un canvas teinté (logo servi sans
-// CORS) lève : on garde alors le fond clair, sans bruit.
-function noteLogoTone(url, el){
-  if(!url || !el || logoToneKnown(url)) return null;
-  let tone = "ink";
+// Mesure sur l'image DÉJÀ chargée, donc sans requête supplémentaire : part des
+// pixels opaques dont le canal le plus fort dépasse 70 (c'est lui qui fait la
+// lisibilité sur noir), et part des pixels colorés. Un canvas teinté (logo
+// servi sans CORS) lève : on n'applique alors aucun filtre, sans bruit.
+function noteLogoFix(url, el){
+  if(!url || !el || logoFixKnown(url)) return null;
+  let fix = "";
   try{
     const w = el.naturalWidth, h = el.naturalHeight;
     if(!w || !h) return null;
     const c = document.createElement("canvas"); c.width = w; c.height = h;
     const x = c.getContext("2d"); x.drawImage(el, 0, 0);
     const d = x.getImageData(0, 0, w, h).data;
-    let op = 0, dark = 0;
+    let op = 0, vis = 0, col = 0;
     for(let i=0;i<w*h;i++){
       if(d[i*4+3] < 24) continue;
       op++;
-      if(0.2126*d[i*4] + 0.7152*d[i*4+1] + 0.0722*d[i*4+2] < 200) dark++;
+      const R = d[i*4], G = d[i*4+1], B = d[i*4+2];
+      const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      if(mx >= 70)      vis++;
+      if(mx - mn > 40)  col++;
     }
-    if(op && dark/op < 0.025) tone = "pale";
+    if(op && vis/op < 0.25) fix = (col/op < 0.25) ? "invert" : "lift";
   }catch(e){ return null; }
-  LOGO_TONE[url] = tone;
-  return tone;
+  LOGO_FIX[url] = fix;
+  return fix;
 }
 /* <img> qui se replie sur `fallback` au lieu de laisser un trou : le CDN
    ne connaît pas tous les tickers (AVIO → 404).
-   Avec `chip`, l'image porte son propre fond, choisi d'après son ton. */
+   Avec `chip`, l'image porte son fond noir et, au besoin, son filtre. */
 function LogoImg({ src, alt, style, fallback=null, chip=false, ...rest }){
   const [bad, setBad] = useState(false);
-  const [tone, setTone] = useState(function(){ return logoTone(src); });
-  useEffect(function(){ setBad(false); setTone(logoTone(src)); }, [src]);
+  const [fix, setFix] = useState(function(){ return logoFilter(src); });
+  useEffect(function(){ setBad(false); setFix(logoFilter(src)); }, [src]);
   if(!src || bad) return fallback;
-  const st = chip ? { ...style, background: LOGO_CHIP[tone] || LOGO_CHIP.ink } : style;
+  // `filter` s'applique à TOUT l'élément, fond compris : sous invert(1) il
+  // faut donc partir d'un fond blanc pour obtenir du noir à l'écran.
+  // brightness, lui, laisse le noir noir (0 × 1,9 = 0).
+  const st = chip ? { ...style,
+                      background: fix==="invert" ? "#ffffff" : LOGO_CHIP_BG,
+                      filter: fix==="invert" ? "invert(1)"
+                            : fix==="lift"   ? "brightness(1.9)" : undefined }
+                  : style;
   // crossOrigin seulement sur notre CDN (qui renvoie Access-Control-Allow-Origin:*) :
   // l'imposer à un logo servi sans CORS l'empêcherait de s'afficher du tout.
   const cors = (typeof src==="string" && src.indexOf(LOGO_CDN)===0) ? "anonymous" : undefined;
   return <img src={src} alt={alt||""} loading="lazy" style={st} crossOrigin={cors}
-              onLoad={chip ? function(e){ const t = noteLogoTone(src, e.target); if(t) setTone(t); } : undefined}
+              onLoad={chip ? function(e){ if(noteLogoFix(src, e.target) !== null) setFix(logoFilter(src)); } : undefined}
               onError={function(){ setBad(true); }} {...rest}/>;
 }
 /* Pastille logo des listes du Suivi (screener S&P 500 + idées suivies).
-   Fond blanc : beaucoup de logos sont noirs sur transparent, donc invisibles
-   sur le thème sombre. Repli sur le début du ticker si le CDN ne l'a pas. */
+   Fond noir comme partout ailleurs, y compris derrière un emoji ou le repli
+   sur le début du ticker quand le CDN ne connaît pas la valeur. */
 function ScrLogo({ ticker, size=28, cat="Action", fallback=null }){
   const best = getBestIcon(ticker, cat);
   const box  = { width:size, height:size, borderRadius:size*0.28, flexShrink:0,
                  display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" };
   // v28.94 — `fallback` permet a un appelant de choisir son propre repli
   // (monogramme colore de la Legend) ; sans lui, le repli gris d'origine.
-  const fb   = fallback || <div style={{...box, background:C.bg3, fontSize:size*0.33, fontWeight:800, color:C.text3}}>
+  const fb   = fallback || <div style={{...box, background:LOGO_CHIP_BG, fontSize:size*0.33, fontWeight:800, color:C.text3}}>
                  {String(ticker||"").slice(0,3)}</div>;
   if(best && best.type==="img")
     return <LogoImg src={best.value} alt={ticker} fallback={fb}
              chip style={{...box, objectFit:"contain", padding:2, boxSizing:"border-box"}}/>;
-  if(best) return <div style={{...box, background:C.bg3, fontSize:size*0.5}}>{best.value}</div>;
+  if(best) return <div style={{...box, background:LOGO_CHIP_BG, fontSize:size*0.5}}>{best.value}</div>;
   return fb;
 }
 // Écrit dans ICON_DB, resync CUSTOM_ICONS, persiste en localStorage
@@ -4511,7 +4532,7 @@ function TickerIcon({ ticker, size=32, color="#ffffff22", cat="", onIconSaved, i
         onClick={e => { e.stopPropagation(); setUserInput(db.user||""); setOpen(true); }}
         style={{
           width:size, height:size, borderRadius:size*0.25, flexShrink:0,
-          background: color, display:"flex", alignItems:"center",
+          background: LOGO_CHIP_BG, display:"flex", alignItems:"center",
           justifyContent:"center", fontSize:size*0.5, cursor:"pointer",
           position:"relative",
         }}

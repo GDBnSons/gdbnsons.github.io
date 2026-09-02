@@ -1497,6 +1497,54 @@ v29.10   Analyse de Warren — le worker répond en flux : fin des coupures
            temps mais dégradé une analyse en six portes : le flux règle le
            problème sans toucher à la qualité.
 
+v29.11   Icônes de ticker — pastille noire dans toute l'app
+         Les pastilles blanches de la v28.92 tranchaient trop sur le thème.
+         Toutes les icônes de ticker passent au NOIR, partout : portefeuille,
+         en-tête du modal, détail du donut, screener S&P 500, idées suivies,
+         Analyses, Legend, sélecteur d'icône. Le fond noir s'applique aussi
+         derrière un emoji (₿, ✈️) et derrière le repli sur les trois premières
+         lettres du ticker, pour que la colonne soit d'un seul tenant.
+         ▸ Un fond UNIQUE redevient tenable parce que la mesure du ton, qui
+           servait à choisir entre blanc et ardoise, n'a plus lieu d'être : sur
+           les 527 valeurs du S&P 500 et du portefeuille, 360 des 382 logos
+           transparents ressortent nettement sur noir. Ce qui compte n'est pas
+           leur LUMINANCE mais leur CANAL LE PLUS FORT — le rouge de XOM ou de
+           TXN a une luminance de 55, mais un canal rouge à 227 : sur noir, il
+           claque. La première mesure, faite en luminance, annonçait 71 logos
+           perdus ; en canal max, il n'y en a que 22.
+         ▸ Ces 22 logos trop sombres sont redressés par un filtre CSS, écrits
+           en dur comme la liste des logos clairs de la v28.91 :
+           · 19 sont noirs ou quasi (PLTR, GS, SYK, INTC, MAR, VICI…) →
+             invert(1), le traitement « mode sombre » habituel : le glyphe noir
+             devient blanc. Vérifié : de 0 % à 100 % de surface lisible.
+           · 3 sont d'une couleur sombre (PSKY, KDP, EOG) → brightness(1.9),
+             qui les éclaircit sans toucher à la teinte — les inverser la
+             détruirait. 0 → 100 %, 14 → 94 %, 20 → 82 %.
+         ▸ Deux cas assumés : FE et TRV sont noirs à 80 % avec un petit élément
+           coloré. brightness ne leur fait RIEN (0 × 1,9 = 0), ils restaient
+           donc invisibles ; ils sont inversés, et leur élément coloré change
+           de teinte. À 26 px, mal le voir vaut mieux que ne pas le voir.
+         ▸ Le filtre CSS s'applique à TOUT l'élément, fond compris : sous
+           invert(1) la pastille part donc du BLANC pour arriver au noir à
+           l'écran. brightness, lui, laisse le noir noir. Vérifié pixel par
+           pixel sur les 526 logos : la pastille sort à 0 partout (une seule à
+           10/255, imperceptible). La bordure de l'en-tête du modal a été
+           retirée pour la même raison — elle se serait inversée avec le logo.
+         ▸ 140 logos sont OPAQUES : ils portent leur propre fond cuit dans le
+           PNG, la pastille ne se voit pas derrière eux. Rien à y faire — et
+           ceux dont le fond cuit est sombre (GRMN, NOC, PALL, GWW…) se fondent
+           d'ailleurs parfaitement dans le noir.
+         ▸ Hors des deux listes en dur, la mesure se refait une fois sur
+           l'image déjà affichée, sans requête supplémentaire : part des pixels
+           opaques dont le canal max dépasse 70, et part des pixels colorés.
+           Moins de 25 % de lisible → inversion si le logo est en niveaux de
+           gris, éclaircissement sinon.
+         ▸ Testé en navigateur, rendu final simulé (composite sur le fond CSS
+           puis filtre) sur les 526 logos : aucun logo invisible, aucune
+           pastille non noire. Contrôle des composants rendus par React —
+           ScrLogo et TickerIcon, logo, emoji et repli texte — tous à
+           rgb(0, 0, 0).
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────

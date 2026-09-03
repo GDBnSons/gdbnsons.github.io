@@ -1602,8 +1602,27 @@ v29.12   Refresh — Yahoo a changé le format de /spark : tout le portefeuille
            « AXTI 260828P00062000 » (un contrat d'option, avec des espaces).
            Ils sont à corriger ou à retirer dans l'éditeur YF_MAP.
 
-         Worker v163 redéployé (version e06ca541). /ping : hasKV et hasAuth
-         à true, cron horaire conservé.
+         Confirmé en production, sonde temporaire depuis l'egress du worker
+         (colo NOU, retirée depuis) :
+           · spark query1 et query2 → 200, format plat — Yahoo ne bloque donc
+             pas le worker, contrairement à ce qu'on aurait pu croire ;
+           · chart v8 → 200 aussi, le repli n'était pas mort non plus ;
+           · /yahoo-quotes rejoué sur la vraie gdb_yfmap : 53 symboles sur 53
+             en 371 ms, _via {spark: 53, chart: 0}, missing vide.
+         Le repli par-ticker ne sert donc plus du tout.
+
+         Ce que cette mesure explique en retour : « ça marchait hier ». Avec
+         l'ancien parseur, spark rendait 0 mais les 45 premiers symboles
+         passaient quand même par le repli chart, UN APPEL PAR TICKER. Ça
+         tenait tant que la liste restait courte. En grossissant, les 45
+         requêtes simultanées vers Yahoo depuis une seule IP de datacenter se
+         sont fait jeter — d'où l'effondrement d'un coup plutôt qu'une
+         dégradation progressive, et d'où les ~2 minutes d'attente avant
+         l'erreur : c'était le repli côté app qui déroulait ~55 tickers par
+         lots de 5, à 10 s de timeout chacun.
+
+         Worker v163 redéployé (version 5e73dcf8). /ping : hasKV et hasAuth à
+         true, cron horaire conservé. Refresh confirmé fonctionnel côté app.
 
 
 ARCHITECTURE TECHNIQUE

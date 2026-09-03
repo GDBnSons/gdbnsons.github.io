@@ -723,7 +723,11 @@ async function fetchAllPrices(){
 
   // v27.25 — Phase 1 : batch des cours en UN seul appel worker (/yahoo-quotes).
   // Fallback par-ticker (anciens proxies) uniquement pour les symboles manquants.
-  const entries = Object.entries(YF_MAP).filter(([key])=> key!=="EURUSD");
+  // v29.12 — EURUSD n'est plus exclu : il l'etait depuis le passage au batch
+  // (v27.25) alors que handleRefresh lit toujours prices.EURUSD. Resultat, le taux
+  // EUR/USD retombait a chaque refresh sur la valeur figee du build et "EUR"
+  // n'apparaissait jamais dans le rapport de refresh.
+  const entries = Object.entries(YF_MAP);
   // v28.75 — Positions detenues absentes de YF_MAP : on les interroge quand meme
   // (symbole = ticker, comme le fait deja le modal). Sans cela leur prix n'etait
   // jamais rafraichi et restait fige sur la derniere valeur enregistree.
@@ -890,7 +894,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.11";
+const APP_VERSION = "v29.12";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);

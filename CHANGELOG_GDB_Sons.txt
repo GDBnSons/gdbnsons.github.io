@@ -1545,6 +1545,66 @@ v29.11   Icônes de ticker — pastille noire dans toute l'app
            ScrLogo et TickerIcon, logo, emoji et repli texte — tous à
            rgb(0, 0, 0).
 
+v29.12   Refresh — Yahoo a changé le format de /spark : tout le portefeuille
+         tombait en échec
+         Le rapport de refresh affichait 58 tickers en « ⚠ Échec » pour 4 en
+         « ✓ Mis à jour ». BTC, ETH, AAPL, TSLA, META, QQQ : plus rien ne se
+         mettait à jour, l'app tournait sur les prix du dernier snapshot.
+
+         Ce n'était ni la phrase secrète, ni le quota, ni Yahoo en panne :
+         l'endpoint /v8/finance/spark répond 200 et sert bien les cours. Il a
+         changé de FORME. Il rendait :
+
+             {spark:{result:[{symbol:"AAPL", response:[{meta:{…}}]}]}}
+
+         il rend maintenant un objet PLAT, une clé par symbole :
+
+             {"AAPL":{symbol:"AAPL", fulldayPrice:328.07, close:[…],
+                      chartPreviousClose:324.96}, …}
+
+         Le parseur du worker cherchait d.spark.result, ne trouvait pas de
+         tableau, et sortait sans rien écrire — silencieusement, puisque tout
+         est enveloppé dans un try/catch vide. Mesuré sur une réponse réelle
+         de 20 symboles : ancien parseur 0 prix, nouveau parseur 20 sur 20.
+
+         ▸ Effet domino, et c'est lui qui expliquait l'ampleur du désastre.
+           Les ~60 symboles basculaient tous sur le repli chart v8, un appel
+           PAR ticker. Or un Worker Cloudflare n'a droit qu'à 50 sous-requêtes
+           par invocation : 4 spark + 45 chart = 49, et le moindre réessai
+           query2 faisait franchir la limite — auquel cas TOUS les fetch
+           suivants échouent d'un coup. Le peu qui passait se heurtait encore
+           au throttling de Yahoo sur 45 requêtes simultanées depuis une même
+           IP de datacenter. D'où 4 rescapés.
+         ▸ Le parseur lit désormais les deux formes (fulldayPrice, puis
+           meta.regularMarketPrice, puis le dernier close non nul, puis
+           chartPreviousClose) : si Yahoo repasse à l'ancien format, rien ne
+           casse.
+         ▸ Un budget de sous-requêtes explicite borne les deux étages. Il ne
+           s'agit pas d'aller plus vite mais de DÉGRADER proprement : dépasser
+           la limite ne coûte plus la totalité du refresh.
+         ▸ La réponse expose _via {spark, chart, budgetLeft} — de quoi voir
+           d'un coup d'œil, la prochaine fois, par quel étage sont passés les
+           cours.
+
+         Le même parseur périmé servait nlFetchSpark, qui porte la photo de
+         marché de la newsletter ET le re-pricing serveur du portefeuille dans
+         la sauvegarde quotidienne. Corrigé pareil, budget compris — son repli
+         par-ticker n'était même pas plafonné.
+
+         ▸ Au passage, EURUSD n'est plus exclu de fetchAllPrices. Il l'était
+           depuis le passage au batch (v27.25), alors que handleRefresh lit
+           toujours prices.EURUSD : le taux EUR/USD retombait donc à chaque
+           refresh sur la valeur figée du build, et « EUR » n'apparaissait
+           jamais dans le rapport. Les totaux € suivent enfin le change réel.
+
+         ⚠ Restent en échec des tickers qui n'existent pas chez Yahoo et qui
+           n'ont rien à voir avec ce bug : « GOLD SPOT », « AL2SI », « 2DG »,
+           « AXTI 260828P00062000 » (un contrat d'option, avec des espaces).
+           Ils sont à corriger ou à retirer dans l'éditeur YF_MAP.
+
+         Worker v163 redéployé (version e06ca541). /ping : hasKV et hasAuth
+         à true, cron horaire conservé.
+
 
 ARCHITECTURE TECHNIQUE
 ───────────────────────
@@ -1558,7 +1618,7 @@ APIs       Yahoo Finance (cours, news, recherche), FMP (logos stocks),
            colintalkscrypto.com (CBBI), Farside (flux ETF),
            datahub / s-and-p-500-companies (composition du S&P 500, v162),
            Resend + Telegram (newsletter), Claude (résumés de news)
-Worker     Cloudflare Worker v162 (proxy API, KV store, no CORS, cron, screener)
+Worker     Cloudflare Worker v163 (proxy API, KV store, no CORS, cron, screener)
 Timezone   UTC+11 (Nouvelle-Calédonie) — toutes dates de snapshot
 
 Validation avant chaque livraison :

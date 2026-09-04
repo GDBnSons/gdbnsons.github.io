@@ -1625,6 +1625,68 @@ v29.12   Refresh — Yahoo a changé le format de /spark : tout le portefeuille
          true, cron horaire conservé. Refresh confirmé fonctionnel côté app.
 
 
+v29.13   Finition générale — chiffres alignés, chrome translucide, retour
+         tactile sur tous les boutons
+         Passe de polish transverse : rien ne change dans les données ni dans
+         la navigation, seulement la façon dont l'app se tient.
+
+         Une feuille de style globale (polishCss(), en haut de app.jsx)
+         remplace la poignée de règles qui traînaient en fin de rendu. Elle est
+         interpolée avec le thème courant et rejouée au changement de thème, la
+         racine portant déjà key={themeName}. Elle est aussi posée sur l'écran
+         de démarrage, qui n'en avait aucune.
+
+         Ce qu'elle apporte, partout à la fois :
+           tabular-nums     Les chiffres passent à chasse fixe. Dans une app de
+                            montants c'est le gain le plus visible : les
+                            colonnes de Stats, du Journal et du Portefeuille ne
+                            dansent plus d'une ligne à l'autre.
+           lissage          -webkit-font-smoothing sur fond sombre.
+           tap-highlight    Le rectangle gris au doigt disparaît — c'était le
+                            plus gros « ça fait page web » qui restait.
+           boutons          Transition + enfoncement à 0,97 sur :active, focus
+                            clavier restauré (button{outline:none} le tuait),
+                            état :disabled homogène.
+           champs           Bordure orange au focus, en !important : les
+                            champs posent leur bordure en inline, sans ça la
+                            saisie n'avait aucun retour visuel.
+           <select>         Chevron redessiné en SVG data-URI.
+                            -webkit-appearance:none effaçait la flèche native :
+                            plus rien ne signalait qu'ils se déroulaient.
+           reduced-motion   Les trois animations ajoutées se coupent, le
+                            spinner de refresh est conservé.
+
+         Chrome de l'app :
+           En-tête et barre d'onglets deviennent translucides + flous. Le
+           backdropFilter était déjà déclaré mais inopérant, posé sur un fond
+           opaque. L'en-tête gagne un filet bas, sans quoi le contenu qui
+           défile dessous n'a plus de limite.
+           Boutons de l'en-tête 32 → 36 px.
+           Onglet actif : pastille orange derrière le glyphe. Les glyphes
+           (◎ ◑ ▲ ◈ ♛ ❖ ◉) se ressemblent trop pour que la seule teinte suffise.
+           Transition de page à l'ouverture d'un onglet (240 ms de montée).
+
+         iPhone — env(safe-area-inset-*) :
+           index.html gagne viewport-fit=cover. Sans lui les insets valent
+           toujours 0 et, en mode PWA avec status-bar black-translucent, la
+           barre d'onglets passait sous l'indicateur d'accueil et l'en-tête
+           sous l'heure. Le padding bas de la coque passe à 84 px + inset
+           (barre mesurée à 72 px, 12 px de garde).
+
+         Feuilles modales : poignée, filet haut, ombre portée, animation de
+         montée et fondu du voile.
+
+         ⚠ crd() gagne une ombre courte + un liseré blanc à 3,5 % (variante
+         atténuée sur Arctic et Tropical), mais le helper n'est appelé que 8
+         fois : l'immense majorité des cartes est écrite en style inline et
+         garde son aspect plat. Les unifier demande de les migrer sur crd(),
+         ce qui est un autre chantier.
+
+         Vérifié dans le navigateur sur les 7 onglets : aucune erreur console
+         imputable, rien de masqué par la barre d'onglets, thème Arctic
+         contrôlé (l'en-tête et la barre y passent à 90/95 % d'opacité).
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)

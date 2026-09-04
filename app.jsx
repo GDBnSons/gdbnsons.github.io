@@ -71,6 +71,57 @@ const THEMES = {
 
 /* C est une variable module réassignable au changement de thème */
 let C = THEMES.dark;
+/* Thèmes clairs : le liseré blanc en haut des cartes et les fonds translucides
+   n'ont de sens que sur fond sombre — sur Arctic et Tropical ils délavent. */
+const isLightTheme = () => C.name==="Arctic Light" || C.name==="🌴 Tropical";
+
+/* ── Feuille globale ────────────────────────────────────────────────────────
+   Finition transverse à toute l'app : chiffres à chasse fixe (les colonnes de
+   montants ne dansent plus d'une ligne à l'autre), lissage des polices sur
+   fond sombre, suppression du flash gris au tap, retour tactile et focus
+   clavier sur TOUS les boutons. Les couleurs sont interpolées : le bloc se
+   réécrit au changement de thème, la racine portant key={themeName}. */
+const polishCss = () => `
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{overscroll-behavior-y:contain}
+  #root{
+    font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+    -webkit-tap-highlight-color:transparent;
+  }
+  ::selection{background:${C.btc}44;color:${C.text}}
+  ::-webkit-scrollbar{display:none}
+  input,select,textarea{-webkit-appearance:none;font-family:inherit}
+  /* Les champs posent leur bordure en style inline : il faut !important pour
+     que le focus la reprenne. Sans ça, aucun retour visuel à la saisie. */
+  input:focus,select:focus,textarea:focus{border-color:${C.btc}!important}
+  /* -webkit-appearance:none efface aussi la flèche native des <select> :
+     on la redessine, sinon rien ne signale qu'ils sont déroulants. */
+  select{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='none' stroke='${C.text2.replace('#','%23')}' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 6 6.5l5-5'/%3E%3C/svg%3E")!important;
+    background-repeat:no-repeat!important;background-position:right 12px center!important;
+    padding-right:32px!important;
+  }
+  button:disabled{opacity:.55;cursor:not-allowed}
+  button{
+    outline:none;font-family:inherit;-webkit-tap-highlight-color:transparent;
+    transition:background-color .16s ease,border-color .16s ease,color .16s ease,opacity .16s ease,transform .1s ease;
+  }
+  button:active:not(:disabled){transform:scale(.97);opacity:.86}
+  button:focus-visible{outline:2px solid ${C.btc};outline-offset:2px}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @keyframes gdbPageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes gdbSheetUp{from{transform:translateY(24px)}to{transform:none}}
+  @keyframes gdbFadeIn{from{opacity:0}to{opacity:1}}
+  .gdb-page{animation:gdbPageIn .24s cubic-bezier(.32,.72,0,1)}
+  .gdb-sheet{animation:gdbSheetUp .3s cubic-bezier(.32,.72,0,1)}
+  .gdb-fade{animation:gdbFadeIn .2s ease}
+  @media (prefers-reduced-motion:reduce){
+    .gdb-page,.gdb-sheet,.gdb-fade{animation:none}
+    button:active:not(:disabled){transform:none}
+  }
+`;
 const getCC = () => ({Indices:C.blue,Picking:C.teal,Or:C.gold,Cash:C.gray});
 let cc = getCC();
 
@@ -894,7 +945,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.12";
+const APP_VERSION = "v29.13";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -1604,7 +1655,7 @@ const SC=({label,val,color,sub,small})=>(
 );
 const SH=({label,right,color})=>(
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,marginTop:16}}>
-    <span style={{fontSize:10,fontWeight:800,color:color||C.gray,textTransform:"uppercase",letterSpacing:.8}}>{label}</span>
+    <span style={{fontSize:11,fontWeight:800,color:color||C.gray,textTransform:"uppercase",letterSpacing:.9}}>{label}</span>
     {right&&<span style={{fontSize:13,fontWeight:800,color:color||C.text}}>{right}</span>}
   </div>
 );
@@ -1629,13 +1680,19 @@ const crd=(x={})=>({
       ? `0 2px 12px rgba(0,194,199,.08)`
       : C.name==="Bitcoin Maximalist"
         ? `0 2px 16px rgba(247,147,26,.06)`
-        : "none",
+        // Défaut (Dark, Bloomberg…) : ombre portée courte + liseré haut d'un
+        // blanc à 3,5 % — c'est lui qui détache la carte du fond sans halo.
+        : isLightTheme()
+          ? `0 1px 2px rgba(15,32,48,.06)`
+          : `0 1px 2px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.035)`,
   marginBottom:7,
   ...x,
 });
 const Modal=({title,onClose,children})=>(
-  <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.82)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
-    <div style={{background:C.bg1,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"92vh",overflowY:"auto",padding:"20px 20px 48px"}}>
+  <div className="gdb-fade" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.82)",backdropFilter:"blur(3px)",WebkitBackdropFilter:"blur(3px)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+    <div className="gdb-sheet" style={{background:C.bg1,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"92vh",overflowY:"auto",padding:"12px 20px 48px",borderTop:`1px solid ${C.border2}`,boxShadow:"0 -12px 40px rgba(0,0,0,.45)"}}>
+      {/* Poignée — même repère visuel que les autres feuilles de l'app */}
+      <div style={{width:36,height:4,borderRadius:2,background:C.border2,margin:"0 auto 14px"}}/>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
         <span style={{fontSize:16,fontWeight:800}}>{title}</span>
         <button onClick={onClose} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,width:32,height:32,color:C.text2,fontSize:18,cursor:"pointer"}}>×</button>
@@ -15637,22 +15694,25 @@ function App(){
 
         </div>
       )}
-      <style>{"@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
+      <style>{polishCss()}</style>
     </div>
   );
 
   return(
-    <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:78,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
+    <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:"calc(84px + env(safe-area-inset-bottom))",boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
       <div style={{
-        padding:"13px 16px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        padding:"calc(13px + env(safe-area-inset-top)) 16px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",
         position:"sticky",top:0,zIndex:100,
-        background:C.bg,
-        backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",
+        // Fond translucide : le backdropFilter était inopérant sur un bg opaque.
+        // Le contenu défile maintenant visiblement sous la barre, d'où le filet.
+        background:isLightTheme()?C.bg+"E6":C.bg+"D9",
+        borderBottom:`1px solid ${C.border}66`,
+        backdropFilter:"blur(16px) saturate(160%)",WebkitBackdropFilter:"blur(16px) saturate(160%)",
       }}>
         {/* Gauche : ↺ 📸 💵 */}
         <div style={{display:"flex",gap:9,alignItems:"center"}}>
           <button onClick={handleRefresh} disabled={refreshing} title="Actualiser les prix" style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
+            width:36,height:36,borderRadius:(C.radiusSm||6)+2,
             border:`1.5px solid ${refreshing?C.border:C.green}`,
             background:refreshing?"transparent":C.green+"1A",
             cursor:refreshing?"not-allowed":"pointer",
@@ -15661,13 +15721,13 @@ function App(){
             animation:refreshing?"spin 1s linear infinite":"none",
           }}>↺</button>
           <button onClick={()=>setShowSnap(true)} title="Prendre un snapshot" style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
+            width:36,height:36,borderRadius:(C.radiusSm||6)+2,
             border:`1.5px solid ${C.btc}`,background:C.btc+"1A",
             cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>📸</button>
           <button onClick={()=>setShowTrade(true)} title="Achat / Vente" style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
+            width:36,height:36,borderRadius:(C.radiusSm||6)+2,
             border:`1.5px solid ${C.teal}`,background:C.teal+"1A",
             cursor:"pointer",fontSize:15,
             display:"flex",alignItems:"center",justifyContent:"center",
@@ -15688,7 +15748,7 @@ function App(){
         {/* Droite : ⚙ — v29.04 : €/$ et 👁 sont passés dans le menu Paramètres */}
         <div style={{display:"flex",gap:9,alignItems:"center"}}>
           <button onClick={()=>setShowSettings(s=>!s)} title="Paramètres" style={{
-            width:32,height:32,borderRadius:C.radiusSm||6,
+            width:36,height:36,borderRadius:(C.radiusSm||6)+2,
             border:`1.5px solid ${showSettings?C.btc:C.border}`,background:C.purple+"1A",
             cursor:"pointer",fontSize:16,color:showSettings?C.btc:C.text2,
             display:"flex",alignItems:"center",justifyContent:"center",
@@ -15718,7 +15778,7 @@ function App(){
           </div>
         </div>
       )}
-      <div style={{padding:"0 16px"}}>
+      <div key={"pg"+tab} className="gdb-page" style={{padding:"0 16px"}}>
         {tab===0 && <PageOverview key={"ov"+chartPrefsVer} chartData={chartData} onSnapshot={()=>setShowSnap(true)} {...liveProps} liveDD={liveDD} liveCM={liveCM} liveGDBS={liveGDBS} liveGC={gcEff} chosenSource={chosenSource} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} liveHomeHist={liveHomeHist} liveGoldHist={liveGoldHist}/>}
         {tab===1 && <PageAllocation hidden={hidden} EFF={EFF} eur={eur} setEur={setEur} iconDbVersion={iconDbVersion} bumpIconDb={bumpIconDb} allocTargets={liveAllocTargets} onSaveTargets={saveAllocTargets}/>}
         {tab===2 && <PageStats chartData={chartData} hidden={hidden} EFF={EFF} eur={eur} liveDD={liveDD} src={EFF||CURRENT} liveInv={liveInv}/>}
@@ -15728,18 +15788,31 @@ function App(){
         {tab===7 && <PageWatchlist list={liveWatchlist} onSave={saveWatchlist} onSaveWarren={saveWarren} warrenDb={liveWarren} eur={eur} usdEur={(EFF||CURRENT).usdEur||0.86}/>}
         {/* Buy & Sell accessible via bouton flottant uniquement */}
       </div>
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,background:C.bg,borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 20px",zIndex:100}}>
+      <div style={{
+        position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:430,
+        background:isLightTheme()?C.bg+"F2":C.bg+"E6",
+        backdropFilter:"blur(18px) saturate(160%)",WebkitBackdropFilter:"blur(18px) saturate(160%)",
+        borderTop:`1px solid ${C.border}`,display:"flex",
+        padding:"7px 0 calc(20px + env(safe-area-inset-bottom))",zIndex:100,
+      }}>
         {TABS.map((lb,i)=> lb==="Data" ? null : (
-          <button key={i} onClick={()=>setTab(i)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",cursor:"pointer",color:tab===i?C.btc:C.text3,transition:"color .15s"}}>
-            <span style={{fontSize:22}}>{ICONS[i]}</span>
-            <span style={{fontSize:11,fontWeight:700}}>{lb}</span>
+          <button key={i} onClick={()=>setTab(i)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",border:"none",cursor:"pointer",color:tab===i?C.btc:C.text3,transition:"color .18s ease"}}>
+            {/* Pastille derrière l'onglet actif : repère plus lisible que la
+                seule teinte, les glyphes étant peu différenciés entre eux. */}
+            <span style={{
+              display:"flex",alignItems:"center",justifyContent:"center",
+              minWidth:42,height:26,borderRadius:9,fontSize:22,lineHeight:1,
+              background:tab===i?C.btc+"1F":"transparent",
+              transition:"background-color .18s ease",
+            }}>{ICONS[i]}</span>
+            <span style={{fontSize:11,fontWeight:tab===i?800:700,letterSpacing:tab===i?.1:0}}>{lb}</span>
           </button>
         ))}
       </div>
       {/* Buy & Sell accessible via snapshot uniquement */}
       {/* VibeCoded signature */}
       <div style={{
-        position:"fixed",bottom:4,left:"50%",transform:"translateX(-50%)",
+        position:"fixed",bottom:"calc(4px + env(safe-area-inset-bottom))",left:"50%",transform:"translateX(-50%)",
         zIndex:101,pointerEvents:"none",
         fontSize:8,letterSpacing:.6,color:C.text3,opacity:.45,
         fontFamily:C.font||"system-ui",whiteSpace:"nowrap",
@@ -16008,7 +16081,7 @@ function App(){
           </div>
         </div>
       )}
-      <style>{"*{box-sizing:border-box}button{outline:none}::-webkit-scrollbar{display:none}input,select{-webkit-appearance:none}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
+      <style>{polishCss()}</style>
     </div>
   );
 }

@@ -2,9 +2,13 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8"/>
-  <!-- viewport-fit=cover : sans lui env(safe-area-inset-*) vaut toujours 0 et
-       la barre d'onglets passe sous l'indicateur d'accueil de l'iPhone. -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+  <!-- Pas de viewport-fit=cover : il fait sortir la mise en page dans les
+       zones sûres, ce qui allonge 100vh et active d'un coup TOUTES les règles
+       env(safe-area-inset-*) du code. Essayé en v29.13, repris en v29.14 :
+       l'app s'étirait verticalement et la barre d'onglets décollait du bas.
+       Le repasser suppose de reprendre ces paddings ensemble, sur un vrai
+       iPhone — ils sont déjà calibrés à la main pour un inset nul. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <meta name="robots" content="noindex, nofollow"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
@@ -58,7 +62,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <!-- Donnees en dur chargees en script simple (non-Babel) : parse natif rapide -->
   <script src="seeds.js?v=27.59"></script>
-  <script src="app.js?v=29.13"></script>
+  <script src="app.js?v=29.14"></script>
   <script>
     // Le splash reste affiche (logo + barre animes) jusqu'a ce que l'app React soit prete :
     // c'est l'app qui retire #loader quand le chargement des donnees est termine.

@@ -945,7 +945,7 @@ function applyPrices(prices, usdEur, effSrc){
 }
 
 // Date locale UTC+11 (Nouvelle-Calédonie)
-const APP_VERSION = "v29.13";
+const APP_VERSION = "v29.14";
 const NC_OFFSET_MS = 11 * 60 * 60 * 1000;
 const todayNC = () => {
   const nc = new Date(Date.now() + NC_OFFSET_MS);
@@ -15699,9 +15699,12 @@ function App(){
   );
 
   return(
-    <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:"calc(84px + env(safe-area-inset-bottom))",boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
+    <div key={themeName} style={{fontFamily:C.font||"'-apple-system',sans-serif",background:C.bg,minHeight:"100vh",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:80,boxShadow:themeName==="midnight"?"0 0 80px rgba(180,100,240,.08)":themeName==="bitcoin"?"0 0 80px rgba(247,147,26,.06)":"none"}}>
       <div style={{
-        padding:"calc(13px + env(safe-area-inset-top)) 16px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",
+        // 13/11 d'origine : la hauteur de l'en-tête est fixée par le bloc titre
+        // (~36 px), pas par les boutons — les passer de 32 à 36 px ne l'allonge
+        // donc pas, et la barre reste à ses 60 px mesurés.
+        padding:"13px 16px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",
         position:"sticky",top:0,zIndex:100,
         // Fond translucide : le backdropFilter était inopérant sur un bg opaque.
         // Le contenu défile maintenant visiblement sous la barre, d'où le filet.
@@ -15793,7 +15796,7 @@ function App(){
         background:isLightTheme()?C.bg+"F2":C.bg+"E6",
         backdropFilter:"blur(18px) saturate(160%)",WebkitBackdropFilter:"blur(18px) saturate(160%)",
         borderTop:`1px solid ${C.border}`,display:"flex",
-        padding:"7px 0 calc(20px + env(safe-area-inset-bottom))",zIndex:100,
+        padding:"7px 0 20px",zIndex:100,
       }}>
         {TABS.map((lb,i)=> lb==="Data" ? null : (
           <button key={i} onClick={()=>setTab(i)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"none",border:"none",cursor:"pointer",color:tab===i?C.btc:C.text3,transition:"color .18s ease"}}>
@@ -15812,7 +15815,7 @@ function App(){
       {/* Buy & Sell accessible via snapshot uniquement */}
       {/* VibeCoded signature */}
       <div style={{
-        position:"fixed",bottom:"calc(4px + env(safe-area-inset-bottom))",left:"50%",transform:"translateX(-50%)",
+        position:"fixed",bottom:4,left:"50%",transform:"translateX(-50%)",
         zIndex:101,pointerEvents:"none",
         fontSize:8,letterSpacing:.6,color:C.text3,opacity:.45,
         fontFamily:C.font||"system-ui",whiteSpace:"nowrap",

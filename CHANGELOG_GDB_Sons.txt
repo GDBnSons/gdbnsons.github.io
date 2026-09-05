@@ -1687,6 +1687,60 @@ v29.13   Finition générale — chiffres alignés, chrome translucide, retour
          contrôlé (l'en-tête et la barre y passent à 90/95 % d'opacité).
 
 
+v29.14   Retrait de viewport-fit=cover — l'app s'étirait et la barre
+         d'onglets décollait du bas
+         Correction du seul faux pas de la v29.13, signalé sur téléphone :
+         rendu allongé verticalement et boutons du bas plus collés au bord.
+
+         Cause. viewport-fit=cover, ajouté en v29.13 dans index.html, fait
+         sortir la mise en page dans les zones sûres de l'écran. Deux effets
+         cumulés :
+           1. 100vh couvre désormais toute la dalle, insets compris. La coque
+              (minHeight:100vh) et #root s'allongent d'une soixantaine de
+              pixels sans contenu en face — d'où l'impression d'étirement.
+           2. Il rend d'un coup ACTIVES toutes les règles env(safe-area-inset-*)
+              du fichier. Or il y en avait déjà CINQ avant la v29.13 (barres de
+              titre et de tickers des vues plein écran, lignes 2974, 4041,
+              6425, 6430, 13300), restées inertes depuis toujours puisque les
+              insets valaient 0. Elles se sont réveillées ensemble.
+
+         Erreur propre à la v29.13 : les quatre paddings que j'avais ajoutés
+         ÉCRIVAIENT calc(20px + env(...)) là où les cinq règles préexistantes
+         utilisent max(8px, env(...)). L'addition compte deux fois — les 20 px
+         de la barre d'onglets étaient déjà la garde calibrée à la main pour
+         un inset nul. Sur iPhone l'inset bas vaut ~34 px : les boutons se
+         retrouvaient 34 px plus haut que prévu.
+
+         Correctif. viewport-fit=cover retiré : tout redevient inerte, y
+         compris les cinq règles préexistantes, et la géométrie repasse à
+         l'identique. Les quatre calc() de la v29.13 sont réécrits en valeurs
+         simples pour que le code dise ce qu'il fait. Un commentaire dans
+         index.html explique pourquoi ne pas le remettre sans reprendre ces
+         paddings ensemble, sur un vrai iPhone.
+
+         Le padding de l'en-tête revient à 13/11 : sa hauteur est fixée par le
+         bloc titre (~36 px), pas par les boutons — les passer de 32 à 36 px en
+         v29.13 ne l'allongeait donc pas, et la compensation à 11/9 que j'avais
+         posée le raccourcissait de 3 px pour rien.
+
+         Mesuré au navigateur en 375×812, v29.12 → v29.14 :
+           en-tête            60 → 61 px
+           barre d'onglets    73 → 72 px
+           padding bas barre  20 → 20 px   (identique)
+           bas des boutons    20 → 20 px   (identique — le symptôme signalé)
+           hauteur document   812 = 812 px (pas de défilement en trop)
+         Les 7 onglets repassés : rien de masqué par la barre, aucune erreur
+         console imputable.
+
+         Tout le reste de la v29.13 est conservé : tabular-nums, lissage,
+         suppression du flash au tap, retour tactile et focus des boutons,
+         focus des champs, chevron des <select>, chrome translucide, pastille
+         d'onglet actif, feuilles modales.
+
+         ⚠ La v29.13 annonçait ce point comme un correctif iPhone : c'était
+         faux, il n'avait pas pu être essayé sur un appareil réel.
+
+
 ARCHITECTURE TECHNIQUE
 ───────────────────────
 Stack      React 18 + JSX, compilé par esbuild — GitHub Pages (noindex)
